@@ -1,8 +1,7 @@
 package cli
 
 import (
-	"Cattery/agent"
-	"Cattery/server"
+	"cattery/agent"
 	"fmt"
 	"github.com/spf13/cobra"
 	"os"
@@ -34,32 +33,6 @@ func init() {
 		"URL of the Cattery server",
 	)
 	agentCmd.MarkFlagRequired("server-url")
-
-	serverCmd.Flags().Int64Var(
-		&server.AppId,
-		"app-id",
-		0,
-		"Github App ID",
-	)
-	serverCmd.MarkFlagRequired("app-id")
-
-	serverCmd.Flags().Int64Var(
-		&server.InstallationId,
-		"installation-id",
-		0,
-		"Github Installation ID",
-	)
-	serverCmd.MarkFlagRequired("installation-id")
-
-	serverCmd.Flags().StringVarP(
-		&server.PrivateKeyPath,
-		"private-key-path",
-		"k",
-		"",
-		"Path to the private key file",
-	)
-	serverCmd.MarkFlagRequired("private-key-path")
-
 }
 
 func Execute() {

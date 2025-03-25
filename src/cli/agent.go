@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"Cattery/agent"
+	"cattery/agent"
 	"github.com/spf13/cobra"
 )
 

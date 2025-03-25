@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"Cattery/server"
+	"cattery/server"
 	"github.com/spf13/cobra"
 )
 

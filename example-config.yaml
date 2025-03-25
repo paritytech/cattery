@@ -1,0 +1,12 @@
+listenAddress: http://localhost:5137
+appID: 123456
+appSecret: 123456
+privateKeyPath: /path/to/private.key
+
+providers:
+  docker:
+    image: some-runner:latest
+
+trayTypes:
+  cattery-tiny:
+    provider: docker

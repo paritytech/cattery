@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"Cattery/server/messages"
+	"cattery/lib/messages"
 	"encoding/json"
 	"log"
 	"net/http"

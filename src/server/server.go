@@ -1,7 +1,9 @@
 package server
 
 import (
-	"Cattery/server/messages"
+	"cattery/lib/config"
+	"cattery/lib/messages"
+	"cattery/server/trays/providers"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,10 +17,6 @@ import (
 	"syscall"
 )
 
-var AppId int64
-var InstallationId int64
-var PrivateKeyPath string
-
 var githubClient *github.Client = nil
 
 func createClient() *github.Client {
@@ -31,9 +29,9 @@ func createClient() *github.Client {
 
 	itr, err := ghinstallation.NewKeyFromFile(
 		tr,
-		AppId,
-		InstallationId,
-		PrivateKeyPath,
+		config.AppConfig.AppID,
+		config.AppConfig.InstallationId,
+		config.AppConfig.PrivateKeyPath,
 	)
 
 	if err != nil {
@@ -57,7 +55,7 @@ func Start() {
 	var webhookMux = http.NewServeMux()
 	webhookMux.HandleFunc("/github", func(w http.ResponseWriter, r *http.Request) {
 
-		var webhookData *github.WorkflowRunEvent
+		var webhookData *github.WorkflowJobEvent
 
 		payload, err := github.ValidatePayload(r, []byte(""))
 		if err != nil {
@@ -71,11 +69,24 @@ func Start() {
 			return
 		}
 
-		webhookData = hook.(*github.WorkflowRunEvent)
+		webhookData = hook.(*github.WorkflowJobEvent)
+		log.Println(webhookData)
 
 		// Spawn a new agent
 
-		log.Println(webhookData)
+		var trayType config.TrayType
+
+		// find
+		for _, label := range webhookData.WorkflowJob.Labels {
+			if val, ok := config.AppConfig.TrayTypes[label]; ok {
+				trayType = val
+			}
+		}
+
+		var provider = providers.GetProvider(trayType.Provider)
+
+		provider.CreateTray(trayType.TrayConfig)
+
 	})
 
 	webhookMux.HandleFunc("/agent/register/{hostname}", func(responseWriter http.ResponseWriter, r *http.Request) {
@@ -117,11 +128,12 @@ func Start() {
 	})
 
 	var webhookServer = &http.Server{
-		Addr:    "0.0.0.0:5137",
+		Addr:    config.AppConfig.ListenAddress,
 		Handler: webhookMux,
 	}
 
 	go func() {
+		log.Println("Starting webhook server on ", config.AppConfig.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
