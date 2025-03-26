@@ -1,6 +1,7 @@
 package trays
 
 type Tray struct {
-	Id       string `json:"id"`
+	AgentId  string `json:"agentId"`
+	RunnerId int64  `json:"runnerId"`
 	Hostname string `json:"hostname"`
 }

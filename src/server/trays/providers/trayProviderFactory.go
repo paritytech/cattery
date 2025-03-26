@@ -2,12 +2,19 @@ package providers
 
 import "cattery/lib/config"
 
+var providers = make(map[string]ITrayProvider)
+
 func GetProvider(providerName string) ITrayProvider {
+
+	if provider, ok := providers[providerName]; ok {
+		return provider
+	}
+
+	var result ITrayProvider
 
 	switch providerName {
 	case "docker":
-		var dockerProvider = NewDockerProvider(config.DockerConfig{})
-		return dockerProvider
+		result = NewDockerProvider(config.DockerConfig{})
 	case "google":
 		// TODO implement me
 		panic("implement me")
@@ -15,4 +22,7 @@ func GetProvider(providerName string) ITrayProvider {
 		panic("Unknown provider: " + providerName)
 	}
 
+	providers[providerName] = result
+
+	return result
 }
