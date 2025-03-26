@@ -1,12 +1,16 @@
-listenAddress: http://localhost:5137
+listenAddress: http://0.0.0.0:5137
 appID: 123456
 appSecret: 123456
+WebhookSecret: abcdefghijklmnopqrstuvwxyz
 privateKeyPath: /path/to/private.key
 
 providers:
-  docker:
-    image: some-runner:latest
+  docker-local:
+    type: docker
 
 trayTypes:
   cattery-tiny:
-    provider: docker
+    provider: docker-local
+    config:
+      image: cattery-runner-tiny:latest
+      namePrefix: cattery

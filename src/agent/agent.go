@@ -3,6 +3,7 @@ package agent
 import (
 	"cattery/lib/messages"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -45,21 +46,25 @@ func registerAgent() *messages.RegisterResponse {
 
 	var hostName, _ = os.Hostname()
 	var request, _ = http.NewRequest("GET", CatteryServerUrl+"/agent/register/"+hostName, nil)
-	response, _ := client.Do(request)
-
-	if response.StatusCode == http.StatusOK {
-
-		var registerResponse *messages.RegisterResponse = &messages.RegisterResponse{}
-		err := json.NewDecoder(response.Body).Decode(registerResponse)
-		if err != nil {
-			log.Println(err)
-		}
-
-		return registerResponse
-
-	} else {
-		log.Println("Error")
+	response, err := client.Do(request)
+	if err != nil {
+		log.Fatalln(err)
+		return nil
 	}
+
+	if response.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(response.Body)
+		log.Fatalln(string(bodyBytes))
+		return nil
+	}
+
+	var registerResponse = &messages.RegisterResponse{}
+	err = json.NewDecoder(response.Body).Decode(registerResponse)
+	if err != nil {
+		log.Println(err)
+	}
+
+	return registerResponse
 
 	return nil
 }

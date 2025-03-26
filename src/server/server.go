@@ -30,7 +30,7 @@ func Start() {
 	}
 
 	go func() {
-		log.Println("Starting webhook server on ", config.AppConfig.ListenAddress)
+		log.Println("Starting webhook server on", config.AppConfig.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)

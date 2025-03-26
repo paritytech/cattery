@@ -1,14 +1,16 @@
 package messages
 
-import "cattery/server/trays"
+import (
+	"cattery/lib/agents"
+)
 
 type RegisterResponse struct {
-	Tray      trays.Tray `json:"tray"`
-	JitConfig string     `json:"jit_config"`
+	Agent     agents.Agent `json:"agent"`
+	JitConfig string       `json:"jit_config"`
 }
 
 type UnregisterRequest struct {
-	Tray   trays.Tray       `json:"tray"`
+	Agent  agents.Agent     `json:"agent"`
 	Reason UnregisterReason `json:"reason"`
 }
 

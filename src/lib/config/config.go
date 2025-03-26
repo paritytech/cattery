@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 var AppConfig = &CatteryConfig{}
 
 type CatteryConfig struct {
@@ -7,23 +9,26 @@ type CatteryConfig struct {
 	AppID          int64
 	InstallationId int64
 	PrivateKeyPath string
+	WebhookSecret  string
 
-	Providers struct {
-		Docker *DockerConfig
-		Google *GoogleConfig
-	}
+	Providers map[string]ProviderConfig
 
 	TrayTypes map[string]TrayType
 }
 
 type TrayType struct {
-	Provider   string
-	TrayConfig map[string]string
+	Provider string
+	Config   TrayConfig
 }
 
-type DockerConfig struct {
-	Image string
+type TrayConfig map[string]string
+
+func (t TrayConfig) Get(key string) string {
+	return t[strings.ToLower(key)]
 }
 
-type GoogleConfig struct {
+type ProviderConfig map[string]string
+
+func (p ProviderConfig) Get(key string) string {
+	return p[strings.ToLower(key)]
 }

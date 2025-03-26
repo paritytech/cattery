@@ -2,32 +2,48 @@ package handlers
 
 import (
 	"cattery/lib/config"
-	"cattery/server/trays/providers"
+	"cattery/lib/trays"
+	"cattery/lib/trays/providers"
+	"fmt"
 	"github.com/google/go-github/v70/github"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 )
 
-func Webhook(w http.ResponseWriter, r *http.Request) {
+var traysStore = make(map[string]*trays.Tray)
+
+var logger = log.WithFields(log.Fields{
+	"name": "server",
+})
+
+func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
+
+	var logger = logger.WithField("action", "Webhook")
 
 	var webhookData *github.WorkflowJobEvent
 
-	payload, err := github.ValidatePayload(r, []byte(""))
+	payload, err := github.ValidatePayload(r, []byte(config.AppConfig.WebhookSecret))
 	if err != nil {
-		log.Println(err)
+		logger.Errorf("Error validating payload: %v", err)
+		http.Error(responseWriter, "Error validating payload", http.StatusBadRequest)
 		return
 	}
 
 	hook, err := github.ParseWebHook(r.Header.Get("X-GitHub-Event"), payload)
 	if err != nil {
-		log.Println(err)
+		logger.Errorf("Error parsing webhook: %v", err)
 		return
 	}
 
 	webhookData = hook.(*github.WorkflowJobEvent)
-	log.Println(webhookData)
 
-	// Spawn a new agent
+	if webhookData.GetAction() != "queued" {
+		logger.Debugf("Ignoring action: %s", webhookData.GetAction())
+		return
+	}
+
+	logger = logger.WithField("runId", webhookData.WorkflowJob.RunID)
+	logger.Tracef("Event payload: %v", payload)
 
 	var trayType config.TrayType
 
@@ -38,8 +54,37 @@ func Webhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var provider = providers.GetProvider(trayType.Provider)
+	provider, err := providers.GetProvider(trayType.Provider)
+	if err != nil {
+		var errMsg = "Error getting provider for tray type: " + trayType.Provider
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
 
-	provider.CreateTray(trayType.TrayConfig)
+	tray := createTray(trayType, webhookData)
+	traysStore[tray.Name] = tray
 
+	err = provider.RunTray(tray)
+	if err != nil {
+		logger.Errorf("Error creating tray: %v", err)
+		http.Error(responseWriter, "Error creating tray", http.StatusInternalServerError)
+		return
+	}
+
+}
+
+// createTray creates a tray object from the webhook data
+func createTray(trayType config.TrayType, webhookData *github.WorkflowJobEvent) *trays.Tray {
+	var containerName = fmt.Sprint(trayType.Config.Get("namePrefix"), "-", *webhookData.WorkflowJob.RunID)
+	var tray = &trays.Tray{
+		Id:         fmt.Sprintf("%d", *webhookData.WorkflowJob.RunID),
+		Name:       containerName,
+		Address:    "",
+		Type:       "docker",
+		Provider:   trayType.Provider,
+		Labels:     webhookData.WorkflowJob.Labels,
+		TrayConfig: trayType.Config,
+	}
+	return tray
 }

@@ -1,6 +1,8 @@
 package providers
 
-import "cattery/server/trays"
+import (
+	"cattery/lib/trays"
+)
 
 type ITrayProvider interface {
 
@@ -10,8 +12,8 @@ type ITrayProvider interface {
 	// ListTrays returns all trays.
 	ListTrays() ([]*trays.Tray, error)
 
-	// CreateTray creates a new tray.
-	CreateTray(trayConfig map[string]string) (*trays.Tray, error)
+	// RunTray spawns a new tray.
+	RunTray(tray *trays.Tray) error
 
 	// CleanTray deletes the tray with the given ID.
 	CleanTray(id string) error

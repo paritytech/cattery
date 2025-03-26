@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	"cattery/lib/agents"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
-	"cattery/server/trays"
 	"encoding/json"
+	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net/http"
@@ -12,7 +13,8 @@ import (
 
 // AgentRegister is a handler for agent registration requests
 func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
-	log.Tracef("AgentRegister: %v", r)
+	var logger = log.WithField("action", "AgentRegister")
+	logger.Tracef("AgentRegister: %v", r)
 
 	if r.Method != http.MethodGet {
 		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
@@ -22,19 +24,27 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var hostname = r.PathValue("hostname")
 	var agentId = getAgentId(hostname)
 
-	var logger = log.WithFields(log.Fields{
-		"action":   "AgentRegister",
+	logger = log.WithFields(log.Fields{
 		"hostname": hostname,
 		"agentId":  agentId,
 	})
 
 	logger.Debugln("Agent registration request, ", hostname)
 
+	var tray, ok = traysStore[hostname]
+
+	if !ok {
+		var err = errors.New(fmt.Sprintf("tray '%s' not found", hostname))
+		logger.Errorf(err.Error())
+		http.Error(responseWriter, err.Error(), http.StatusNotFound)
+		return
+	}
+
 	client := githubClient.NewGithubClient("paritytech-stg")
 	config, err := client.CreateJITConfig(
-		fmt.Sprint("Test local runner ", agentId),
+		tray.Name,
 		3,
-		[]string{"cattery-tiny", "cattery"},
+		tray.Labels,
 	)
 
 	if err != nil {
@@ -45,14 +55,14 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var jitConfig = config.GetEncodedJITConfig()
 
-	var newTray = trays.Tray{
+	var newAgent = agents.Agent{
 		AgentId:  agentId,
 		Hostname: hostname,
 		RunnerId: config.GetRunner().GetID(),
 	}
 
 	var registerResponse = messages.RegisterResponse{
-		Tray:      newTray,
+		Agent:     newAgent,
 		JitConfig: jitConfig,
 	}
 
@@ -63,7 +73,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Infof("Agent %s, %s registered with runner ID %d", hostname, agentId, newTray.RunnerId)
+	logger.Infof("Agent %s, %s registered with runner ID %d", hostname, agentId, newAgent.RunnerId)
 }
 
 // getAgentId returns the agent ID for the given hostname
@@ -91,15 +101,15 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	var logger = log.WithFields(log.Fields{
 		"action":   "AgentRegister",
 		"hostname": hostname,
-		"agentId":  unregisterRequest.Tray.AgentId,
+		"agentId":  unregisterRequest.Agent.AgentId,
 	})
 
 	logger.Debugf("Agent unregister request")
 
 	client := githubClient.NewGithubClient("paritytech-stg")
-	err = client.RemoveRunner(unregisterRequest.Tray.RunnerId)
+	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
 	if err != nil {
-		logger.Errorf("Failed to remove runner %d: %v", unregisterRequest.Tray.RunnerId, err)
+		logger.Errorf("Failed to remove runner %d: %v", unregisterRequest.Agent.AgentId, err)
 	}
 
 	log.Println("Agent ", r.PathValue("hostname"), "registered")

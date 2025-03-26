@@ -1,6 +1,6 @@
-package trays
+package agents
 
-type Tray struct {
+type Agent struct {
 	AgentId  string `json:"agentId"`
 	RunnerId int64  `json:"runnerId"`
 	Hostname string `json:"hostname"`
