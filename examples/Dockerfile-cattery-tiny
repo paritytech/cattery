@@ -1,0 +1,19 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y \
+    git dotnet-runtime-8.0 golang-go tar curl
+
+WORKDIR /action-runner
+
+RUN curl -sL -o actions-runner-linux-x64-2.323.0.tar.gz https://github.com/actions/runner/releases/download/v2.323.0/actions-runner-linux-x64-2.323.0.tar.gz
+RUN ls -al
+RUN tar xzf ./actions-runner-linux-x64-2.323.0.tar.gz
+
+WORKDIR /cattery-agent
+
+COPY . .
+
+RUN go build -o /usr/local/bin/cattery-agent
+RUN cattery-agent --help
+
+ENTRYPOINT ["cattery-agent", "agent", "-r","/action-runner", "-s", "http://10.10.10.116:5137"]
