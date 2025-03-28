@@ -17,7 +17,7 @@ type UnregisterRequest struct {
 type UnregisterReason int
 
 const (
-	Unknown UnregisterReason = iota
-	Done
-	Preempted
+	UnregisterReasonUnknown UnregisterReason = iota
+	UnregisterReasonDone
+	UnregisterReasonPreempted
 )

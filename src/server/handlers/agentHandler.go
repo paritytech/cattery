@@ -83,7 +83,9 @@ func getAgentId(hostname string) string {
 
 // AgentUnregister is a handler for agent unregister requests
 func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	log.Tracef("AgentUnregister: %v", r)
+	var logger = log.WithField("action", "AgentUnregister")
+
+	logger.Tracef("AgentUnregister: %v", r)
 
 	if r.Method != http.MethodPost {
 		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
@@ -95,10 +97,12 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	var unregisterRequest messages.UnregisterRequest
 	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
-		log.Warnf("Failed to decode unregister request for hostname '%s': %v", r.PathValue("hostname"), err)
+		var errMsg = fmt.Sprintf("Failed to decode unregister request for hostname '%s': %v", hostname, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 	}
 
-	var logger = log.WithFields(log.Fields{
+	logger = logger.WithFields(log.Fields{
 		"action":   "AgentRegister",
 		"hostname": hostname,
 		"agentId":  unregisterRequest.Agent.AgentId,
@@ -109,8 +113,12 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	client := githubClient.NewGithubClient("paritytech-stg")
 	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
 	if err != nil {
-		logger.Errorf("Failed to remove runner %d: %v", unregisterRequest.Agent.AgentId, err)
+		var errMsg = fmt.Sprintf("Failed to remove runner %s: %v", unregisterRequest.Agent.AgentId, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	log.Println("Agent ", r.PathValue("hostname"), "registered")
+	logger.Infof("Agent %s, %s unregistered", hostname, unregisterRequest.Agent.AgentId)
+
+	// TODO remove tray
 }

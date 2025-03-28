@@ -19,8 +19,12 @@ var logger = log.WithFields(log.Fields{
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var logger = logger.WithField("action", "Webhook")
-
 	var webhookData *github.WorkflowJobEvent
+
+	if r.Method != http.MethodPost {
+		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
 	payload, err := github.ValidatePayload(r, []byte(config.AppConfig.WebhookSecret))
 	if err != nil {
@@ -38,20 +42,25 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 	webhookData = hook.(*github.WorkflowJobEvent)
 
 	if webhookData.GetAction() != "queued" {
-		logger.Debugf("Ignoring action: %s", webhookData.GetAction())
+		logger.Debugf("Ignoring action: %s for runId: %d, only 'queued' actions are supported", webhookData.GetAction(), webhookData.WorkflowJob.RunID)
 		return
 	}
 
 	logger = logger.WithField("runId", webhookData.WorkflowJob.RunID)
 	logger.Tracef("Event payload: %v", payload)
 
-	var trayType config.TrayType
+	var trayType *config.TrayType
 
-	// find
+	// find tray type based on labels (runs_on)
 	for _, label := range webhookData.WorkflowJob.Labels {
 		if val, ok := config.AppConfig.TrayTypes[label]; ok {
-			trayType = val
+			trayType = &val
 		}
+	}
+
+	if trayType == nil {
+		logger.Debugf("Ignoring action: %s, no tray type found for labels: %v", webhookData.GetAction(), webhookData.WorkflowJob.Labels)
+		return
 	}
 
 	provider, err := providers.GetProvider(trayType.Provider)
@@ -62,7 +71,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tray := createTray(trayType, webhookData)
+	tray := createTray(*trayType, webhookData)
 	traysStore[tray.Name] = tray
 
 	err = provider.RunTray(tray)

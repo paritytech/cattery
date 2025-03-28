@@ -1,70 +1,119 @@
 package agent
 
 import (
+	"cattery/lib/agents"
 	"cattery/lib/messages"
-	"encoding/json"
-	"io"
-	"log"
-	"net/http"
+	"github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
+	"sync"
+	"syscall"
 )
 
 var RunnerFolder string
 var CatteryServerUrl string
 
 func Start() {
-	var registerResponse = registerAgent()
+	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl)
 
-	var listenerPath = path.Join(RunnerFolder, "bin", "Runner.Listener")
+	catteryAgent.Start()
+}
 
-	var command = exec.Command(listenerPath, "run", "--jitconfig", registerResponse.JitConfig)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	err := command.Run()
+type CatteryAgent struct {
+	mutex         sync.Mutex
+	logger        *logrus.Entry
+	catteryClient *CatteryClient
+	agent         *agents.Agent
+
+	stopped          bool
+	listenerExecPath string
+}
+
+func NewCatteryAgent(runnerFolder string, catteryServerUrl string) *CatteryAgent {
+	return &CatteryAgent{
+		mutex:            sync.Mutex{},
+		logger:           logrus.WithField("name", "agent"),
+		catteryClient:    createClient(catteryServerUrl),
+		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
+	}
+}
+
+func (a *CatteryAgent) Start() {
+
+	agent, jitConfig, err := a.catteryClient.RegisterAgent()
 	if err != nil {
-		log.Println(err)
+		errMsg := "Failed to register agent: " + err.Error()
+		a.logger.Errorf(errMsg)
+		return
+	}
+	a.agent = agent
+
+	var commandRun = exec.Command(a.listenerExecPath, "run", "--jitconfig", *jitConfig)
+	commandRun.Stdout = os.Stdout
+	commandRun.Stderr = os.Stderr
+
+	go func() {
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT)
+		signal.Notify(sigs, syscall.SIGTERM)
+		signal.Notify(sigs, syscall.SIGKILL)
+
+		sig := <-sigs
+		a.logger.Info("Got signal ", sig)
+
+		a.stop(commandRun.Process, true)
+	}()
+
+	err = commandRun.Run()
+	if err != nil {
+		var errMsg = "Runner failed: " + err.Error()
+		a.logger.Errorf(errMsg)
+		os.Exit(1)
 	}
 
+	a.stop(commandRun.Process, false)
+}
+
+// stop stops the runner process
+func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
+	if a.stopped {
+		return
+	}
+
+	if isInterrupted {
+		a.logger.Info("Stopping runner")
+		err := runnerProcess.Signal(syscall.SIGINT)
+		if err != nil {
+			var errMsg = "Failed to stop runner: " + err.Error()
+			a.logger.Errorf(errMsg)
+		}
+	}
+
+	a.logger.Info("Runner stopped")
+
+	a.stopped = true
+
+	var reason messages.UnregisterReason
+
+	if isInterrupted {
+		reason = messages.UnregisterReasonPreempted
+	} else {
+		reason = messages.UnregisterReasonDone
+	}
+
+	err := a.catteryClient.UnregisterAgent(a.agent, reason)
+	if err != nil {
+		var errMsg = "Failed to unregister agent: " + err.Error()
+		a.logger.Errorf(errMsg)
+	}
 }
 
 // createClient creates a new http client
-func createClient() *http.Client {
-	var client = &http.Client{}
-
-	return client
-}
-
-// getJitConfig request just-in-time runner configuration from the Cattery server
-// and returns the configuration as a base64 encoded string
-//
-// https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-configuration-for-a-just-in-time-runner-for-an-organization
-func registerAgent() *messages.RegisterResponse {
-
-	var client = createClient()
-
-	var hostName, _ = os.Hostname()
-	var request, _ = http.NewRequest("GET", CatteryServerUrl+"/agent/register/"+hostName, nil)
-	response, err := client.Do(request)
-	if err != nil {
-		log.Fatalln(err)
-		return nil
-	}
-
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		log.Fatalln(string(bodyBytes))
-		return nil
-	}
-
-	var registerResponse = &messages.RegisterResponse{}
-	err = json.NewDecoder(response.Body).Decode(registerResponse)
-	if err != nil {
-		log.Println(err)
-	}
-
-	return registerResponse
-
-	return nil
+func createClient(baseUrl string) *CatteryClient {
+	return NewCatteryClient(baseUrl)
 }

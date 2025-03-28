@@ -5,7 +5,7 @@ import (
 	"context"
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 )
 
@@ -41,7 +41,6 @@ func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels
 func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org, runnerId)
 	// TODO: handle not existing runner
-	//err.(*github.Error).Code
 	return err
 }
 
