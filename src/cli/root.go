@@ -35,7 +35,7 @@ func init() {
 	agentCmd.MarkFlagRequired("server-url")
 
 	agentCmd.Flags().StringVarP(
-		&agent.CatteryServerUrl,
+		&agent.AgentId,
 		"agent-id",
 		"i",
 		"",

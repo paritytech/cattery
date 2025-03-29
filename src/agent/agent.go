@@ -14,6 +14,7 @@ import (
 
 var RunnerFolder string
 var CatteryServerUrl string
+var AgentId string
 
 func Start() {
 	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl)
@@ -42,7 +43,7 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string) *CatteryAgent
 
 func (a *CatteryAgent) Start() {
 
-	agent, jitConfig, err := a.catteryClient.RegisterAgent()
+	agent, jitConfig, err := a.catteryClient.RegisterAgent(AgentId)
 	if err != nil {
 		errMsg := "Failed to register agent: " + err.Error()
 		a.logger.Errorf(errMsg)

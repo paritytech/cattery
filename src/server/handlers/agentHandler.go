@@ -118,7 +118,14 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("Agent %s, %s unregistered", agentId, unregisterRequest.Agent.AgentId)
 
-	var tray = traysStore[agentId]
+	var tray, ok = traysStore[agentId]
+
+	if !ok {
+		var errMsg = fmt.Sprintf("tray '%s' not found", agentId)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusNotFound)
+		return
+	}
 
 	provider, err := providers.GetProvider(tray.Provider)
 	if err != nil {
