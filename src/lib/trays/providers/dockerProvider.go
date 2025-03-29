@@ -47,7 +47,7 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 	var containerName = tray.Name
 	var image = tray.TrayConfig.Get("image")
 
-	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--hostname", containerName, "--name", containerName, image)
+	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--name", containerName, image)
 	err := dockerCommand.Run()
 
 	if err != nil {

@@ -21,8 +21,8 @@ func Start() {
 
 	var webhookMux = http.NewServeMux()
 	webhookMux.HandleFunc("/github", handlers.Webhook)
-	webhookMux.HandleFunc("/agent/register/{hostname}", handlers.AgentRegister)
-	webhookMux.HandleFunc("/agent/unregister/{hostname}", handlers.AgentUnregister)
+	webhookMux.HandleFunc("/agent/register/{id}", handlers.AgentRegister)
+	webhookMux.HandleFunc("/agent/unregister/{id}", handlers.AgentUnregister)
 
 	var webhookServer = &http.Server{
 		Addr:    config.AppConfig.ListenAddress,

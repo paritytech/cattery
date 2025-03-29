@@ -4,6 +4,7 @@ import (
 	"cattery/lib/agents"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
+	"cattery/lib/trays/providers"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,20 +22,19 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hostname = r.PathValue("hostname")
-	var agentId = getAgentId(hostname)
+	var id = r.PathValue("id")
+	var agentId = validateAgentId(id)
 
 	logger = log.WithFields(log.Fields{
-		"hostname": hostname,
-		"agentId":  agentId,
+		"agentId": agentId,
 	})
 
-	logger.Debugln("Agent registration request, ", hostname)
+	logger.Debugln("Agent registration request, ", agentId)
 
-	var tray, ok = traysStore[hostname]
+	var tray, ok = traysStore[agentId]
 
 	if !ok {
-		var err = errors.New(fmt.Sprintf("tray '%s' not found", hostname))
+		var err = errors.New(fmt.Sprintf("tray '%s' not found", agentId))
 		logger.Errorf(err.Error())
 		http.Error(responseWriter, err.Error(), http.StatusNotFound)
 		return
@@ -57,7 +57,6 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
-		Hostname: hostname,
 		RunnerId: config.GetRunner().GetID(),
 	}
 
@@ -73,12 +72,12 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Infof("Agent %s, %s registered with runner ID %d", hostname, agentId, newAgent.RunnerId)
+	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
 }
 
-// getAgentId returns the agent ID for the given hostname
-func getAgentId(hostname string) string {
-	return hostname
+// validateAgentId validates the agent ID
+func validateAgentId(agentId string) string {
+	return agentId
 }
 
 // AgentUnregister is a handler for agent unregister requests
@@ -92,20 +91,19 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hostname = r.PathValue("hostname")
+	var agentId = r.PathValue("id")
 
 	var unregisterRequest messages.UnregisterRequest
 	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to decode unregister request for hostname '%s': %v", hostname, err)
+		var errMsg = fmt.Sprintf("Failed to decode unregister request for agentId '%s': %v", agentId, err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 	}
 
 	logger = logger.WithFields(log.Fields{
-		"action":   "AgentRegister",
-		"hostname": hostname,
-		"agentId":  unregisterRequest.Agent.AgentId,
+		"action":  "AgentRegister",
+		"agentId": unregisterRequest.Agent.AgentId,
 	})
 
 	logger.Debugf("Agent unregister request")
@@ -118,7 +116,25 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	logger.Infof("Agent %s, %s unregistered", hostname, unregisterRequest.Agent.AgentId)
+	logger.Infof("Agent %s, %s unregistered", agentId, unregisterRequest.Agent.AgentId)
 
-	// TODO remove tray
+	var tray = traysStore[agentId]
+
+	provider, err := providers.GetProvider(tray.Provider)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray %s: %v", tray.Provider, tray.Id, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
+
+	err = provider.CleanTray(tray.Id)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to clean tray %s: %v", tray.Id, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
+
+	delete(traysStore, agentId)
 }

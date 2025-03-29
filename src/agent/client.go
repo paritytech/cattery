@@ -9,7 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
-	"os"
 )
 
 type CatteryClient struct {
@@ -30,12 +29,11 @@ func NewCatteryClient(baseURL string) *CatteryClient {
 // and returns the configuration as a base64 encoded string
 //
 // https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-configuration-for-a-just-in-time-runner-for-an-organization
-func (c *CatteryClient) RegisterAgent() (*agents.Agent, *string, error) {
+func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error) {
 
 	var client = c.httpClient
 
-	var hostName, _ = os.Hostname()
-	var request, _ = http.NewRequest("GET", CatteryServerUrl+"/agent/register/"+hostName, nil)
+	var request, _ = http.NewRequest("GET", CatteryServerUrl+"/agent/register/"+id, nil)
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, nil, err
@@ -68,8 +66,7 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 		return err
 	}
 
-	var hostName, _ = os.Hostname()
-	var request, _ = http.NewRequest("POST", CatteryServerUrl+"/agent/unregister/"+hostName, bytes.NewBuffer(requestJson))
+	var request, _ = http.NewRequest("POST", CatteryServerUrl+"/agent/unregister/"+agent.AgentId, bytes.NewBuffer(requestJson))
 	response, err := client.Do(request)
 	if err != nil {
 		return err

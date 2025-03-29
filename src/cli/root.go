@@ -33,6 +33,15 @@ func init() {
 		"URL of the Cattery server",
 	)
 	agentCmd.MarkFlagRequired("server-url")
+
+	agentCmd.Flags().StringVarP(
+		&agent.CatteryServerUrl,
+		"agent-id",
+		"i",
+		"",
+		"ID of the agent",
+	)
+	agentCmd.MarkFlagRequired("agent-id")
 }
 
 func Execute() {
