@@ -61,6 +61,8 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		subnetwork     = tray.TrayConfig.Get("subnetwork")
 	)
 
+	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id, "https://lorwyn.andwehaveaplan.com", "/actions-runner")
+
 	insert, err := instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: project,
 		Zone:    zone,
@@ -69,7 +71,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 				Items: []*computepb.Items{
 					{
 						Key:   proto.String("startup-script"),
-						Value: proto.String(startupScript + "\n cattery-agent run  "),
+						Value: proto.String(startupScript + "\n" + agentStartupCommand),
 					},
 				},
 			},
@@ -166,11 +168,11 @@ curl -sL -o actions-runner-linux-x64-2.323.0.tar.gz https://github.com/actions/r
 ls -al
 tar xzf ./actions-runner-linux-x64-2.323.0.tar.gz
 
-git clone https://andwehaveaplan:token@github.com/paritytech/cattery.git
+git clone https://github.com/paritytech/cattery.git
 
 cd cattery/src
 export GOMODCACHE=$HOME/golang/pkg/mod
 export HOME=/root
-go build -o /usr/local/bin/cattery-agent
-cattery-agent --help
+go build -o /usr/local/bin/cattery
+cattery --help
 `
