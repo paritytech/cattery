@@ -11,21 +11,6 @@ import (
 
 func main() {
 
-	//var p = providers.NewGceProvider()
-	//
-	//errr := p.RunTray(&trays.Tray{
-	//	Id:         "1122334455",
-	//	Name:       "catterey-test-1122334455",
-	//	Address:    "",
-	//	Type:       "gce",
-	//	Provider:   "gce",
-	//	Labels:     nil,
-	//	TrayConfig: nil,
-	//})
-	//if errr != nil {
-	//	return
-	//}
-
 	log.SetLevel(log.DebugLevel)
 
 	viper.SetConfigName("config")

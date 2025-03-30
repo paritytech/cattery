@@ -17,7 +17,7 @@ var CatteryServerUrl string
 var AgentId string
 
 func Start() {
-	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl)
+	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl, AgentId)
 
 	catteryAgent.Start()
 }
@@ -27,23 +27,25 @@ type CatteryAgent struct {
 	logger        *logrus.Entry
 	catteryClient *CatteryClient
 	agent         *agents.Agent
+	agentId       string
 
 	stopped          bool
 	listenerExecPath string
 }
 
-func NewCatteryAgent(runnerFolder string, catteryServerUrl string) *CatteryAgent {
+func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId string) *CatteryAgent {
 	return &CatteryAgent{
 		mutex:            sync.Mutex{},
 		logger:           logrus.WithField("name", "agent"),
 		catteryClient:    createClient(catteryServerUrl),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
+		agentId:          agentId,
 	}
 }
 
 func (a *CatteryAgent) Start() {
 
-	agent, jitConfig, err := a.catteryClient.RegisterAgent(AgentId)
+	agent, jitConfig, err := a.catteryClient.RegisterAgent(a.agentId)
 	if err != nil {
 		errMsg := "Failed to register agent: " + err.Error()
 		a.logger.Errorf(errMsg)

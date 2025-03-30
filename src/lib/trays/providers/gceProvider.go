@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
+	"strconv"
+	"strings"
 )
 
 type GceProvider struct {
@@ -48,24 +50,31 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 	}
 	defer instancesClient.Close()
 
-	var zone = "europe-west1-c"
+	var (
+		project = g.config.Get("project")
+
+		zone           = tray.TrayConfig.Get("zone")
+		machineType    = tray.TrayConfig.Get("machineType")
+		tags           = strings.Split(tray.TrayConfig.Get("tags"), ",")
+		preemptible, _ = strconv.ParseBool(tray.TrayConfig.Get("preemptible"))
+		network        = tray.TrayConfig.Get("network")
+		subnetwork     = tray.TrayConfig.Get("subnetwork")
+	)
 
 	insert, err := instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
-		Project: "parity-ci-2024",
+		Project: project,
 		Zone:    zone,
 		InstanceResource: &computepb.Instance{
 			Metadata: &computepb.Metadata{
 				Items: []*computepb.Items{
 					{
 						Key:   proto.String("startup-script"),
-						Value: proto.String("#! /bin/bash\napt-get update\napt-get install -y nginx\n"),
+						Value: proto.String(startupScript + "\n cattery-agent run  "),
 					},
 				},
 			},
 			Scheduling: &computepb.Scheduling{
-				InstanceTerminationAction: proto.String(computepb.Scheduling_DELETE.String()),
-				Preemptible:               proto.Bool(true),
-				ProvisioningModel:         proto.String(computepb.Scheduling_SPOT.String()),
+				Preemptible: proto.Bool(preemptible),
 			},
 			Disks: []*computepb.AttachedDisk{
 				{
@@ -79,16 +88,21 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 					Type: proto.String(computepb.AttachedDisk_PERSISTENT.String()),
 				},
 			},
-			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, "e2-micro")),
+			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
 			Name:        proto.String(tray.Name),
 			NetworkInterfaces: []*computepb.NetworkInterface{
 				{
-					Network:    proto.String("https://www.googleapis.com/compute/v1/projects/parity-ci-2024/global/networks/parity-ci-stg"),
-					Subnetwork: proto.String("https://www.googleapis.com/compute/v1/projects/parity-ci-2024/regions/europe-west1/subnetworks/parity-ci-europe-west1-stg"),
+					AccessConfigs: []*computepb.AccessConfig{
+						{
+							NetworkTier: proto.String(computepb.AccessConfig_STANDARD.String()),
+						},
+					},
+					Network:    proto.String(network),
+					Subnetwork: proto.String(subnetwork),
 				},
 			},
 			Tags: &computepb.Tags{
-				Items: []string{"iap-22-tcp-stg", "int-mig-gke-deny-stg"},
+				Items: tags,
 			},
 		},
 	})
@@ -108,10 +122,15 @@ func (g GceProvider) CleanTray(id string) error {
 		return err
 	}
 
+	var (
+		zone    = g.config.Get("zone")
+		project = g.config.Get("project")
+	)
+
 	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
 		Instance: id,
-		Project:  "parity-ci-2024",
-		Zone:     "europe-west1-c",
+		Project:  project,
+		Zone:     zone,
 	})
 	if err != nil {
 		return err
@@ -137,9 +156,21 @@ func (g GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
 }
 
 var startupScript = `#! /bin/bash
-apt-get update && apt-get install -y git dotnet-runtime-8.0 golang-go tar curl
+apt-get update
+apt-get install -y git dotnet-runtime-8.0 golang-go tar curl
+
+mkdir /actions-runner
+cd /actions-runner
 
 curl -sL -o actions-runner-linux-x64-2.323.0.tar.gz https://github.com/actions/runner/releases/download/v2.323.0/actions-runner-linux-x64-2.323.0.tar.gz
 ls -al
 tar xzf ./actions-runner-linux-x64-2.323.0.tar.gz
+
+git clone https://andwehaveaplan:token@github.com/paritytech/cattery.git
+
+cd cattery/src
+export GOMODCACHE=$HOME/golang/pkg/mod
+export HOME=/root
+go build -o /usr/local/bin/cattery-agent
+cattery-agent --help
 `

@@ -76,7 +76,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	err = provider.RunTray(tray)
 	if err != nil {
-		logger.Errorf("Error creating tray: %v", err)
+		logger.Errorf("Error creating tray for runId %d, provider: %s, tray: %s: %v", *webhookData.WorkflowJob.RunID, tray.Provider, tray.Name, err)
 		http.Error(responseWriter, "Error creating tray", http.StatusInternalServerError)
 		return
 	}

@@ -32,8 +32,7 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 	case "docker":
 		result = NewDockerProvider(providerName, provider)
 	case "google":
-		// TODO implement me
-		panic("implement me")
+		result = NewGceProvider(providerName, provider)
 	default:
 		var errMsg = "Unknown provider: " + providerName
 		logger.Errorf(errMsg)
