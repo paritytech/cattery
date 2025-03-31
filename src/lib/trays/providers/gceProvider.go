@@ -15,8 +15,8 @@ import (
 
 type GceProvider struct {
 	ITrayProvider
-	Name   string
-	config config.ProviderConfig
+	Name           string
+	providerConfig config.ProviderConfig
 
 	instanceClient *compute.InstancesClient
 }
@@ -25,7 +25,7 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	var provider = &GceProvider{}
 
 	provider.Name = name
-	provider.config = providerConfig
+	provider.providerConfig = providerConfig
 
 	provider.instanceClient = nil
 
@@ -51,19 +51,19 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 	defer instancesClient.Close()
 
 	var (
-		project = g.config.Get("project")
+		project = g.providerConfig.Get("project")
 
-		zone           = tray.TrayConfig.Get("zone")
-		machineType    = tray.TrayConfig.Get("machineType")
-		tags           = strings.Split(tray.TrayConfig.Get("tags"), ",")
-		preemptible, _ = strconv.ParseBool(tray.TrayConfig.Get("preemptible"))
-		network        = tray.TrayConfig.Get("network")
-		subnetwork     = tray.TrayConfig.Get("subnetwork")
+		zone           = tray.TrayConfig().Get("zone")
+		machineType    = tray.TrayConfig().Get("machineType")
+		tags           = strings.Split(tray.TrayConfig().Get("tags"), ",")
+		preemptible, _ = strconv.ParseBool(tray.TrayConfig().Get("preemptible"))
+		network        = tray.TrayConfig().Get("network")
+		subnetwork     = tray.TrayConfig().Get("subnetwork")
 	)
 
-	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id, "https://lorwyn.andwehaveaplan.com", "/actions-runner")
+	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.AdvertiseUrl, "/actions-runner")
 
-	insert, err := instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
+	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: project,
 		Zone:    zone,
 		InstanceResource: &computepb.Instance{
@@ -91,7 +91,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 				},
 			},
 			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
-			Name:        proto.String(tray.Name),
+			Name:        proto.String(tray.Id()),
 			NetworkInterfaces: []*computepb.NetworkInterface{
 				{
 					AccessConfigs: []*computepb.AccessConfig{
@@ -113,24 +113,22 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		return err
 	}
 
-	logger.Infof("Created tray: %v", insert)
-
 	return nil
 }
 
-func (g GceProvider) CleanTray(id string) error {
+func (g GceProvider) CleanTray(tray *trays.Tray) error {
 	client, err := g.createInstancesClient()
 	if err != nil {
 		return err
 	}
 
 	var (
-		zone    = g.config.Get("zone")
-		project = g.config.Get("project")
+		zone    = tray.TrayConfig().Get("zone")
+		project = g.providerConfig.Get("project")
 	)
 
 	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
-		Instance: id,
+		Instance: tray.Id(),
 		Project:  project,
 		Zone:     zone,
 	})
@@ -174,5 +172,4 @@ cd cattery/src
 export GOMODCACHE=$HOME/golang/pkg/mod
 export HOME=/root
 go build -o /usr/local/bin/cattery
-cattery --help
 `

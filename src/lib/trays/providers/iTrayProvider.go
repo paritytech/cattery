@@ -16,5 +16,5 @@ type ITrayProvider interface {
 	RunTray(tray *trays.Tray) error
 
 	// CleanTray deletes the tray with the given ID.
-	CleanTray(id string) error
+	CleanTray(tray *trays.Tray) error
 }

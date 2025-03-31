@@ -42,9 +42,9 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	client := githubClient.NewGithubClient("paritytech-stg")
 	config, err := client.CreateJITConfig(
-		tray.Name,
+		tray.Id(),
 		3,
-		tray.Labels,
+		tray.Labels(),
 	)
 
 	if err != nil {
@@ -91,22 +91,22 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var agentId = r.PathValue("id")
+	var trayId = r.PathValue("id")
 
 	var unregisterRequest messages.UnregisterRequest
 	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to decode unregister request for agentId '%s': %v", agentId, err)
+		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 	}
 
 	logger = logger.WithFields(log.Fields{
-		"action":  "AgentRegister",
-		"agentId": unregisterRequest.Agent.AgentId,
+		"action": "AgentRegister",
+		"trayId": unregisterRequest.Agent.AgentId,
 	})
 
-	logger.Debugf("Agent unregister request")
+	logger.Tracef("Agent unregister request")
 
 	client := githubClient.NewGithubClient("paritytech-stg")
 	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
@@ -116,32 +116,34 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	logger.Infof("Agent %s, %s unregistered", agentId, unregisterRequest.Agent.AgentId)
+	//unregisterRequest.Reason
+	logger.Debugf("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 
-	var tray, ok = traysStore[agentId]
+	var tray, ok = traysStore[trayId]
 
 	if !ok {
-		var errMsg = fmt.Sprintf("tray '%s' not found", agentId)
+		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusNotFound)
 		return
 	}
 
-	provider, err := providers.GetProvider(tray.Provider)
+	provider, err := providers.GetProvider(tray.Provider())
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray %s: %v", tray.Provider, tray.Id, err)
+		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray %s: %v", tray.Provider(), tray.Id(), err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	err = provider.CleanTray(tray.Id)
+	err = provider.CleanTray(tray)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to clean tray %s: %v", tray.Id, err)
+		var errMsg = fmt.Sprintf("Failed to clean tray %s: %v", tray.Id(), err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
+	delete(traysStore, trayId)
 
-	delete(traysStore, agentId)
+	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 }

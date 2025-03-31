@@ -1,16 +1,31 @@
-listenAddress: http://0.0.0.0:5137
-appID: 123456
-appSecret: 123456
-WebhookSecret: abcdefghijklmnopqrstuvwxyz
-privateKeyPath: /path/to/private.key
+listenAddress: "0.0.0.0:5137"
+appId: 12345
+installationId: 54321
+privateKeyPath: path/to/private-key.pem
+
+advertiseUrl: https://cattery.my-org.com
 
 providers:
   docker-local:
     type: docker
+  gce-stg:
+    type: google
+    project: parity-ci-2024
+    credentialsFile: path/to/credentials.json
 
 trayTypes:
   cattery-tiny:
     provider: docker-local
     config:
       image: cattery-runner-tiny:latest
-      namePrefix: cattery
+
+  cattery-gce:
+    provider: gce-stg
+    config:
+      namePrefix: cattery-stg
+      project: parity-ci-2024
+      zone: europe-west1-d
+      machineType: e2-standard-4
+      preemptible: true
+      network: <network-url>
+      subnetwork: <subnetwork-url>

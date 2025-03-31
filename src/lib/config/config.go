@@ -11,6 +11,8 @@ type CatteryConfig struct {
 	PrivateKeyPath string
 	WebhookSecret  string
 
+	AdvertiseUrl string
+
 	Providers map[string]ProviderConfig
 
 	TrayTypes map[string]TrayType
