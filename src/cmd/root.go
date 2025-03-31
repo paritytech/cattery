@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"cattery/agent"
@@ -7,14 +7,21 @@ import (
 	"os"
 )
 
+var Version = "0.0.0"
+var configPath string
+
 var rootCmd = &cobra.Command{
 	Use:   "cattery",
 	Short: "Github self-hosted runners scheduler",
 }
 
 func init() {
+	rootCmd.Version = Version
+
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(serverCmd)
+
+	serverCmd.PersistentFlags().StringVarP(&configPath, "config-path", "c", "", "Path to the config file")
 
 	agentCmd.Flags().StringVarP(
 		&agent.RunnerFolder,
