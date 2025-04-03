@@ -5,6 +5,18 @@ privateKeyPath: path/to/private-key.pem
 
 advertiseUrl: https://cattery.my-org.com
 
+github:
+  paritytech-stg:
+    appId: 123456
+    installationId: 654321
+    privateKeyPath: path/to/github-private-key.pem
+    webhookSecret: my-webhook-secret
+  paritytech:
+    appId: 123456
+    installationId: 654321
+    privateKeyPath: path/to/github-private-key.pem
+    webhookSecret: my-webhook-secret
+
 providers:
   docker-local:
     type: docker
@@ -16,11 +28,14 @@ providers:
 trayTypes:
   cattery-tiny:
     provider: docker-local
+    shutdown: false
     config:
       image: cattery-runner-tiny:latest
 
   cattery-gce:
     provider: gce-stg
+    shutdown: true
+    runnerGroupId: 3
     config:
       namePrefix: cattery-stg
       project: parity-ci-2024

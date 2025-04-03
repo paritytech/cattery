@@ -43,7 +43,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	client := githubClient.NewGithubClient("paritytech-stg")
 	config, err := client.CreateJITConfig(
 		tray.Id(),
-		3,
+		tray.RunnerGroupId(),
 		tray.Labels(),
 	)
 

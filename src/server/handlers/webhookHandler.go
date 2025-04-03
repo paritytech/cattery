@@ -112,8 +112,10 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 // handles the 'handleQueuedWorkflowJob' action of the workflow job event
 func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
 
-	var trayType *config.TrayType
-	var trayTypeName = ""
+	var (
+		trayType     *config.TrayType
+		trayTypeName string
+	)
 
 	// find tray type based on labels (runs_on)
 	// TODO: handle multiple labels
@@ -121,6 +123,7 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		if val, ok := config.AppConfig.TrayTypes[label]; ok {
 			trayType = &val
 			trayTypeName = label
+			break
 		}
 	}
 
@@ -138,8 +141,10 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 	}
 
 	tray := trays.NewTray(
-		webhookData.WorkflowJob.Labels,
 		trayTypeName,
+		trayType.RunnerGroupId,
+		trayType.Shutdown,
+		webhookData.WorkflowJob.Labels,
 		*trayType)
 
 	traysStore[tray.Id()] = tray

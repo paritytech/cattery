@@ -146,7 +146,17 @@ func (g GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
 	}
 
 	ctx := context.Background()
-	instancesClient, err := compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile("parity-ci-2024-6f2e1072e896.json"))
+
+	var (
+		instancesClient *compute.InstancesClient
+		err             error
+	)
+
+	if credFile := g.providerConfig.Get("credentialsFile"); credFile != "" {
+		instancesClient, err = compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile(g.providerConfig.Get("credentialsFile")))
+	} else {
+		instancesClient, err = compute.NewInstancesRESTClient(ctx)
+	}
 
 	if err == nil {
 		g.instanceClient = instancesClient

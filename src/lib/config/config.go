@@ -19,8 +19,10 @@ type CatteryConfig struct {
 }
 
 type TrayType struct {
-	Provider string
-	Config   TrayConfig
+	Provider      string
+	RunnerGroupId int64
+	Shutdown      bool
+	Config        TrayConfig
 }
 
 type TrayConfig map[string]string

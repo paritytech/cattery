@@ -8,27 +8,36 @@ import (
 )
 
 type Tray struct {
-	id         string
-	trayType   string
-	provider   string
-	labels     []string
-	trayConfig config.TrayConfig
+	id            string
+	trayType      string
+	runnerGroupId int64
+	shutdown      bool
+	provider      string
+	labels        []string
+	trayConfig    config.TrayConfig
 
 	JobRunId int64
 }
 
-func NewTray(labels []string, trayTypeName string, trayType config.TrayType) *Tray {
+func NewTray(
+	trayTypeName string,
+	runnerGroupId int64,
+	shutdown bool,
+	labels []string,
+	trayType config.TrayType) *Tray {
 
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:         fmt.Sprintf("%s-%s", trayTypeName, id),
-		trayType:   trayTypeName,
-		provider:   trayType.Provider,
-		labels:     labels,
-		trayConfig: trayType.Config,
+		id:            fmt.Sprintf("%s-%s", trayTypeName, id),
+		trayType:      trayTypeName,
+		runnerGroupId: runnerGroupId,
+		shutdown:      shutdown,
+		provider:      trayType.Provider,
+		labels:        labels,
+		trayConfig:    trayType.Config,
 	}
 
 	return tray
@@ -52,4 +61,12 @@ func (tray *Tray) Labels() []string {
 
 func (tray *Tray) TrayConfig() config.TrayConfig {
 	return tray.trayConfig
+}
+
+func (tray *Tray) RunnerGroupId() int64 {
+	return tray.runnerGroupId
+}
+
+func (tray *Tray) Shutdown() bool {
+	return tray.shutdown
 }
