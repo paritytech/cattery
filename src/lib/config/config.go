@@ -23,8 +23,9 @@ type CatteryConfig struct {
 func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	if configPath == nil {
+	if *configPath == "" {
 		viper.AddConfigPath("/etc/cattery/")
+		viper.AddConfigPath("./")
 	} else {
 		viper.SetConfigFile(*configPath)
 	}
