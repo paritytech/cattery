@@ -13,12 +13,12 @@ var githubClient *github.Client = nil
 
 type GithubClient struct {
 	client *github.Client
-	Org    string
+	Org    *config.GitHubOrganization
 }
 
-func NewGithubClient(org string) *GithubClient {
+func NewGithubClient(org *config.GitHubOrganization) *GithubClient {
 	return &GithubClient{
-		client: createClient(),
+		client: createClient(org),
 		Org:    org,
 	}
 }
@@ -27,7 +27,7 @@ func NewGithubClient(org string) *GithubClient {
 func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels []string) (*github.JITRunnerConfig, error) {
 	jitConfig, _, err := gc.client.Actions.GenerateOrgJITConfig(
 		context.Background(),
-		gc.Org,
+		gc.Org.Name,
 		&github.GenerateJITConfigRequest{
 			Name:          name,
 			RunnerGroupID: runnerGroupId,
@@ -39,13 +39,13 @@ func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels
 }
 
 func (gc *GithubClient) RemoveRunner(runnerId int64) error {
-	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org, runnerId)
+	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org.Name, runnerId)
 	// TODO: handle not existing runner
 	return err
 }
 
 // createClient creates a new GitHub client
-func createClient() *github.Client {
+func createClient(org *config.GitHubOrganization) *github.Client {
 
 	if githubClient != nil {
 		return githubClient
@@ -55,9 +55,9 @@ func createClient() *github.Client {
 
 	itr, err := ghinstallation.NewKeyFromFile(
 		tr,
-		config.AppConfig.AppID,
-		config.AppConfig.InstallationId,
-		config.AppConfig.PrivateKeyPath,
+		org.AppId,
+		org.InstallationId,
+		org.PrivateKeyPath,
 	)
 
 	if err != nil {

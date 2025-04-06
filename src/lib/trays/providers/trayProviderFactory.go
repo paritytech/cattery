@@ -20,9 +20,9 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 
 	var result ITrayProvider
 
-	var provider, ok = config.AppConfig.Providers[providerName]
+	var provider = *config.AppConfig.GetProvider(providerName)
 
-	if !ok {
+	if provider == nil {
 		var err = errors.New("No provider found for " + providerName)
 		logger.Errorf(err.Error())
 		return nil, err

@@ -15,12 +15,14 @@ type Tray struct {
 	provider      string
 	labels        []string
 	trayConfig    config.TrayConfig
+	githubOrgName string
 
 	JobRunId int64
 }
 
 func NewTray(
 	trayTypeName string,
+	githubOrgName string,
 	runnerGroupId int64,
 	shutdown bool,
 	labels []string,
@@ -45,6 +47,10 @@ func NewTray(
 
 func (tray *Tray) Id() string {
 	return tray.id
+}
+
+func (tray *Tray) GitHubOrgName() string {
+	return tray.githubOrgName
 }
 
 func (tray *Tray) Type() string {

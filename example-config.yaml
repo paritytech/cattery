@@ -29,6 +29,8 @@ trayTypes:
   cattery-tiny:
     provider: docker-local
     shutdown: false
+    runnerGroupId: 3
+    githubOrg: paritytech
     config:
       image: cattery-runner-tiny:latest
 
@@ -36,6 +38,7 @@ trayTypes:
     provider: gce-stg
     shutdown: true
     runnerGroupId: 3
+    githubOrg: paritytech-stg
     config:
       namePrefix: cattery-stg
       project: parity-ci-2024

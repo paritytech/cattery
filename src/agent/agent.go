@@ -73,7 +73,6 @@ func (a *CatteryAgent) Start() {
 	if err != nil {
 		var errMsg = "Runner failed: " + err.Error()
 		a.logger.Errorf(errMsg)
-		os.Exit(1)
 	}
 
 	a.stop(commandRun.Process, false)

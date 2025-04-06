@@ -27,11 +27,20 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("X-GitHub-Event") != "workflow_job" {
-		logger.Warn("Ignoring webhook request: X-GitHub-Event is not 'workflow_job'")
+		logger.Debugf("Ignoring webhook request: X-GitHub-Event is not 'workflow_job'")
 		return
 	}
 
-	payload, err := github.ValidatePayload(r, []byte(config.AppConfig.WebhookSecret))
+	var organizationName = r.PathValue("org")
+	var org = config.AppConfig.GetGitHubOrg(organizationName)
+	if org == nil {
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", organizationName)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
 	if err != nil {
 		logger.Errorf("Error validating payload: %v", err)
 		http.Error(responseWriter, "Error validating payload", http.StatusBadRequest)
@@ -43,8 +52,8 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorf("Error parsing webhook: %v", err)
 		return
 	}
-
 	webhookData = hook.(*github.WorkflowJobEvent)
+
 	logger.Tracef("Event payload: %v", payload)
 
 	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
@@ -120,8 +129,8 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 	// find tray type based on labels (runs_on)
 	// TODO: handle multiple labels
 	for _, label := range webhookData.WorkflowJob.Labels {
-		if val, ok := config.AppConfig.TrayTypes[label]; ok {
-			trayType = &val
+		if val := config.AppConfig.GetTrayType(label); val != nil {
+			trayType = val
 			trayTypeName = label
 			break
 		}
@@ -140,8 +149,10 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		return
 	}
 
+	var organizationName = webhookData.GetOrg().GetName()
 	tray := trays.NewTray(
 		trayTypeName,
+		organizationName,
 		trayType.RunnerGroupId,
 		trayType.Shutdown,
 		webhookData.WorkflowJob.Labels,

@@ -28,12 +28,12 @@ func Start() {
 	webhookMux.HandleFunc("/agent/unregister/{id}", handlers.AgentUnregister)
 
 	var webhookServer = &http.Server{
-		Addr:    config.AppConfig.ListenAddress,
+		Addr:    config.AppConfig.Server.ListenAddress,
 		Handler: webhookMux,
 	}
 
 	go func() {
-		log.Println("Starting webhook server on", config.AppConfig.ListenAddress)
+		log.Println("Starting webhook server on", config.AppConfig.Server.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)

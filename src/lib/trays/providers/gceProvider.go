@@ -61,7 +61,9 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		subnetwork     = tray.TrayConfig().Get("subnetwork")
 	)
 
-	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.AdvertiseUrl, "/actions-runner")
+	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.Server.AdvertiseUrl, "/actions-runner")
+
+	//instancesClient.temp
 
 	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: project,
