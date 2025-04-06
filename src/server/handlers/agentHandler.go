@@ -32,8 +32,8 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugln("Agent registration request")
 
-	var tray, ok = traysStore[agentId]
-	if !ok {
+	var tray, _ = traysStore.Get(agentId)
+	if tray == nil {
 		var err = errors.New(fmt.Sprintf("tray '%s' not found", agentId))
 		logger.Errorf(err.Error())
 		http.Error(responseWriter, err.Error(), http.StatusNotFound)
@@ -116,8 +116,8 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Agent unregister request")
 
-	var tray, ok = traysStore[trayId]
-	if !ok {
+	var tray, _ = traysStore.Get(trayId)
+	if tray == nil {
 		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusNotFound)
@@ -158,7 +158,8 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
-	delete(traysStore, trayId)
+
+	_ = traysStore.Delete(trayId)
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 }

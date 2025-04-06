@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/repositories"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
 	"fmt"
@@ -10,11 +11,11 @@ import (
 	"net/http"
 )
 
-var traysStore = make(map[string]*trays.Tray)
-
 var logger = log.WithFields(log.Fields{
 	"name": "server",
 })
+
+var traysStore = repositories.NewMemTrayRepository()
 
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
@@ -77,8 +78,8 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 // handles the 'completed' action of the workflow job event
 func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
 
-	var tray, ok = traysStore[webhookData.WorkflowJob.GetRunnerName()]
-	if !ok {
+	var tray, _ = traysStore.Get(webhookData.WorkflowJob.GetRunnerName())
+	if tray == nil {
 		logger.Debugf("Tray '%s' not found", webhookData.WorkflowJob.GetRunnerName())
 		return
 	}
@@ -99,15 +100,15 @@ func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.
 		return
 	}
 
-	delete(traysStore, tray.Id())
+	_ = traysStore.Delete(tray.Id())
 }
 
 // handleInProgressWorkflowJob
 // handles the 'in_progress' action of the workflow job event
 func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
 
-	var tray, ok = traysStore[webhookData.WorkflowJob.GetRunnerName()]
-	if !ok {
+	var tray, _ = traysStore.Get(webhookData.WorkflowJob.GetRunnerName())
+	if tray == nil {
 		logger.Debugf("Tray '%s' not found", webhookData.WorkflowJob.GetRunnerName())
 		return
 	}
@@ -158,7 +159,7 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		webhookData.WorkflowJob.Labels,
 		*trayType)
 
-	traysStore[tray.Id()] = tray
+	_ = traysStore.Save(tray)
 
 	err = provider.RunTray(tray)
 	if err != nil {
