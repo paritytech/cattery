@@ -34,6 +34,7 @@ func NewTray(
 
 	var tray = &Tray{
 		id:            fmt.Sprintf("%s-%s", trayTypeName, id),
+		githubOrgName: githubOrgName,
 		trayType:      trayTypeName,
 		runnerGroupId: runnerGroupId,
 		shutdown:      shutdown,

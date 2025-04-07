@@ -48,6 +48,8 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id(), agentId, tray.GitHubOrgName())
+
 	client := githubClient.NewGithubClient(org)
 	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.Id(),

@@ -150,7 +150,7 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		return
 	}
 
-	var organizationName = webhookData.GetOrg().GetName()
+	var organizationName = webhookData.GetOrg().GetLogin()
 	tray := trays.NewTray(
 		trayTypeName,
 		organizationName,

@@ -20,12 +20,13 @@ func Start() {
 	signal.Notify(sigs, syscall.SIGKILL)
 
 	var webhookMux = http.NewServeMux()
-	webhookMux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+	webhookMux.HandleFunc("/{$}", func(writer http.ResponseWriter, request *http.Request) {
 		return
 	})
-	webhookMux.HandleFunc("/github/{org}", handlers.Webhook)
-	webhookMux.HandleFunc("/agent/register/{id}", handlers.AgentRegister)
-	webhookMux.HandleFunc("/agent/unregister/{id}", handlers.AgentUnregister)
+	webhookMux.HandleFunc("GET /agent/register/{id}", handlers.AgentRegister)
+	webhookMux.HandleFunc("POST /agent/unregister/{id}", handlers.AgentUnregister)
+
+	webhookMux.HandleFunc("POST /github/{org}", handlers.Webhook)
 
 	var webhookServer = &http.Server{
 		Addr:    config.AppConfig.Server.ListenAddress,
