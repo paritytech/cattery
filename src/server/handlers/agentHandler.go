@@ -41,7 +41,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
-	if org != nil {
+	if org == nil {
 		var errMsg = fmt.Sprintf("Organization '%s' not found in jitRunnerConfig", tray.GitHubOrgName())
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
@@ -128,8 +128,8 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
-	if org != nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in jitRunnerConfig", tray.GitHubOrgName())
+	if org == nil {
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
