@@ -42,7 +42,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
 	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in jitRunnerConfig", tray.GitHubOrgName())
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
@@ -59,7 +59,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		logger.Errorln(err)
-		http.Error(responseWriter, "Failed to generate JIT jitRunnerConfig", http.StatusInternalServerError)
+		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
 		return
 	}
 
@@ -142,9 +142,6 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
-
-	//unregisterRequest.Reason
-	logger.Debugf("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 
 	provider, err := providers.GetProvider(tray.Provider())
 	if err != nil {

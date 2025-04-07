@@ -57,8 +57,12 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Event payload: %v", payload)
 
-	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
+	if getTrayType(webhookData) == nil {
+		logger.Tracef("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
+		return
+	}
 
+	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
 	logger.Debugf("Action: %s", webhookData.GetAction())
 
 	switch webhookData.GetAction() {
@@ -115,27 +119,18 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 
 	tray.JobRunId = webhookData.WorkflowJob.GetID()
 
-	logger.Debugf("Tray '%s' is running '%s'", tray.Id(), *webhookData.WorkflowJob.Name)
+	logger.Infof("Tray '%s' is running '%s/%s' in '%s/%s'",
+		tray.Id(),
+		webhookData.WorkflowJob.GetWorkflowName(), webhookData.WorkflowJob.GetName(),
+		webhookData.GetOrg().GetLogin(), webhookData.GetRepo().GetName(),
+	)
 }
 
 // handleQueuedWorkflowJob
 // handles the 'handleQueuedWorkflowJob' action of the workflow job event
 func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
 
-	var (
-		trayType     *config.TrayType
-		trayTypeName string
-	)
-
-	// find tray type based on labels (runs_on)
-	// TODO: handle multiple labels
-	for _, label := range webhookData.WorkflowJob.Labels {
-		if val := config.AppConfig.GetTrayType(label); val != nil {
-			trayType = val
-			trayTypeName = label
-			break
-		}
-	}
+	trayType := getTrayType(webhookData)
 
 	if trayType == nil {
 		logger.Debugf("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
@@ -150,16 +145,10 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		return
 	}
 
-	var organizationName = webhookData.GetOrg().GetLogin()
+	//var organizationName = webhookData.GetOrg().GetLogin()
 	tray := trays.NewTray(
-		trayTypeName,
-		organizationName,
-		trayType.RunnerGroupId,
-		trayType.Shutdown,
 		webhookData.WorkflowJob.Labels,
 		*trayType)
-
-	_ = traysStore.Save(tray)
 
 	err = provider.RunTray(tray)
 	if err != nil {
@@ -168,5 +157,29 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		return
 	}
 
+	_ = traysStore.Save(tray)
+
 	logger.Infof("Run tray %s", tray.Id())
+}
+
+func getTrayType(webhookData *github.WorkflowJobEvent) *config.TrayType {
+
+	if len(webhookData.WorkflowJob.Labels) != 1 {
+		// Cattery only support one label for now
+		return nil
+	}
+
+	// find tray type based on labels (runs_on)
+	var label = webhookData.WorkflowJob.Labels[0]
+	var trayType = config.AppConfig.GetTrayType(label)
+
+	if trayType == nil {
+		return nil
+	}
+
+	if trayType.GitHubOrg != webhookData.GetOrg().GetLogin() {
+		return nil
+	}
+
+	return trayType
 }

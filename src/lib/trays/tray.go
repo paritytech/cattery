@@ -8,23 +8,14 @@ import (
 )
 
 type Tray struct {
-	id            string
-	trayType      string
-	runnerGroupId int64
-	shutdown      bool
-	provider      string
-	labels        []string
-	trayConfig    config.TrayConfig
-	githubOrgName string
+	id       string
+	labels   []string
+	trayType config.TrayType
 
 	JobRunId int64
 }
 
 func NewTray(
-	trayTypeName string,
-	githubOrgName string,
-	runnerGroupId int64,
-	shutdown bool,
 	labels []string,
 	trayType config.TrayType) *Tray {
 
@@ -33,14 +24,9 @@ func NewTray(
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:            fmt.Sprintf("%s-%s", trayTypeName, id),
-		githubOrgName: githubOrgName,
-		trayType:      trayTypeName,
-		runnerGroupId: runnerGroupId,
-		shutdown:      shutdown,
-		provider:      trayType.Provider,
-		labels:        labels,
-		trayConfig:    trayType.Config,
+		id:       fmt.Sprintf("%s-%s", trayType.Name, id),
+		labels:   labels,
+		trayType: trayType,
 	}
 
 	return tray
@@ -51,15 +37,15 @@ func (tray *Tray) Id() string {
 }
 
 func (tray *Tray) GitHubOrgName() string {
-	return tray.githubOrgName
+	return tray.trayType.GitHubOrg
 }
 
-func (tray *Tray) Type() string {
-	return tray.trayType
+func (tray *Tray) TypeName() string {
+	return tray.trayType.Name
 }
 
 func (tray *Tray) Provider() string {
-	return tray.provider
+	return tray.trayType.Provider
 }
 
 func (tray *Tray) Labels() []string {
@@ -67,13 +53,13 @@ func (tray *Tray) Labels() []string {
 }
 
 func (tray *Tray) TrayConfig() config.TrayConfig {
-	return tray.trayConfig
+	return tray.trayType.Config
 }
 
 func (tray *Tray) RunnerGroupId() int64 {
-	return tray.runnerGroupId
+	return tray.trayType.RunnerGroupId
 }
 
 func (tray *Tray) Shutdown() bool {
-	return tray.shutdown
+	return tray.trayType.Shutdown
 }

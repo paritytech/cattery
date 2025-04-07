@@ -40,7 +40,6 @@ func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels
 
 func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org.Name, runnerId)
-	// TODO: handle not existing runner
 	return err
 }
 
