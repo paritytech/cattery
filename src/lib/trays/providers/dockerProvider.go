@@ -1,10 +1,13 @@
 package providers
 
 import (
+	"bufio"
+	"bytes"
 	"cattery/lib/config"
 	"cattery/lib/trays"
-	log "github.com/sirupsen/logrus"
 	"os/exec"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type DockerProvider struct {
@@ -45,10 +48,12 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 	var containerName = tray.Id()
 	var image = tray.TrayConfig().Get("image")
 
-	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--name", containerName, image)
+	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--name", containerName, image, "cattery", "-i", tray.Id(), "-s", "http://host.containers.internal:5137")
 	err := dockerCommand.Run()
+	log.Info("Running docker command: ", dockerCommand.String())
 
 	if err != nil {
+		log.Error("Error running docker command: ", err)
 		return err
 	}
 
@@ -56,11 +61,31 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 }
 
 func (d DockerProvider) CleanTray(tray *trays.Tray) error {
-	var dockerCommand = exec.Command("docker", "container", "stop", tray.Id(), "-s", "SIGINT")
-	err := dockerCommand.Run()
 
+	var dockerCheckCommand = exec.Command("docker", "ps", "--format", "'{{.Names}}'")
+	dockerCheckCommandOutput, err := dockerCheckCommand.Output()
 	if err != nil {
-		return err
+		log.Error("Error checking docker containers: ", err)
+	}
+	if string(dockerCheckCommandOutput) == "" {
+		log.Info("No docker containers running")
+		return nil
+	} else {
+		ioReader := bytes.NewReader(dockerCheckCommandOutput)
+		scanner := bufio.NewScanner(ioReader)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == tray.Id() {
+				var dockerCommand = exec.Command("docker", "container", "stop", tray.Id(), "-s", "SIGINT")
+				err = dockerCommand.Run()
+				if err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+		log.Info("Couldn't find the container:", tray.Id())
+
 	}
 
 	return nil
