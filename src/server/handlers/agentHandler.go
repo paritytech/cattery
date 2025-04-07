@@ -66,6 +66,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
 		RunnerId: jitRunnerConfig.GetRunner().GetID(),
+		Shutdown: tray.Shutdown(),
 	}
 
 	var registerResponse = messages.RegisterResponse{
