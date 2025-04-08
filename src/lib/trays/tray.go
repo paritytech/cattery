@@ -8,27 +8,25 @@ import (
 )
 
 type Tray struct {
-	id         string
-	trayType   string
-	provider   string
-	labels     []string
-	trayConfig config.TrayConfig
+	id       string
+	labels   []string
+	trayType config.TrayType
 
 	JobRunId int64
 }
 
-func NewTray(labels []string, trayTypeName string, trayType config.TrayType) *Tray {
+func NewTray(
+	labels []string,
+	trayType config.TrayType) *Tray {
 
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:         fmt.Sprintf("%s-%s", trayTypeName, id),
-		trayType:   trayTypeName,
-		provider:   trayType.Provider,
-		labels:     labels,
-		trayConfig: trayType.Config,
+		id:       fmt.Sprintf("%s-%s", trayType.Name, id),
+		labels:   labels,
+		trayType: trayType,
 	}
 
 	return tray
@@ -38,12 +36,16 @@ func (tray *Tray) Id() string {
 	return tray.id
 }
 
-func (tray *Tray) Type() string {
-	return tray.trayType
+func (tray *Tray) GitHubOrgName() string {
+	return tray.trayType.GitHubOrg
+}
+
+func (tray *Tray) TypeName() string {
+	return tray.trayType.Name
 }
 
 func (tray *Tray) Provider() string {
-	return tray.provider
+	return tray.trayType.Provider
 }
 
 func (tray *Tray) Labels() []string {
@@ -51,5 +53,13 @@ func (tray *Tray) Labels() []string {
 }
 
 func (tray *Tray) TrayConfig() config.TrayConfig {
-	return tray.trayConfig
+	return tray.trayType.Config
+}
+
+func (tray *Tray) RunnerGroupId() int64 {
+	return tray.trayType.RunnerGroupId
+}
+
+func (tray *Tray) Shutdown() bool {
+	return tray.trayType.Shutdown
 }

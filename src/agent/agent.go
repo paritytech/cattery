@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cattery/agent/tools"
 	"cattery/lib/agents"
 	"cattery/lib/messages"
 	"github.com/sirupsen/logrus"
@@ -73,7 +74,6 @@ func (a *CatteryAgent) Start() {
 	if err != nil {
 		var errMsg = "Runner failed: " + err.Error()
 		a.logger.Errorf(errMsg)
-		os.Exit(1)
 	}
 
 	a.stop(commandRun.Process, false)
@@ -113,6 +113,10 @@ func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
 	if err != nil {
 		var errMsg = "Failed to unregister agent: " + err.Error()
 		a.logger.Errorf(errMsg)
+	}
+
+	if a.agent.Shutdown {
+		tools.Shutdown()
 	}
 }
 
