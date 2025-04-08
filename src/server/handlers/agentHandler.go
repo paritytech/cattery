@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cattery/lib/agents"
+	"cattery/lib/config"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
 	"cattery/lib/trays/providers"
@@ -29,35 +30,45 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		"agentId": agentId,
 	})
 
-	logger.Debugln("Agent registration request, ", agentId)
+	logger.Debugln("Agent registration request")
 
-	var tray, ok = traysStore[agentId]
-
-	if !ok {
+	var tray, _ = traysStore.Get(agentId)
+	if tray == nil {
 		var err = errors.New(fmt.Sprintf("tray '%s' not found", agentId))
 		logger.Errorf(err.Error())
 		http.Error(responseWriter, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	client := githubClient.NewGithubClient("paritytech-stg")
-	config, err := client.CreateJITConfig(
+	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	if org == nil {
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id(), agentId, tray.GitHubOrgName())
+
+	client := githubClient.NewGithubClient(org)
+	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.Id(),
-		3,
+		tray.RunnerGroupId(),
 		tray.Labels(),
 	)
 
 	if err != nil {
 		logger.Errorln(err)
-		http.Error(responseWriter, "Failed to generate JIT config", http.StatusInternalServerError)
+		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
 		return
 	}
 
-	var jitConfig = config.GetEncodedJITConfig()
+	var jitConfig = jitRunnerConfig.GetEncodedJITConfig()
 
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
-		RunnerId: config.GetRunner().GetID(),
+		RunnerId: jitRunnerConfig.GetRunner().GetID(),
+		Shutdown: tray.Shutdown(),
 	}
 
 	var registerResponse = messages.RegisterResponse{
@@ -108,24 +119,28 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Agent unregister request")
 
-	client := githubClient.NewGithubClient("paritytech-stg")
+	var tray, _ = traysStore.Get(trayId)
+	if tray == nil {
+		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusNotFound)
+		return
+	}
+
+	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	if org == nil {
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	client := githubClient.NewGithubClient(org)
 	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to remove runner %s: %v", unregisterRequest.Agent.AgentId, err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-	}
-
-	//unregisterRequest.Reason
-	logger.Debugf("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
-
-	var tray, ok = traysStore[trayId]
-
-	if !ok {
-		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusNotFound)
-		return
 	}
 
 	provider, err := providers.GetProvider(tray.Provider())
@@ -143,7 +158,8 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
-	delete(traysStore, trayId)
+
+	_ = traysStore.Delete(trayId)
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 }

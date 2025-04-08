@@ -6,7 +6,10 @@ import (
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"context"
+	"errors"
 	"fmt"
+	"github.com/sirupsen/logrus"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 	"strconv"
@@ -19,6 +22,7 @@ type GceProvider struct {
 	providerConfig config.ProviderConfig
 
 	instanceClient *compute.InstancesClient
+	logger         *logrus.Entry
 }
 
 func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvider {
@@ -28,6 +32,7 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	provider.providerConfig = providerConfig
 
 	provider.instanceClient = nil
+	provider.logger = logrus.WithFields(logrus.Fields{name: "gceProvider"})
 
 	return provider
 }
@@ -61,7 +66,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		subnetwork     = tray.TrayConfig().Get("subnetwork")
 	)
 
-	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.AdvertiseUrl, "/actions-runner")
+	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.Server.AdvertiseUrl, "/actions-runner")
 
 	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: project,
@@ -109,7 +114,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		},
 	})
 	if err != nil {
-		logger.Errorf("Error creating tray: %v", err)
+		g.logger.Errorf("Error creating tray: %v", err)
 		return err
 	}
 
@@ -133,6 +138,14 @@ func (g GceProvider) CleanTray(tray *trays.Tray) error {
 		Zone:     zone,
 	})
 	if err != nil {
+		var e *googleapi.Error
+		if errors.As(err, &e) {
+			if e.Code != 404 {
+				return err
+			} else {
+				g.logger.Tracef("Tray deletion error, tray %s not found: %v", tray.Id(), err)
+			}
+		}
 		return err
 	}
 
@@ -146,7 +159,17 @@ func (g GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
 	}
 
 	ctx := context.Background()
-	instancesClient, err := compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile("parity-ci-2024-6f2e1072e896.json"))
+
+	var (
+		instancesClient *compute.InstancesClient
+		err             error
+	)
+
+	if credFile := g.providerConfig.Get("credentialsFile"); credFile != "" {
+		instancesClient, err = compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile(g.providerConfig.Get("credentialsFile")))
+	} else {
+		instancesClient, err = compute.NewInstancesRESTClient(ctx)
+	}
 
 	if err == nil {
 		g.instanceClient = instancesClient
