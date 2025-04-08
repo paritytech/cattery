@@ -3,8 +3,10 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
-	log "github.com/sirupsen/logrus"
 	"os/exec"
+	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type DockerProvider struct {
@@ -45,10 +47,12 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 	var containerName = tray.Id()
 	var image = tray.TrayConfig().Get("image")
 
-	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--name", containerName, image)
+	var dockerCommand = exec.Command("docker", "run", "-d", "--rm", "--name", containerName, image, "cattery", "-i", tray.Id(), "-s", d.config.Get("catteryUrl"))
 	err := dockerCommand.Run()
+	log.Info("Running docker command: ", dockerCommand.String())
 
 	if err != nil {
+		d.logger.Error("Error running docker command: ", err)
 		return err
 	}
 
@@ -56,10 +60,13 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 }
 
 func (d DockerProvider) CleanTray(tray *trays.Tray) error {
-	var dockerCommand = exec.Command("docker", "container", "stop", tray.Id(), "-s", "SIGINT")
-	err := dockerCommand.Run()
-
+	var dockerCommand = exec.Command("docker", "container", "stop", tray.Id())
+	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {
+		if strings.Contains(string(dockerCommandOutput), "no such container") {
+			d.logger.Trace("No such container: ", tray.Id())
+			return nil
+		}
 		return err
 	}
 
