@@ -18,6 +18,7 @@ github:
 providers:
   - name: docker-local
     type: docker
+    catteryUrl: http://host.containers.internal:5137 # example for podman
 
   - name: gce-stg
     type: google
