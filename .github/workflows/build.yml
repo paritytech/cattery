@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: cattery-gce-stg
+    runs-on: cattery-gce
     steps:
      - name: Checkout code
        uses: actions/checkout@v4
