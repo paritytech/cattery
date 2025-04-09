@@ -1,0 +1,31 @@
+name: Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: cattery-gce-stg
+    steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
+
+     - name: Set up Go
+       uses: actions/setup-go@v5
+       with:
+         go-version: '1.24'
+
+     - name: Install dependencies
+       run: go mod download
+
+     - name: Build
+       run: go build -C src -o ../bin/cattery
+
+     - run: ls -la bin/
