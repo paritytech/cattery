@@ -23,7 +23,7 @@ jobs:
          go-version: '1.24'
 
      - name: Install dependencies
-       run: go mod download
+       run: go mod download -C src
 
      - name: Build
        run: go build -C src -o ../bin/cattery
