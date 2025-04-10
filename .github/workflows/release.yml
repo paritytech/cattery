@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+  #workflow_dispatch:
+  #  inputs:
+  #    tag_name:
+  #        description: 'Tag name'
+  #        required: true
+  #        default: 'v0.0.0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: cattery-gce
+    steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
+
+     - name: Set up Go
+       uses: actions/setup-go@v5
+       with:
+         go-version: '1.24'
+
+     - name: Install dependencies
+       run: go mod download -C src
+
+     - name: Build
+       run: go build -C src -o ../bin/cattery
+
+     - run: ls -la bin/
+
+     - name: create-release
+       uses: softprops/action-gh-release@v2
+       with:
+         tag_name: 0.0.1
+         name: 0.0.1
+         draft: true
+         token: ${{ github.token }}
+         target_commitish: ${{ github.sha }}
+         files: |
+           bin/cattery
