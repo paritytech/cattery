@@ -1,0 +1,30 @@
+name: Docker build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY_PATH: "paritytech/cattery"
+
+jobs:
+  Build:
+    runs-on: parity-default
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          file: ./Dockerfile
+          tags: |
+            ${{ env.REGISTRY_PATH }}:${{ github.sha }}
+            ${{ env.REGISTRY_PATH }}:latest            
+          push: false
+          build-args: |
+            VCS_REF=${{ github.sha }}       
