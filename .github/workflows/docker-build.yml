@@ -13,7 +13,7 @@ env:
 
 jobs:
   Build:
-    runs-on: parity-default
+    runs-on: cattery-gce
     steps:
       - uses: actions/checkout@v4
 
