@@ -1,2 +1,6 @@
 Dockerfile
 bin/
+examples/
+README.MD
+LICENCE
+.github/

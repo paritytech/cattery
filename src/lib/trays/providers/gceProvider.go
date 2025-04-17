@@ -12,8 +12,6 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
-	"strconv"
-	"strings"
 )
 
 type GceProvider struct {
@@ -56,60 +54,30 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 	defer instancesClient.Close()
 
 	var (
-		project = g.providerConfig.Get("project")
-
-		zone           = tray.TrayConfig().Get("zone")
-		machineType    = tray.TrayConfig().Get("machineType")
-		tags           = strings.Split(tray.TrayConfig().Get("tags"), ",")
-		preemptible, _ = strconv.ParseBool(tray.TrayConfig().Get("preemptible"))
-		network        = tray.TrayConfig().Get("network")
-		subnetwork     = tray.TrayConfig().Get("subnetwork")
+		project          = g.providerConfig.Get("project")
+		instanceTemplate = tray.TrayConfig().Get("instanceTemplate")
+		zone             = tray.TrayConfig().Get("zone")
+		machineType      = tray.TrayConfig().Get("machineType")
 	)
 
-	var agentStartupCommand = fmt.Sprintf("cattery agent -i %s -s %s -r %s", tray.Id(), config.AppConfig.Server.AdvertiseUrl, "/actions-runner")
-
 	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
-		Project: project,
-		Zone:    zone,
+		Project:                project,
+		Zone:                   zone,
+		SourceInstanceTemplate: &instanceTemplate,
 		InstanceResource: &computepb.Instance{
+			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
+			Name:        proto.String(tray.Id()),
 			Metadata: &computepb.Metadata{
 				Items: []*computepb.Items{
 					{
-						Key:   proto.String("startup-script"),
-						Value: proto.String(startupScript + "\n" + agentStartupCommand),
+						Key:   proto.String("cattery-url"),
+						Value: proto.String(config.AppConfig.Server.AdvertiseUrl),
+					},
+					{
+						Key:   proto.String("cattery-agent-id"),
+						Value: proto.String(tray.Id()),
 					},
 				},
-			},
-			Scheduling: &computepb.Scheduling{
-				Preemptible: proto.Bool(preemptible),
-			},
-			Disks: []*computepb.AttachedDisk{
-				{
-					AutoDelete: proto.Bool(true),
-					Boot:       proto.Bool(true),
-					InitializeParams: &computepb.AttachedDiskInitializeParams{
-						DiskSizeGb:  proto.Int64(10),
-						DiskType:    proto.String(fmt.Sprintf("zones/%s/diskTypes/pd-standard", zone)),
-						SourceImage: proto.String("https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/ubuntu-2404-noble-amd64-v20250313"),
-					},
-					Type: proto.String(computepb.AttachedDisk_PERSISTENT.String()),
-				},
-			},
-			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
-			Name:        proto.String(tray.Id()),
-			NetworkInterfaces: []*computepb.NetworkInterface{
-				{
-					AccessConfigs: []*computepb.AccessConfig{
-						{
-							NetworkTier: proto.String(computepb.AccessConfig_STANDARD.String()),
-						},
-					},
-					Network:    proto.String(network),
-					Subnetwork: proto.String(subnetwork),
-				},
-			},
-			Tags: &computepb.Tags{
-				Items: tags,
 			},
 		},
 	})
@@ -178,7 +146,8 @@ func (g GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
 	return instancesClient, err
 }
 
-var startupScript = `#! /bin/bash
+/*
+vr startupScript = `#! /bin/bash
 apt-get update
 apt-get install -y git dotnet-runtime-8.0 golang-go tar curl
 
@@ -196,3 +165,4 @@ export GOMODCACHE=$HOME/golang/pkg/mod
 export HOME=/root
 go build -o /usr/local/bin/cattery
 `
+*/

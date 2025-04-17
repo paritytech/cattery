@@ -150,14 +150,15 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		webhookData.WorkflowJob.Labels,
 		*trayType)
 
+	_ = traysStore.Save(tray)
+
 	err = provider.RunTray(tray)
 	if err != nil {
 		logger.Errorf("Error creating tray for provider: %s, tray: %s: %v", tray.Provider(), tray.Id(), err)
 		http.Error(responseWriter, "Error creating tray", http.StatusInternalServerError)
+		_ = traysStore.Delete(tray.Id())
 		return
 	}
-
-	_ = traysStore.Save(tray)
 
 	logger.Infof("Run tray %s", tray.Id())
 }
