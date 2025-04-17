@@ -78,6 +78,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY_PATH }}:${{ env.VERSION }}
             ${{ env.REGISTRY_PATH }}:latest
-          push: false
+          push: true
           build-args: |
             CATTERY_VERSION=${{ env.VERSION }}
