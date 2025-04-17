@@ -57,7 +57,7 @@ jobs:
     runs-on: cattery-gce
     environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
     env:
-      REGISTRY_PATH: ${{ github.event_name == 'workflow_dispatch' && 'paritytech/cattery' || 'paritypr/cattery' }}
+      REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}
       VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
     steps:
       - uses: actions/checkout@v4
