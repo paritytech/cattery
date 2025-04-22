@@ -13,7 +13,6 @@ WORKDIR /cattery-agent
 
 COPY . .
 
-RUN go build -o /usr/local/bin/cattery-agent
-RUN cattery-agent --help
+RUN go build -o /action-runner/cattery/cattery
 
-ENTRYPOINT ["cattery-agent", "agent", "-r","/action-runner", "-s", "http://10.10.10.116:5137"]
+#ENTRYPOINT ["/action-runner/cattery/cattery", "agent", "-r","/action-runner", "-s", "http://10.10.10.116:5137"]
