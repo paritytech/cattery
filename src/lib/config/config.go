@@ -3,17 +3,19 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/spf13/viper"
 	"strings"
+
+	"github.com/go-playground/validator"
+	"github.com/spf13/viper"
 )
 
 var AppConfig = &CatteryConfig{}
 
 type CatteryConfig struct {
-	Server    ServerConfig
-	Github    []*GitHubOrganization
-	Providers []*ProviderConfig
-	TrayTypes []*TrayType
+	Server    ServerConfig          `yaml:"server" validate:"required"`
+	Github    []*GitHubOrganization `yaml:"github" validate:"required,dive,required"`
+	Providers []*ProviderConfig     `yaml:"providers" validate:"required,dive,required"`
+	TrayTypes []*TrayType           `yaml:"trayTypes" validate:"required,dive,required"`
 
 	githubMap    map[string]*GitHubOrganization
 	providerMap  map[string]*ProviderConfig
@@ -63,6 +65,16 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	}
 
 	AppConfig = appConfig
+
+	validate := validator.New()
+	err = validate.Struct(AppConfig)
+	if err != nil {
+		// err is of type validator.ValidationErrors
+		for _, fieldErr := range err.(validator.ValidationErrors) {
+			return nil, fmt.Errorf("Validation failed on field '%s' for tag '%s'\n", fieldErr.Namespace(), fieldErr.Tag())
+		}
+	}
+
 	return appConfig, nil
 }
 
@@ -94,24 +106,24 @@ func (c *CatteryConfig) GetTrayType(name string) *TrayType {
 }
 
 type ServerConfig struct {
-	ListenAddress string
-	AdvertiseUrl  string
+	ListenAddress string `yaml:"listenAddress" validate:"required"`
+	AdvertiseUrl  string `yaml:"advertiseUrl" validate:"required"`
 }
 
 type GitHubOrganization struct {
-	Name           string
-	AppId          int64
-	InstallationId int64
-	WebhookSecret  string
-	PrivateKeyPath string
+	Name           string `yaml:"name" validate:"required"`
+	AppId          int64  `yaml:"appId" validate:"required"`
+	InstallationId int64  `yaml:"installationId" validate:"required"`
+	WebhookSecret  string `yaml:"webhookSecret"`
+	PrivateKeyPath string `yaml:"privateKeyPath"`
 }
 
 type TrayType struct {
-	Name          string
-	Provider      string
-	RunnerGroupId int64
+	Name          string `yaml:"name" validate:"required"`
+	Provider      string `yaml:"provider" validate:"required"`
+	RunnerGroupId int64  `yaml:"runnerGroupId" validate:"required"`
 	Shutdown      bool
-	GitHubOrg     string
+	GitHubOrg     string `yaml:"githubOrg" validate:"required"`
 	Config        TrayConfig
 }
 

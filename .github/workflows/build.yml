@@ -1,0 +1,81 @@
+name: Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag_name:
+          description: 'Tag name'
+          required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build:
+    permissions:
+      contents: write
+    runs-on: cattery-gce
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
+    steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
+
+     - name: Set up Go
+       uses: actions/setup-go@v5
+       with:
+         go-version: '1.24'
+
+     - name: Install dependencies
+       run: go mod download -C src
+
+     - name: Build
+       run: go build -C src -o ../bin/cattery_linux_x86_${{ env.VERSION }} -ldflags="-X cattery/cmd.Version=${{ env.VERSION }}"
+
+     - run: ls -la bin/
+
+     - name: create-release
+       if: github.event_name == 'workflow_dispatch'
+       uses: softprops/action-gh-release@v2
+       with:
+         tag_name: ${{ github.event.inputs.tag_name }}
+         name: v${{ github.event.inputs.tag_name }}
+         draft: true
+         token: ${{ github.token }}
+         target_commitish: ${{ github.sha }}
+         files: |
+           bin/cattery*
+
+  docker-build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push')
+    runs-on: cattery-gce
+    environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
+    env:
+      REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}/cattery
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: docker build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          file: ./Dockerfile
+          tags: |
+            ${{ env.REGISTRY_PATH }}:${{ env.VERSION }}
+            ${{ env.REGISTRY_PATH }}:latest
+          push: true
+          build-args: |
+            CATTERY_VERSION=${{ env.VERSION }}
