@@ -13,6 +13,7 @@ var AppConfig = &CatteryConfig{}
 
 type CatteryConfig struct {
 	Server    ServerConfig          `yaml:"server" validate:"required"`
+	Database  DatabaseConfig        `yaml:"database" validate:"required"`
 	Github    []*GitHubOrganization `yaml:"github" validate:"required,dive,required"`
 	Providers []*ProviderConfig     `yaml:"providers" validate:"required,dive,required"`
 	TrayTypes []*TrayType           `yaml:"trayTypes" validate:"required,dive,required"`
@@ -110,6 +111,13 @@ type ServerConfig struct {
 	AdvertiseUrl  string `yaml:"advertiseUrl" validate:"required"`
 }
 
+type DatabaseConfig struct {
+	Uri      string `yaml:"uri" validate:"required"`
+	Database string `yaml:"database" validate:"required"`
+	Username string `yaml:"username" validate:"required"`
+	Password string `yaml:"password" validate:"required"`
+}
+
 type GitHubOrganization struct {
 	Name           string `yaml:"name" validate:"required"`
 	AppId          int64  `yaml:"appId" validate:"required"`
@@ -122,8 +130,9 @@ type TrayType struct {
 	Name          string `yaml:"name" validate:"required"`
 	Provider      string `yaml:"provider" validate:"required"`
 	RunnerGroupId int64  `yaml:"runnerGroupId" validate:"required"`
-	Shutdown      bool
+	Shutdown      bool   `yaml:"shutdown"`
 	GitHubOrg     string `yaml:"githubOrg" validate:"required"`
+	Limit         int    `yaml:"limit"`
 	Config        TrayConfig
 }
 

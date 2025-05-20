@@ -8,11 +8,12 @@ import (
 )
 
 type Tray struct {
-	id       string
-	labels   []string
-	trayType config.TrayType
+	id       string          `bson:"id"`
+	labels   []string        `bson:"labels"`
+	trayType config.TrayType `bson:"-"`
 
-	JobRunId int64
+	JobRunId int64  `bson:"jobRunId"`
+	Status   string `bson:"status"`
 }
 
 func NewTray(
@@ -27,6 +28,7 @@ func NewTray(
 		id:       fmt.Sprintf("%s-%s", trayType.Name, id),
 		labels:   labels,
 		trayType: trayType,
+		Status:   "pending",
 	}
 
 	return tray
