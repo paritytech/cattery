@@ -5,6 +5,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"sync"
 )
 
@@ -120,7 +121,7 @@ func (m *MongoSyncMap[T, Y]) Get(key T) *Y {
 func (m *MongoSyncMap[T, Y]) Set(key T, value *Y) error {
 	m.waitGroup.Wait()
 
-	_, err := m.collection.InsertOne(context.Background(), value)
+	_, err := m.collection.UpdateOne(context.Background(), bson.M{m.idField: key}, value, options.UpdateOne().SetUpsert(true))
 	if err != nil {
 		return err
 	}
@@ -132,7 +133,7 @@ func (m *MongoSyncMap[T, Y]) Set(key T, value *Y) error {
 func (m *MongoSyncMap[T, Y]) Delete(key T) error {
 	m.waitGroup.Wait()
 
-	_, err := m.collection.DeleteOne(context.Background(), bson.M{"_id": key})
+	_, err := m.collection.DeleteOne(context.Background(), bson.M{m.idField: key})
 	if err != nil {
 		return err
 	}

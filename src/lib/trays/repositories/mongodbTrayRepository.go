@@ -1,54 +1,41 @@
 package repositories
 
 import (
-	"cattery/lib/maps"
 	"cattery/lib/trays"
 	"context"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"strings"
+	"time"
 )
-
-var traysDictionary = maps.NewMongoSyncMap[string, trays.Tray]("id", true)
 
 type MongodbTrayRepository struct {
 	uri        string
 	collection *mongo.Collection
 }
 
-func NewMongodbTrayRepository(uri string) *MongodbTrayRepository {
-	return &MongodbTrayRepository{
-		uri: uri,
-	}
+func NewMongodbTrayRepository() *MongodbTrayRepository {
+	return &MongodbTrayRepository{}
 }
 
-func (m MongodbTrayRepository) Connect(ctx context.Context) error {
-
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(m.uri).SetServerAPIOptions(serverAPI)
-
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		panic(err)
-	}
-
-	m.collection = client.Database("cattery").Collection("trays")
-
-	err = traysDictionary.Load(m.collection)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (m MongodbTrayRepository) Connect(collection *mongo.Collection) {
+	m.collection = collection
 }
 
 func (m MongodbTrayRepository) Get(trayId string) (*trays.Tray, error) {
-	return traysDictionary.Get(trayId), nil
+	dbResult := m.collection.FindOne(context.Background(), bson.M{"trayId": trayId})
+
+	var result trays.Tray
+	err := dbResult.Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
 
 func (m MongodbTrayRepository) Save(tray *trays.Tray) error {
-	traysDictionary.Set(tray.Id(), tray)
+	tray.StatusChanged = time.Now().UTC()
 	_, err := m.collection.InsertOne(context.Background(), tray)
 	if err != nil {
 		return err
@@ -57,8 +44,24 @@ func (m MongodbTrayRepository) Save(tray *trays.Tray) error {
 	return nil
 }
 
+func (m MongodbTrayRepository) UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64) (*trays.Tray, error) {
+
+	dbResult := m.collection.FindOneAndUpdate(
+		context.Background(),
+		bson.M{"trayId": trayId},
+		bson.M{"$set": bson.M{"status": status, "statusChanged": time.Now().UTC(), "jobRunId": jobRunId}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After))
+
+	var result trays.Tray
+	err := dbResult.Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 func (m MongodbTrayRepository) Delete(trayId string) error {
-	traysDictionary.Delete(trayId)
 	_, err := m.collection.DeleteOne(context.Background(), bson.M{"_id": trayId})
 	if err != nil {
 		return err
@@ -67,17 +70,11 @@ func (m MongodbTrayRepository) Delete(trayId string) error {
 	return nil
 }
 
-func (m MongodbTrayRepository) Len() int {
-	return traysDictionary.Len()
-}
-
-func (m MongodbTrayRepository) GetGroupByLabels() map[string][]*trays.Tray {
-	groupedTrays := make(map[string][]*trays.Tray)
-
-	for _, tray := range traysDictionary.GetAll() {
-		var joinedLabels = strings.Join(tray.Labels(), ";")
-		groupedTrays[joinedLabels] = append(groupedTrays[joinedLabels], tray)
+func (m MongodbTrayRepository) CountByTrayType(trayType string) (int64, error) {
+	count, err := m.collection.CountDocuments(context.Background(), bson.M{"trayType": trayType, "status": bson.M{"$ne": trays.TrayStatusDeleting}})
+	if err != nil {
+		return 0, err
 	}
 
-	return groupedTrays
+	return count, nil
 }

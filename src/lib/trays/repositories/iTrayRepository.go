@@ -6,6 +6,6 @@ type ITrayRepository interface {
 	Get(trayId string) (*trays.Tray, error)
 	Save(tray *trays.Tray) error
 	Delete(trayId string) error
-	GetGroupByLabels() map[string][]*trays.Tray
-	Len() int
+	UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64) (*trays.Tray, error)
+	CountByTrayType(trayType string) (int64, error)
 }

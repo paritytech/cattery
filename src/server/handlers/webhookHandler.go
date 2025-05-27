@@ -2,9 +2,8 @@ package handlers
 
 import (
 	"cattery/lib/config"
-	"cattery/lib/repositories"
-	"cattery/lib/trays"
-	"cattery/lib/trays/providers"
+	"cattery/lib/jobs"
+	"cattery/server/jobQueue"
 	"fmt"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
@@ -15,7 +14,7 @@ var logger = log.WithFields(log.Fields{
 	"name": "server",
 })
 
-var traysStore = repositories.NewMemTrayRepository()
+var QueueManager = jobQueue.NewQueueManager(false)
 
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
@@ -57,7 +56,8 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Event payload: %v", payload)
 
-	if getTrayType(webhookData) == nil {
+	var trayType = getTrayType(webhookData)
+	if trayType == nil {
 		logger.Tracef("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
 		return
 	}
@@ -65,13 +65,16 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
 	logger.Debugf("Action: %s", webhookData.GetAction())
 
+	var job = jobs.FromGithubModel(webhookData)
+	job.TrayType = trayType.Name
+
 	switch webhookData.GetAction() {
 	case "queued":
-		handleQueuedWorkflowJob(responseWriter, logger, webhookData)
+		handleQueuedWorkflowJob(responseWriter, logger, job)
 	case "in_progress":
-		handleInProgressWorkflowJob(responseWriter, logger, webhookData)
+		handleInProgressWorkflowJob(responseWriter, logger, job)
 	case "completed":
-		handleCompletedWorkflowJob(responseWriter, logger, webhookData)
+		handleCompletedWorkflowJob(responseWriter, logger, job)
 	default:
 		logger.Debugf("Ignoring action: '%s', for job '%s'", webhookData.GetAction(), *webhookData.WorkflowJob.Name)
 		return
@@ -80,87 +83,44 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 // handleCompletedWorkflowJob
 // handles the 'completed' action of the workflow job event
-func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
+func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	var tray, _ = traysStore.Get(webhookData.WorkflowJob.GetRunnerName())
-	if tray == nil {
-		logger.Debugf("Tray '%s' not found", webhookData.WorkflowJob.GetRunnerName())
-		return
-	}
-
-	provider, err := providers.GetProvider(tray.Provider())
+	err := QueueManager.JobFinished(job.Id, job.RunnerName)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray '%s': %v", tray.Provider(), tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
-
-	err = provider.CleanTray(tray)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to clean tray '%s': %v", tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-
-	_ = traysStore.Delete(tray.Id())
 }
 
 // handleInProgressWorkflowJob
 // handles the 'in_progress' action of the workflow job event
-func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
+func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	var tray, _ = traysStore.Get(webhookData.WorkflowJob.GetRunnerName())
-	if tray == nil {
-		logger.Debugf("Tray '%s' not found", webhookData.WorkflowJob.GetRunnerName())
-		return
+	err := QueueManager.JobInProgress(job.Id, job.RunnerName)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to mark job '%s/%s' as in progress: %v", job.WorkflowName, job.Name, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	tray.JobRunId = webhookData.WorkflowJob.GetID()
-
 	logger.Infof("Tray '%s' is running '%s/%s' in '%s/%s'",
-		tray.Id(),
-		webhookData.WorkflowJob.GetWorkflowName(), webhookData.WorkflowJob.GetName(),
-		webhookData.GetOrg().GetLogin(), webhookData.GetRepo().GetName(),
+		job.RunnerName,
+		job.WorkflowName, job.Name,
+		job.Organization, job.Repository,
 	)
 }
 
 // handleQueuedWorkflowJob
 // handles the 'handleQueuedWorkflowJob' action of the workflow job event
-func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, webhookData *github.WorkflowJobEvent) {
-
-	trayType := getTrayType(webhookData)
-
-	if trayType == nil {
-		logger.Debugf("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
-		return
-	}
-
-	provider, err := providers.GetProvider(trayType.Provider)
+func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
+	err := QueueManager.AddJob(job)
 	if err != nil {
-		var errMsg = "Error getting provider for tray type: " + trayType.Provider
+		var errMsg = fmt.Sprintf("Failed to enqueue job '%s/%s/%s': %v", job.Repository, job.WorkflowName, job.Name, err)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	//var organizationName = webhookData.GetOrg().GetLogin()
-	tray := trays.NewTray(
-		webhookData.WorkflowJob.Labels,
-		*trayType)
-
-	_ = traysStore.Save(tray)
-
-	err = provider.RunTray(tray)
-	if err != nil {
-		logger.Errorf("Error creating tray for provider: %s, tray: %s: %v", tray.Provider(), tray.Id(), err)
-		http.Error(responseWriter, "Error creating tray", http.StatusInternalServerError)
-		_ = traysStore.Delete(tray.Id())
-		return
-	}
-
-	logger.Infof("Run tray %s", tray.Id())
+	logger.Infof("Enqueued job %s/%s/%s ", job.Repository, job.WorkflowName, job.Name)
 }
 
 func getTrayType(webhookData *github.WorkflowJobEvent) *config.TrayType {

@@ -5,30 +5,33 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"time"
 )
 
 type Tray struct {
-	id       string          `bson:"id"`
-	labels   []string        `bson:"labels"`
-	trayType config.TrayType `bson:"-"`
+	id             string          `bson:"id"`
+	trayType       string          `bson:"labels"`
+	trayTypeConfig config.TrayType `bson:"-"`
 
-	JobRunId int64  `bson:"jobRunId"`
-	Status   string `bson:"status"`
+	gitHubOrgName string     `bson:"githubOrgName"`
+	JobRunId      int64      `bson:"jobRunId"`
+	Status        TrayStatus `bson:"status"`
+	StatusChanged time.Time  `bson:"statusChange"`
 }
 
-func NewTray(
-	labels []string,
-	trayType config.TrayType) *Tray {
+func NewTray(trayType config.TrayType) *Tray {
 
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:       fmt.Sprintf("%s-%s", trayType.Name, id),
-		labels:   labels,
-		trayType: trayType,
-		Status:   "pending",
+		id:             fmt.Sprintf("%s-%s", trayType.Name, id),
+		trayType:       trayType.Name,
+		trayTypeConfig: trayType,
+		Status:         TrayStatusCreating,
+		gitHubOrgName:  trayType.GitHubOrg,
+		JobRunId:       0,
 	}
 
 	return tray
@@ -39,29 +42,29 @@ func (tray *Tray) Id() string {
 }
 
 func (tray *Tray) GitHubOrgName() string {
-	return tray.trayType.GitHubOrg
+	return tray.gitHubOrgName
 }
 
 func (tray *Tray) TypeName() string {
-	return tray.trayType.Name
+	return tray.trayTypeConfig.Name
 }
 
 func (tray *Tray) Provider() string {
-	return tray.trayType.Provider
+	return tray.trayTypeConfig.Provider
 }
 
-func (tray *Tray) Labels() []string {
-	return tray.labels
+func (tray *Tray) TrayType() string {
+	return tray.trayType
 }
 
 func (tray *Tray) TrayConfig() config.TrayConfig {
-	return tray.trayType.Config
+	return tray.trayTypeConfig.Config
 }
 
 func (tray *Tray) RunnerGroupId() int64 {
-	return tray.trayType.RunnerGroupId
+	return tray.trayTypeConfig.RunnerGroupId
 }
 
 func (tray *Tray) Shutdown() bool {
-	return tray.trayType.Shutdown
+	return tray.trayTypeConfig.Shutdown
 }
