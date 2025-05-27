@@ -33,6 +33,16 @@ func Start() {
 		Handler: webhookMux,
 	}
 
+	err := handlers.QueueManager.Connect(config.AppConfig.Database.Uri)
+	if err != nil {
+		logger.Errorf("Error connecting to database: %v", err)
+	}
+
+	err = handlers.QueueManager.Load()
+	if err != nil {
+		logger.Errorf("Error loading queue manager: %v", err)
+	}
+
 	go func() {
 		log.Println("Starting webhook server on", config.AppConfig.Server.ListenAddress)
 		err := webhookServer.ListenAndServe()

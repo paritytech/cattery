@@ -5,12 +5,6 @@ import (
 	"sync"
 )
 
-type ITrayRepository interface {
-	Get(trayId string) (*trays.Tray, error)
-	Save(tray *trays.Tray) error
-	Delete(trayId string) error
-}
-
 type MemTrayRepository struct {
 	ITrayRepository
 	trays map[string]*trays.Tray
@@ -50,4 +44,11 @@ func (r *MemTrayRepository) Delete(trayId string) error {
 
 	delete(r.trays, trayId)
 	return nil
+}
+
+func (r *MemTrayRepository) Len() int {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return len(r.trays)
 }
