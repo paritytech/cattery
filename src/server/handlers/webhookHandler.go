@@ -3,7 +3,6 @@ package handlers
 import (
 	"cattery/lib/config"
 	"cattery/lib/jobs"
-	"cattery/server/jobQueue"
 	"fmt"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
@@ -13,8 +12,6 @@ import (
 var logger = log.WithFields(log.Fields{
 	"name": "server",
 })
-
-var QueueManager = jobQueue.NewQueueManager(false)
 
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
@@ -85,9 +82,9 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 // handles the 'completed' action of the workflow job event
 func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	err := QueueManager.JobFinished(job.Id, job.RunnerName)
+	err := TrayManager.DeleteTray(job.RunnerName)
 	if err != nil {
-		return
+		logger.Errorf("Error deleting tray: %v", err)
 	}
 }
 

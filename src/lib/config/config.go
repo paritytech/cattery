@@ -114,8 +114,6 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	Uri      string `yaml:"uri" validate:"required"`
 	Database string `yaml:"database" validate:"required"`
-	Username string `yaml:"username" validate:"required"`
-	Password string `yaml:"password" validate:"required"`
 }
 
 type GitHubOrganization struct {
@@ -132,7 +130,7 @@ type TrayType struct {
 	RunnerGroupId int64  `yaml:"runnerGroupId" validate:"required"`
 	Shutdown      bool   `yaml:"shutdown"`
 	GitHubOrg     string `yaml:"githubOrg" validate:"required"`
-	Limit         int    `yaml:"limit"`
+	MaxTrays      int    `yaml:"limit"`
 	Config        TrayConfig
 }
 

@@ -11,7 +11,7 @@ type Job struct {
 	Repository   string   `bson:"repository"`
 	Organization string   `bson:"organization"`
 	Labels       []string `bson:"labels"`
-	RunnerName   string   `bson:"runnerName,omitempty"`
+	RunnerName   string   `bson:"runnerName"`
 	TrayType     string   `bson:"trayType"`
 }
 

@@ -23,6 +23,10 @@ func (qm *JobQueue) GetGroup(groupName string) map[int64]jobs.Job {
 	qm.rwMutex.RLock()
 	defer qm.rwMutex.RUnlock()
 
+	return qm.getGroup(groupName)
+}
+
+func (qm *JobQueue) getGroup(groupName string) map[int64]jobs.Job {
 	if group, ok := qm.groups[groupName]; ok {
 		return group
 	}
@@ -54,7 +58,7 @@ func (qm *JobQueue) Add(job *jobs.Job) {
 
 	qm.jobs[job.Id] = *job
 
-	var group = qm.GetGroup(job.TrayType)
+	var group = qm.getGroup(job.TrayType)
 	group[job.Id] = *job
 }
 
@@ -66,7 +70,7 @@ func (qm *JobQueue) Delete(jobId int64) {
 
 		delete(qm.jobs, jobId)
 
-		var group = qm.GetGroup(job.TrayType)
+		var group = qm.getGroup(job.TrayType)
 		delete(group, job.Id)
 	}
 

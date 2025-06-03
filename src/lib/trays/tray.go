@@ -9,11 +9,11 @@ import (
 )
 
 type Tray struct {
-	id             string          `bson:"id"`
-	trayType       string          `bson:"labels"`
-	trayTypeConfig config.TrayType `bson:"-"`
+	Id             string `bson:"id"`
+	TrayType       string `bson:"trayType"`
+	trayTypeConfig config.TrayType
 
-	gitHubOrgName string     `bson:"githubOrgName"`
+	GitHubOrgName string     `bson:"gitHubOrgName"`
 	JobRunId      int64      `bson:"jobRunId"`
 	Status        TrayStatus `bson:"status"`
 	StatusChanged time.Time  `bson:"statusChange"`
@@ -26,45 +26,41 @@ func NewTray(trayType config.TrayType) *Tray {
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:             fmt.Sprintf("%s-%s", trayType.Name, id),
-		trayType:       trayType.Name,
+		Id:             fmt.Sprintf("%s-%s", trayType.Name, id),
+		TrayType:       trayType.Name,
 		trayTypeConfig: trayType,
 		Status:         TrayStatusCreating,
-		gitHubOrgName:  trayType.GitHubOrg,
+		GitHubOrgName:  trayType.GitHubOrg,
 		JobRunId:       0,
 	}
 
 	return tray
 }
 
-func (tray *Tray) Id() string {
-	return tray.id
+func (tray *Tray) GetId() string {
+	return tray.Id
 }
 
-func (tray *Tray) GitHubOrgName() string {
-	return tray.gitHubOrgName
-}
-
-func (tray *Tray) TypeName() string {
-	return tray.trayTypeConfig.Name
+func (tray *Tray) GetGitHubOrgName() string {
+	return tray.GitHubOrgName
 }
 
 func (tray *Tray) Provider() string {
 	return tray.trayTypeConfig.Provider
 }
 
-func (tray *Tray) TrayType() string {
-	return tray.trayType
+func (tray *Tray) GetTrayType() string {
+	return tray.TrayType
 }
 
-func (tray *Tray) TrayConfig() config.TrayConfig {
+func (tray *Tray) GetTrayConfig() config.TrayConfig {
 	return tray.trayTypeConfig.Config
 }
 
-func (tray *Tray) RunnerGroupId() int64 {
+func (tray *Tray) GetRunnerGroupId() int64 {
 	return tray.trayTypeConfig.RunnerGroupId
 }
 
-func (tray *Tray) Shutdown() bool {
+func (tray *Tray) GetShutdown() bool {
 	return tray.trayTypeConfig.Shutdown
 }

@@ -3,9 +3,7 @@ package jobQueue
 import (
 	"cattery/lib/config"
 	"cattery/lib/jobs"
-	"cattery/lib/trays"
-	"cattery/lib/trays/providers"
-	"cattery/lib/trays/repositories"
+	"cattery/lib/trayManager"
 	"context"
 	"errors"
 	log "github.com/sirupsen/logrus"
@@ -16,44 +14,33 @@ import (
 )
 
 type QueueManager struct {
-	TraysStore *repositories.MongodbTrayRepository
-	jobQueue   *JobQueue
-	waitGroup  sync.WaitGroup
-	listen     bool
+	trayManager *trayManager.TrayManager
+	jobQueue    *JobQueue
+	waitGroup   sync.WaitGroup
+	listen      bool
 
-	client       *mongo.Client
+	collection   *mongo.Collection
 	changeStream *mongo.ChangeStream
 }
 
-func NewQueueManager(listen bool) *QueueManager {
+func NewQueueManager(trayManager *trayManager.TrayManager, listen bool) *QueueManager {
 	return &QueueManager{
-		TraysStore: repositories.NewMongodbTrayRepository(),
-		jobQueue:   NewJobQueue(),
-		waitGroup:  sync.WaitGroup{},
-		listen:     listen,
+		trayManager: trayManager,
+		jobQueue:    NewJobQueue(),
+		waitGroup:   sync.WaitGroup{},
+		listen:      listen,
 	}
 }
 
-func (qm *QueueManager) Connect(uri string) error {
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI)
-
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		return err
-	}
-
-	qm.TraysStore.Connect(client.Database("cattery").Collection("trays"))
-	qm.client = client
-
-	return nil
+func (qm *QueueManager) Connect(collection *mongo.Collection) {
+	qm.collection = collection
 }
 
 func (qm *QueueManager) Load() error {
 	qm.waitGroup.Add(1)
 	defer qm.waitGroup.Done()
 
-	collection := qm.client.Database("cattery").Collection("jobs")
+	collection := qm.collection
 
 	if qm.listen {
 		changeStream, err := collection.Watch(nil, mongo.Pipeline{}, options.ChangeStream().SetFullDocument(options.UpdateLookup))
@@ -111,7 +98,7 @@ func (qm *QueueManager) Load() error {
 
 func (qm *QueueManager) AddJob(job *jobs.Job) error {
 	qm.jobQueue.Add(job)
-	_, err := qm.client.Database("cattery").Collection("jobs").InsertOne(context.Background(), job)
+	_, err := qm.collection.InsertOne(context.Background(), job)
 	if err != nil {
 		return err
 	}
@@ -131,32 +118,7 @@ func (qm *QueueManager) JobInProgress(jobId int64, trayId string) error {
 		return errors.New("No job found with id ")
 	}
 
-	_, err := qm.TraysStore.UpdateStatus(trayId, trays.TrayStatusRunning, job.Id)
-	if err != nil {
-		return err
-	}
-
-	err = qm.deleteJob(jobId)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (qm *QueueManager) JobFinished(jobId int64, trayId string) error {
-	job := qm.jobQueue.Get(jobId)
-	if job == nil {
-		log.Errorf("No job found with id %v", jobId)
-		return errors.New("No job found with id ")
-	}
-
 	err := qm.deleteJob(jobId)
-	if err != nil {
-		return err
-	}
-
-	err = qm.deleteTray(trayId)
 	if err != nil {
 		return err
 	}
@@ -197,7 +159,7 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 
 func (qm *QueueManager) deleteJob(jobId int64) error {
 	qm.jobQueue.Delete(jobId)
-	_, err := qm.client.Database("cattery").Collection("jobs").DeleteOne(context.Background(), bson.M{"id": jobId})
+	_, err := qm.collection.DeleteOne(context.Background(), bson.M{"id": jobId})
 	if err != nil {
 		return err
 	}
@@ -208,26 +170,12 @@ func (qm *QueueManager) deleteJob(jobId int64) error {
 func (qm *QueueManager) Reconcile(trayTypeName string) error {
 
 	var trayType = getTrayType(trayTypeName)
-	traysCount64, err := qm.TraysStore.CountByTrayType(trayTypeName)
-	if err != nil {
-		return err
-	}
 
 	var jobsInQueue = len(qm.jobQueue.GetGroup(trayTypeName))
 
-	var traysCount = int(traysCount64)
-	var availableTraysCount = trayType.Limit - traysCount
-
-	if availableTraysCount > jobsInQueue {
-		err := qm.createTrays(trayType, jobsInQueue)
-		if err != nil {
-			return err
-		}
-	} else {
-		err := qm.createTrays(trayType, availableTraysCount)
-		if err != nil {
-			return err
-		}
+	err := qm.trayManager.CreateTrays(trayType, jobsInQueue)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -241,62 +189,4 @@ func getTrayType(trayTypeName string) *config.TrayType {
 	}
 
 	return trayType
-}
-
-func (qm *QueueManager) createTrays(trayType *config.TrayType, n int) error {
-	for i := 0; i < n; i++ {
-		err := qm.createTray(trayType)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (qm *QueueManager) createTray(trayType *config.TrayType) error {
-
-	provider, err := providers.GetProvider(trayType.Provider)
-	if err != nil {
-		return err
-	}
-
-	tray := trays.NewTray(*trayType)
-
-	_ = qm.TraysStore.Save(tray)
-
-	err = provider.RunTray(tray)
-	if err != nil {
-		log.Errorf("Error creating tray for provider: %s, tray: %s: %v", tray.Provider(), tray.Id(), err)
-		return err
-	}
-
-	return nil
-}
-
-func (qm *QueueManager) deleteTray(trayId string) error {
-	tray, err := qm.TraysStore.Get(trayId)
-	if err != nil {
-		return err
-	}
-	if tray == nil {
-		return nil // Tray not found, nothing to delete
-	}
-
-	provider, err := providers.GetProvider(tray.Provider())
-	if err != nil {
-		return err
-	}
-
-	err = provider.CleanTray(tray)
-	if err != nil {
-		log.Errorf("Error deleting tray for provider: %s, tray: %s: %v", tray.Provider(), tray.Id(), err)
-		return err
-	}
-
-	err = qm.TraysStore.Delete(trayId)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
