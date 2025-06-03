@@ -55,9 +55,9 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 
 	var (
 		project          = g.providerConfig.Get("project")
-		instanceTemplate = tray.TrayConfig().Get("instanceTemplate")
-		zone             = tray.TrayConfig().Get("zone")
-		machineType      = tray.TrayConfig().Get("machineType")
+		instanceTemplate = tray.GetTrayConfig().Get("instanceTemplate")
+		zone             = tray.GetTrayConfig().Get("zone")
+		machineType      = tray.GetTrayConfig().Get("machineType")
 	)
 
 	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
@@ -66,7 +66,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 		SourceInstanceTemplate: &instanceTemplate,
 		InstanceResource: &computepb.Instance{
 			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
-			Name:        proto.String(tray.Id()),
+			Name:        proto.String(tray.GetId()),
 			Metadata: &computepb.Metadata{
 				Items: []*computepb.Items{
 					{
@@ -75,7 +75,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 					},
 					{
 						Key:   proto.String("cattery-agent-id"),
-						Value: proto.String(tray.Id()),
+						Value: proto.String(tray.GetId()),
 					},
 				},
 			},
@@ -96,12 +96,12 @@ func (g GceProvider) CleanTray(tray *trays.Tray) error {
 	}
 
 	var (
-		zone    = tray.TrayConfig().Get("zone")
+		zone    = tray.GetTrayConfig().Get("zone")
 		project = g.providerConfig.Get("project")
 	)
 
 	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
-		Instance: tray.Id(),
+		Instance: tray.GetId(),
 		Project:  project,
 		Zone:     zone,
 	})
@@ -111,7 +111,7 @@ func (g GceProvider) CleanTray(tray *trays.Tray) error {
 			if e.Code != 404 {
 				return err
 			} else {
-				g.logger.Tracef("Tray deletion error, tray %s not found: %v", tray.Id(), err)
+				g.logger.Tracef("Tray deletion error, tray %s not found: %v", tray.GetId(), err)
 			}
 		}
 		return err

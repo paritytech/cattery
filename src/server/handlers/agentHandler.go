@@ -5,9 +5,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
-	"cattery/lib/trays/providers"
 	"encoding/json"
-	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net/http"
@@ -32,29 +30,29 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugln("Agent registration request")
 
-	var tray, _ = traysStore.Get(agentId)
-	if tray == nil {
-		var err = errors.New(fmt.Sprintf("tray '%s' not found", agentId))
-		logger.Errorf(err.Error())
-		http.Error(responseWriter, err.Error(), http.StatusNotFound)
+	var tray, err = TrayManager.SetJob(agentId, 0)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
+		logger.Errorf(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
 	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
 
-	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id(), agentId, tray.GitHubOrgName())
+	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
 	client := githubClient.NewGithubClient(org)
 	jitRunnerConfig, err := client.CreateJITConfig(
-		tray.Id(),
-		tray.RunnerGroupId(),
-		tray.Labels(),
+		tray.GetId(),
+		tray.GetRunnerGroupId(),
+		[]string{tray.GetTrayType()},
 	)
 
 	if err != nil {
@@ -68,12 +66,13 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
 		RunnerId: jitRunnerConfig.GetRunner().GetID(),
-		Shutdown: tray.Shutdown(),
+		Shutdown: tray.GetShutdown(),
 	}
 
 	var registerResponse = messages.RegisterResponse{
-		Agent:     newAgent,
-		JitConfig: jitConfig,
+		Agent:         newAgent,
+		JitConfig:     jitConfig,
+		GitHubOrgName: tray.GetGitHubOrgName(),
 	}
 
 	err = json.NewEncoder(responseWriter).Encode(registerResponse)
@@ -119,17 +118,9 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Agent unregister request")
 
-	var tray, _ = traysStore.Get(trayId)
-	if tray == nil {
-		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusNotFound)
-		return
-	}
-
-	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	var org = config.AppConfig.GetGitHubOrg(unregisterRequest.GitHubOrgName)
 	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", unregisterRequest.GitHubOrgName)
 		logger.Errorf(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
@@ -143,23 +134,10 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	provider, err := providers.GetProvider(tray.Provider())
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray %s: %v", tray.Provider(), tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-
-	err = provider.CleanTray(tray)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to clean tray %s: %v", tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-
-	_ = traysStore.Delete(trayId)
-
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
+
+	err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+	if err != nil {
+		logger.Errorln("Failed to delete tray:", err)
+	}
 }
