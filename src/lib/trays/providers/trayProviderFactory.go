@@ -20,13 +20,15 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 
 	var result ITrayProvider
 
-	var provider = *config.AppConfig.GetProvider(providerName)
+	var p = config.AppConfig.GetProvider(providerName)
 
-	if provider == nil {
+	if p == nil {
 		var err = errors.New("No provider found for " + providerName)
 		logger.Errorf(err.Error())
 		return nil, err
 	}
+
+	var provider = *p
 
 	switch provider["type"] {
 	case "docker":
