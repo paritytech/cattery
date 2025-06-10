@@ -30,7 +30,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugln("Agent registration request")
 
-	var tray, err = TrayManager.SetJob(agentId, 0)
+	var tray, err = TrayManager.Registering(agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
 		logger.Errorf(errMsg)
@@ -80,6 +80,11 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorln(err)
 		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
+	}
+
+	_, err = TrayManager.Registered(agentId)
+	if err != nil {
+		logger.Errorln(err)
 	}
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)

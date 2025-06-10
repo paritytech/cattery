@@ -1,9 +1,7 @@
 package jobQueue
 
 import (
-	"cattery/lib/config"
 	"cattery/lib/jobs"
-	"cattery/lib/trayManager"
 	"context"
 	"errors"
 	log "github.com/sirupsen/logrus"
@@ -14,21 +12,19 @@ import (
 )
 
 type QueueManager struct {
-	trayManager *trayManager.TrayManager
-	jobQueue    *JobQueue
-	waitGroup   sync.WaitGroup
-	listen      bool
+	jobQueue  *JobQueue
+	waitGroup sync.WaitGroup
+	listen    bool
 
 	collection   *mongo.Collection
 	changeStream *mongo.ChangeStream
 }
 
-func NewQueueManager(trayManager *trayManager.TrayManager, listen bool) *QueueManager {
+func NewQueueManager(listen bool) *QueueManager {
 	return &QueueManager{
-		trayManager: trayManager,
-		jobQueue:    NewJobQueue(),
-		waitGroup:   sync.WaitGroup{},
-		listen:      listen,
+		jobQueue:  NewJobQueue(),
+		waitGroup: sync.WaitGroup{},
+		listen:    listen,
 	}
 }
 
@@ -103,11 +99,6 @@ func (qm *QueueManager) AddJob(job *jobs.Job) error {
 		return err
 	}
 
-	err = qm.Reconcile(job.TrayType)
-	if err != nil {
-		log.Errorf("Error reconciling jobs: %v", err)
-	}
-
 	return nil
 }
 
@@ -149,11 +140,6 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 		return nil
 	}
 
-	err := qm.Reconcile(job.TrayType)
-	if err != nil {
-		log.Errorf("Error reconciling jobs: %v", err)
-	}
-
 	return nil
 }
 
@@ -167,26 +153,6 @@ func (qm *QueueManager) deleteJob(jobId int64) error {
 	return nil
 }
 
-func (qm *QueueManager) Reconcile(trayTypeName string) error {
-
-	var trayType = getTrayType(trayTypeName)
-
-	var jobsInQueue = len(qm.jobQueue.GetGroup(trayTypeName))
-
-	err := qm.trayManager.CreateTrays(trayType, jobsInQueue)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getTrayType(trayTypeName string) *config.TrayType {
-
-	var trayType = config.AppConfig.GetTrayType(trayTypeName)
-	if trayType == nil {
-		return nil
-	}
-
-	return trayType
+func (qm *QueueManager) GetJobsCount() map[string]int {
+	return qm.jobQueue.GetJobsCount()
 }

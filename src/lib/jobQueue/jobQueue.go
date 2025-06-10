@@ -1,7 +1,7 @@
 package jobQueue
 
 import (
-	jobs "cattery/lib/jobs"
+	"cattery/lib/jobs"
 	"sync"
 )
 
@@ -34,6 +34,16 @@ func (qm *JobQueue) getGroup(groupName string) map[int64]jobs.Job {
 	newGroup := make(map[int64]jobs.Job)
 	qm.groups[groupName] = newGroup
 	return newGroup
+}
+
+func (qm *JobQueue) GetJobsCount() map[string]int {
+	result := make(map[string]int)
+	qm.rwMutex.RLock()
+	defer qm.rwMutex.RUnlock()
+	for groupName, group := range qm.groups {
+		result[groupName] = len(group)
+	}
+	return result
 }
 
 func (qm *JobQueue) Get(jobId int64) *jobs.Job {

@@ -6,6 +6,7 @@ import (
 	"cattery/lib/trayManager"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
+	"context"
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -54,13 +55,15 @@ func Start() {
 	handlers.TrayManager = trayManager.NewTrayManager(trayRepository)
 
 	//QueueManager initialization
-	handlers.QueueManager = jobQueue.NewQueueManager(handlers.TrayManager, false)
+	handlers.QueueManager = jobQueue.NewQueueManager(false)
 	handlers.QueueManager.Connect(database.Collection("jobs"))
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
 		logger.Errorf("Error loading queue manager: %v", err)
 	}
+
+	handlers.TrayManager.HandleJobsQueue(context.Background(), handlers.QueueManager)
 
 	// Start the server
 	go func() {

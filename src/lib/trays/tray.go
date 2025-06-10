@@ -16,13 +16,17 @@ type Tray struct {
 	GitHubOrgName string     `bson:"gitHubOrgName"`
 	JobRunId      int64      `bson:"jobRunId"`
 	Status        TrayStatus `bson:"status"`
-	StatusChanged time.Time  `bson:"statusChange"`
+	StatusChanged time.Time  `bson:"statusChanged"`
 }
 
 func NewTray(trayType config.TrayType) *Tray {
 
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{

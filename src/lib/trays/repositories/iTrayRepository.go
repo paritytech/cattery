@@ -7,5 +7,6 @@ type ITrayRepository interface {
 	Save(tray *trays.Tray) error
 	Delete(trayId string) error
 	UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64) (*trays.Tray, error)
-	CountByTrayType(trayType string) (int, error)
+	CountByTrayType(trayType string) (map[trays.TrayStatus]int, int, error)
+	MarkRedundant(trayType string, limit int) ([]*trays.Tray, error)
 }
