@@ -148,9 +148,9 @@ func (m *MongodbTrayRepository) CountByTrayType(trayType string) (map[trays.Tray
 		var int32Status = res["_id"].(int32)
 
 		status := int32Status
-		cnt, _ := res["count"].(int)
-		result[trays.TrayStatus(status)] = cnt
-		total += cnt
+		cnt, _ := res["count"].(int32)
+		result[trays.TrayStatus(status)] = int(cnt)
+		total += int(cnt)
 	}
 	return result, total, nil
 

@@ -49,22 +49,10 @@ func (tray *Tray) GetGitHubOrgName() string {
 	return tray.GitHubOrgName
 }
 
-func (tray *Tray) Provider() string {
-	return tray.trayTypeConfig.Provider
-}
-
 func (tray *Tray) GetTrayType() string {
 	return tray.TrayType
 }
 
 func (tray *Tray) GetTrayConfig() config.TrayConfig {
-	return tray.trayTypeConfig.Config
-}
-
-func (tray *Tray) GetRunnerGroupId() int64 {
-	return tray.trayTypeConfig.RunnerGroupId
-}
-
-func (tray *Tray) GetShutdown() bool {
-	return tray.trayTypeConfig.Shutdown
+	return config.AppConfig.GetTrayType(tray.TrayType).Config
 }

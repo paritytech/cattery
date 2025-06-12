@@ -35,17 +35,21 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	return provider
 }
 
-func (g GceProvider) GetTray(id string) (*trays.Tray, error) {
+func (g *GceProvider) GetProviderName() string {
+	return g.Name
+}
+
+func (g *GceProvider) GetTray(id string) (*trays.Tray, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (g GceProvider) ListTrays() ([]*trays.Tray, error) {
+func (g *GceProvider) ListTrays() ([]*trays.Tray, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (g GceProvider) RunTray(tray *trays.Tray) error {
+func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
 	instancesClient, err := g.createInstancesClient()
 	if err != nil {
@@ -89,7 +93,7 @@ func (g GceProvider) RunTray(tray *trays.Tray) error {
 	return nil
 }
 
-func (g GceProvider) CleanTray(tray *trays.Tray) error {
+func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 	client, err := g.createInstancesClient()
 	if err != nil {
 		return err
@@ -120,7 +124,7 @@ func (g GceProvider) CleanTray(tray *trays.Tray) error {
 	return nil
 }
 
-func (g GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
+func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
 
 	if g.instanceClient != nil {
 		return g.instanceClient, nil

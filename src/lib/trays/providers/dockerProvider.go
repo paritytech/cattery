@@ -32,17 +32,21 @@ func NewDockerProvider(name string, providerConfig config.ProviderConfig) *Docke
 	return provider
 }
 
-func (d DockerProvider) GetTray(id string) (*trays.Tray, error) {
+func (d *DockerProvider) GetProviderName() string {
+	return d.name
+}
+
+func (d *DockerProvider) GetTray(id string) (*trays.Tray, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (d DockerProvider) ListTrays() ([]*trays.Tray, error) {
+func (d *DockerProvider) ListTrays() ([]*trays.Tray, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (d DockerProvider) RunTray(tray *trays.Tray) error {
+func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
 	var containerName = tray.GetId()
 	var image = tray.GetTrayConfig().Get("image")
@@ -64,7 +68,7 @@ func (d DockerProvider) RunTray(tray *trays.Tray) error {
 	return nil
 }
 
-func (d DockerProvider) CleanTray(tray *trays.Tray) error {
+func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
 	var dockerCommand = exec.Command("docker", "container", "stop", tray.GetId())
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {

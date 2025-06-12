@@ -2,6 +2,7 @@ package providers
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/trays"
 	"errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -11,6 +12,20 @@ var providers = make(map[string]ITrayProvider)
 var logger = log.WithFields(log.Fields{
 	"name": "trayProviderFactory",
 })
+
+func GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
+	return GetProviderByTrayTypeName(tray.TrayType)
+}
+
+func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
+	var trayType = config.AppConfig.GetTrayType(trayTypeName)
+
+	if trayType == nil {
+		return nil, errors.New("tray type not found: " + trayTypeName)
+	}
+
+	return GetProvider(trayType.Provider)
+}
 
 func GetProvider(providerName string) (ITrayProvider, error) {
 

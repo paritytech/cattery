@@ -46,13 +46,15 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var trayType = config.AppConfig.GetTrayType(tray.GetTrayType())
+
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
 	client := githubClient.NewGithubClient(org)
 	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.GetId(),
-		tray.GetRunnerGroupId(),
-		[]string{tray.GetTrayType()},
+		trayType.RunnerGroupId,
+		[]string{trayType.Name},
 	)
 
 	if err != nil {
@@ -66,7 +68,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
 		RunnerId: jitRunnerConfig.GetRunner().GetID(),
-		Shutdown: tray.GetShutdown(),
+		Shutdown: trayType.Shutdown,
 	}
 
 	var registerResponse = messages.RegisterResponse{
