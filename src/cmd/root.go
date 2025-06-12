@@ -42,7 +42,7 @@ func init() {
 	agentCmd.MarkFlagRequired("server-url")
 
 	agentCmd.Flags().StringVarP(
-		&agent.AgentId,
+		&agent.Id,
 		"agent-id",
 		"i",
 		"",

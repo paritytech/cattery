@@ -39,7 +39,7 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 
 	if p == nil {
 		var err = errors.New("No provider found for " + providerName)
-		logger.Errorf(err.Error())
+		logger.Error(err.Error())
 		return nil, err
 	}
 
@@ -52,7 +52,7 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 		result = NewGceProvider(providerName, provider)
 	default:
 		var errMsg = "Unknown provider: " + providerName
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		return nil, errors.New(errMsg)
 	}
 

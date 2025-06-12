@@ -32,7 +32,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 	var org = config.AppConfig.GetGitHubOrg(organizationName)
 	if org == nil {
 		var errMsg = fmt.Sprintf("Organization '%s' not found in config", organizationName)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
@@ -95,7 +95,7 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 	err := QueueManager.JobInProgress(job.Id, job.RunnerName)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to mark job '%s/%s' as in progress: %v", job.WorkflowName, job.Name, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
@@ -112,7 +112,7 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 	err := QueueManager.AddJob(job)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to enqueue job '%s/%s/%s': %v", job.Repository, job.WorkflowName, job.Name, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}

@@ -15,10 +15,10 @@ import (
 
 var RunnerFolder string
 var CatteryServerUrl string
-var AgentId string
+var Id string
 
 func Start() {
-	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl, AgentId)
+	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl, Id)
 
 	catteryAgent.Start()
 }
@@ -49,7 +49,7 @@ func (a *CatteryAgent) Start() {
 	agent, jitConfig, err := a.catteryClient.RegisterAgent(a.agentId)
 	if err != nil {
 		errMsg := "Failed to register agent: " + err.Error()
-		a.logger.Errorf(errMsg)
+		a.logger.Error(errMsg)
 		return
 	}
 	a.agent = agent
@@ -73,7 +73,7 @@ func (a *CatteryAgent) Start() {
 	err = commandRun.Run()
 	if err != nil {
 		var errMsg = "Runner failed: " + err.Error()
-		a.logger.Errorf(errMsg)
+		a.logger.Error(errMsg)
 	}
 
 	a.stop(commandRun.Process, false)
@@ -93,7 +93,7 @@ func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
 		err := runnerProcess.Signal(syscall.SIGINT)
 		if err != nil {
 			var errMsg = "Failed to stop runner: " + err.Error()
-			a.logger.Errorf(errMsg)
+			a.logger.Error(errMsg)
 		}
 	}
 
@@ -112,7 +112,7 @@ func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
 	err := a.catteryClient.UnregisterAgent(a.agent, reason)
 	if err != nil {
 		var errMsg = "Failed to unregister agent: " + err.Error()
-		a.logger.Errorf(errMsg)
+		a.logger.Error(errMsg)
 	}
 
 	if a.agent.Shutdown {

@@ -33,7 +33,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var tray, err = TrayManager.Registering(agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
@@ -41,7 +41,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
 	if org == nil {
 		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
@@ -114,7 +114,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 	}
 
@@ -128,7 +128,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	var org = config.AppConfig.GetGitHubOrg(unregisterRequest.GitHubOrgName)
 	if org == nil {
 		var errMsg = fmt.Sprintf("Organization '%s' not found in config", unregisterRequest.GitHubOrgName)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
@@ -137,7 +137,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to remove runner %s: %v", unregisterRequest.Agent.AgentId, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
