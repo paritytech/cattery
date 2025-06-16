@@ -22,11 +22,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: run mongo
-        run: |
-          docker run -e MONGO_REPLICA_SET_NAME=rs0 --name mongo -p 27017:27017 -d mongo
-          docker exec mongo mongosh --eval "rs.initiate({ _id: 'rs0', members: [   {_id: 0, host: 'localhost'} ]})"
-          go test -C src ./...
+
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-replica-set: rs0
+          mongodb-port: 27017
+
+      - name: run tests
+        run: go test -C src ./...
 
   build:
     needs: [tests]
