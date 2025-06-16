@@ -82,7 +82,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 // handles the 'completed' action of the workflow job event
 func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	err := TrayManager.DeleteTray(job.RunnerName)
+	_, err := TrayManager.DeleteTray(job.RunnerName)
 	if err != nil {
 		logger.Errorf("Error deleting tray: %v", err)
 	}
@@ -92,11 +92,19 @@ func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.
 // handles the 'in_progress' action of the workflow job event
 func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	err := QueueManager.JobInProgress(job.Id, job.RunnerName)
+	err := QueueManager.JobInProgress(job.Id)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to mark job '%s/%s' as in progress: %v", job.WorkflowName, job.Name, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+	}
+
+	tray, err := TrayManager.SetJob(job.RunnerName, job.Id)
+	if tray == nil {
+		logger.Errorf("Failed to set job '%s/%s' as in progress to tray, tray not found: %v", job.WorkflowName, job.Name, err)
+	}
+	if err != nil {
+		log.Errorf("Failed to set job '%s/%s' as in progress to tray: %v", job.WorkflowName, job.Name, err)
 	}
 
 	logger.Infof("Tray '%s' is running '%s/%s' in '%s/%s'",

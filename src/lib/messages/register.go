@@ -5,15 +5,13 @@ import (
 )
 
 type RegisterResponse struct {
-	Agent         agents.Agent `json:"agent"`
-	JitConfig     string       `json:"jit_config"`
-	GitHubOrgName string       `json:"github_org_name"`
+	Agent     agents.Agent `json:"agent"`
+	JitConfig string       `json:"jit_config"`
 }
 
 type UnregisterRequest struct {
-	Agent         agents.Agent     `json:"agent"`
-	Reason        UnregisterReason `json:"reason"`
-	GitHubOrgName string           `json:"github_org_name"`
+	Agent  agents.Agent     `json:"agent"`
+	Reason UnregisterReason `json:"reason"`
 }
 
 type UnregisterReason int

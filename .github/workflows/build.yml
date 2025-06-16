@@ -17,7 +17,20 @@ concurrency:
 
 jobs:
 
+  tests:
+    runs-on: cattery-gce
+    services:
+      mongo:
+        image: mongo
+        ports:
+          - 27017:27017
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - run: go test -C src ./...
+
   build:
+    needs: [tests]
     permissions:
       contents: write
     runs-on: cattery-gce
@@ -53,6 +66,7 @@ jobs:
            bin/cattery*
 
   docker-build:
+    needs: [tests]
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push')
     runs-on: cattery-gce
     environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}

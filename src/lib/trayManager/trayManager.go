@@ -113,33 +113,33 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error
 	return tray, nil
 }
 
-func (tm *TrayManager) DeleteTray(trayId string) error {
+func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
 	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if tray == nil {
-		return nil // Tray not found, nothing to delete
+		return nil, nil // Tray not found, nothing to delete
 	}
 
 	provider, err := providers.GetProviderForTray(tray)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = provider.CleanTray(tray)
 	if err != nil {
 		log.Errorf("Error deleting tray for provider: %s, tray: %s: %v", provider.GetProviderName(), tray.GetId(), err)
-		return err
+		return nil, err
 	}
 
 	err = tm.trayRepository.Delete(trayId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return tray, nil
 }
 
 func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.QueueManager) {

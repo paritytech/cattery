@@ -102,7 +102,7 @@ func (qm *QueueManager) AddJob(job *jobs.Job) error {
 	return nil
 }
 
-func (qm *QueueManager) JobInProgress(jobId int64, trayId string) error {
+func (qm *QueueManager) JobInProgress(jobId int64) error {
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
 		log.Errorf("No job found with id %v", jobId)
