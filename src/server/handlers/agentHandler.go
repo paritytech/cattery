@@ -5,9 +5,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
-	"cattery/lib/trays/providers"
 	"encoding/json"
-	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net/http"
@@ -32,29 +30,31 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugln("Agent registration request")
 
-	var tray, _ = traysStore.Get(agentId)
-	if tray == nil {
-		var err = errors.New(fmt.Sprintf("tray '%s' not found", agentId))
-		logger.Errorf(err.Error())
-		http.Error(responseWriter, err.Error(), http.StatusNotFound)
+	var tray, err = TrayManager.Registering(agentId)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
 	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
-		logger.Errorf(errMsg)
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
 
-	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id(), agentId, tray.GitHubOrgName())
+	var trayType = config.AppConfig.GetTrayType(tray.GetTrayType())
+
+	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
 	client := githubClient.NewGithubClient(org)
 	jitRunnerConfig, err := client.CreateJITConfig(
-		tray.Id(),
-		tray.RunnerGroupId(),
-		tray.Labels(),
+		tray.GetId(),
+		trayType.RunnerGroupId,
+		[]string{trayType.Name},
 	)
 
 	if err != nil {
@@ -68,7 +68,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
 		RunnerId: jitRunnerConfig.GetRunner().GetID(),
-		Shutdown: tray.Shutdown(),
+		Shutdown: trayType.Shutdown,
 	}
 
 	var registerResponse = messages.RegisterResponse{
@@ -81,6 +81,11 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorln(err)
 		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
+	}
+
+	_, err = TrayManager.Registered(agentId)
+	if err != nil {
+		logger.Errorln(err)
 	}
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
@@ -108,7 +113,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 	}
 
@@ -119,18 +124,19 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Agent unregister request")
 
-	var tray, _ = traysStore.Get(trayId)
+	tray, err := TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+	if err != nil {
+		logger.Errorln("Failed to delete tray:", err)
+	}
 	if tray == nil {
-		var errMsg = fmt.Sprintf("tray '%s' not found", trayId)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusNotFound)
+		logger.Warningf("Tray '%s' does not exist", trayId)
 		return
 	}
 
-	var org = config.AppConfig.GetGitHubOrg(tray.GitHubOrgName())
+	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
 	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GitHubOrgName())
-		logger.Errorf(errMsg)
+		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
@@ -139,27 +145,14 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to remove runner %s: %v", unregisterRequest.Agent.AgentId, err)
-		logger.Errorf(errMsg)
+		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
-
-	provider, err := providers.GetProvider(tray.Provider())
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get provider '%s' for tray %s: %v", tray.Provider(), tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-
-	err = provider.CleanTray(tray)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to clean tray %s: %v", tray.Id(), err)
-		logger.Errorf(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-
-	_ = traysStore.Delete(trayId)
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
+
+	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+	if err != nil {
+		logger.Errorln("Failed to delete tray:", err)
+	}
 }

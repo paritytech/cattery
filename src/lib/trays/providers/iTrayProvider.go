@@ -5,6 +5,7 @@ import (
 )
 
 type ITrayProvider interface {
+	GetProviderName() string
 
 	// GetTray returns the tray with the given ID.
 	GetTray(id string) (*trays.Tray, error)
