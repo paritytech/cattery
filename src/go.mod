@@ -10,6 +10,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
+	github.com/stretchr/testify v1.10.0
 	go.mongodb.org/mongo-driver/v2 v2.2.0
 	google.golang.org/api v0.227.0
 	google.golang.org/protobuf v1.36.6
@@ -19,6 +20,7 @@ require (
 	cloud.google.com/go/auth v0.15.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.7 // indirect
 	cloud.google.com/go/compute/metadata v0.6.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
@@ -37,6 +39,7 @@ require (
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.12.0 // indirect
