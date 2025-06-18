@@ -73,7 +73,7 @@ trayTypes:
 
 		assert.Error(t, err)
 		assert.Nil(t, config)
-		assert.Contains(t, err.Error(), "system cannot find the file specified")
+		assert.Contains(t, err.Error(), "fatal error reading config file")
 	})
 
 	// Test case 3: Invalid config file (validation failure)
