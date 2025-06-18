@@ -46,6 +46,12 @@ func Start() {
 		logger.Fatal(err)
 	}
 
+	err = client.Ping(context.Background(), nil)
+	if err != nil {
+		logger.Errorf("Failed to connect to MongoDB: %v", err)
+		os.Exit(1)
+	}
+
 	var database = client.Database(config.AppConfig.Database.Database)
 
 	// Initialize tray manager and repository
