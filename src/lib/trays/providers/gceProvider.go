@@ -32,6 +32,12 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	provider.instanceClient = nil
 	provider.logger = logrus.WithFields(logrus.Fields{name: "gceProvider"})
 
+	client, err := provider.createInstancesClient()
+	if err != nil {
+		return nil
+	}
+	provider.instanceClient = client
+
 	return provider
 }
 
@@ -51,11 +57,6 @@ func (g *GceProvider) ListTrays() ([]*trays.Tray, error) {
 
 func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
-	instancesClient, err := g.createInstancesClient()
-	if err != nil {
-		return fmt.Errorf("NewInstancesRESTClient: %w", err)
-	}
-	defer instancesClient.Close()
 
 	var (
 		project          = g.providerConfig.Get("project")
@@ -64,7 +65,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		machineType      = tray.GetTrayConfig().Get("machineType")
 	)
 
-	_, err = instancesClient.Insert(ctx, &computepb.InsertInstanceRequest{
+	_, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project:                project,
 		Zone:                   zone,
 		SourceInstanceTemplate: &instanceTemplate,
