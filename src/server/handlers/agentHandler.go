@@ -13,7 +13,12 @@ import (
 
 // AgentRegister is a handler for agent registration requests
 func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithField("action", "AgentRegister")
+
+	logger = log.WithFields(log.Fields{
+		"handler": "agent",
+		"call":    "AgentRegister",
+	})
+
 	logger.Tracef("AgentRegister: %v", r)
 
 	if r.Method != http.MethodGet {
@@ -38,19 +43,18 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
-	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusBadRequest)
-		return
-	}
-
 	var trayType = config.AppConfig.GetTrayType(tray.GetTrayType())
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
-	client := githubClient.NewGithubClient(org)
+	// TODO handle
+	client, err := githubClient.NewGithubClientWithOrgName(tray.GetGitHubOrgName())
+	if err != nil {
+		var errMsg = fmt.Sprintf("Organization '%s' is invalid: %v", tray.GetGitHubOrgName(), err)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+	}
+
 	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.GetId(),
 		trayType.RunnerGroupId,
@@ -83,7 +87,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = TrayManager.Registered(agentId)
+	_, err = TrayManager.Registered(agentId, jitRunnerConfig.GetRunner().GetID())
 	if err != nil {
 		logger.Errorln(err)
 	}
@@ -98,7 +102,10 @@ func validateAgentId(agentId string) string {
 
 // AgentUnregister is a handler for agent unregister requests
 func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithField("action", "AgentUnregister")
+	logger = log.WithFields(log.Fields{
+		"handler": "agent",
+		"call":    "AgentUnregister",
+	})
 
 	logger.Tracef("AgentUnregister: %v", r)
 
@@ -118,41 +125,16 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	logger = logger.WithFields(log.Fields{
-		"action": "AgentRegister",
 		"trayId": unregisterRequest.Agent.AgentId,
 	})
 
 	logger.Tracef("Agent unregister request")
 
-	tray, err := TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+
 	if err != nil {
 		logger.Errorln("Failed to delete tray:", err)
-	}
-	if tray == nil {
-		logger.Warningf("Tray '%s' does not exist", trayId)
-		return
-	}
-
-	var org = config.AppConfig.GetGitHubOrg(tray.GetGitHubOrgName())
-	if org == nil {
-		var errMsg = fmt.Sprintf("Organization '%s' not found in config", tray.GetGitHubOrgName())
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusBadRequest)
-		return
-	}
-
-	client := githubClient.NewGithubClient(org)
-	err = client.RemoveRunner(unregisterRequest.Agent.RunnerId)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to remove runner %s: %v", unregisterRequest.Agent.AgentId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
-
-	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
-	if err != nil {
-		logger.Errorln("Failed to delete tray:", err)
-	}
 }

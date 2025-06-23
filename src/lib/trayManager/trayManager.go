@@ -2,6 +2,7 @@ package trayManager
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/githubClient"
 	"cattery/lib/jobQueue"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
@@ -61,21 +62,8 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 	return nil
 }
 
-func (tm *TrayManager) SetReady(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0)
-	if err != nil {
-		return nil, err
-	}
-	if tray == nil {
-		log.Errorf("Failed to set tray %s as 'registered', tray not found", trayId)
-		return nil, err
-	}
-
-	return tray, nil
-}
-
 func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +75,8 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 	return tray, nil
 }
 
-func (tm *TrayManager) Registered(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0)
+func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, ghRunnerId)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +89,7 @@ func (tm *TrayManager) Registered(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +103,22 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error
 
 func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
-	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0)
+	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0)
 	if err != nil {
 		return nil, err
 	}
 	if tray == nil {
 		return nil, nil // Tray not found, nothing to delete
+	}
+
+	ghClient, err := githubClient.NewGithubClientWithOrgName(tray.GetGitHubOrgName())
+	if err != nil {
+		return nil, err
+	}
+
+	err = ghClient.RemoveRunner(tray.GitHubRunnerId)
+	if err != nil {
+		return nil, err
 	}
 
 	provider, err := providers.GetProviderForTray(tray)
@@ -140,6 +138,39 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 	}
 
 	return tray, nil
+}
+
+func (tm *TrayManager) HandleStale(ctx context.Context) {
+
+	var interval = time.Minute * 5
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+
+				time.Sleep(interval / 2)
+
+				stale, err := tm.trayRepository.GetStale(interval)
+				if err != nil {
+					return
+				}
+
+				log.Infof("Found %d stale trays: %v", len(stale), stale)
+
+				for _, tray := range stale {
+					log.Debugf("Deleting stale tray: %s", tray.GetId())
+
+					_, err := tm.DeleteTray(tray.GetId())
+					if err != nil {
+						log.Errorf("Error deleting tray %s: %v", tray.GetId(), err)
+					}
+				}
+			}
+		}
+	}()
 }
 
 func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.QueueManager) {

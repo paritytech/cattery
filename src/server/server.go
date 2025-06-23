@@ -70,6 +70,7 @@ func Start() {
 	}
 
 	handlers.TrayManager.HandleJobsQueue(context.Background(), handlers.QueueManager)
+	handlers.TrayManager.HandleStale(context.Background())
 
 	// Start the server
 	go func() {

@@ -34,6 +34,20 @@ func (m *MongodbTrayRepository) GetById(trayId string) (*trays.Tray, error) {
 	return &result, nil
 }
 
+func (m *MongodbTrayRepository) GetStale(d time.Duration) ([]*trays.Tray, error) {
+	dbResult, err := m.collection.Find(context.Background(), bson.M{"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)}})
+	if err != nil {
+		return nil, err
+	}
+
+	var traysArr []*trays.Tray
+	if err := dbResult.All(context.Background(), &traysArr); err != nil {
+		return nil, err
+	}
+	return traysArr, nil
+
+}
+
 func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*trays.Tray, error) {
 
 	var resultTrays = make([]*trays.Tray, 0)
@@ -85,12 +99,22 @@ func (m *MongodbTrayRepository) Save(tray *trays.Tray) error {
 	return nil
 }
 
-func (m *MongodbTrayRepository) UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64) (*trays.Tray, error) {
+func (m *MongodbTrayRepository) UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64, ghRunnerId int64) (*trays.Tray, error) {
+
+	var setQuery = bson.M{"status": status, "statusChanged": time.Now().UTC()}
+
+	if jobRunId != 0 {
+		setQuery["jobRunId"] = jobRunId
+	}
+
+	if ghRunnerId != 0 {
+		setQuery["gitHubRunnerId"] = ghRunnerId
+	}
 
 	dbResult := m.collection.FindOneAndUpdate(
 		context.Background(),
 		bson.M{"id": trayId},
-		bson.M{"$set": bson.M{"status": status, "statusChanged": time.Now().UTC(), "jobRunId": jobRunId}},
+		bson.M{"$set": setQuery},
 		options.FindOneAndUpdate().SetReturnDocument(options.After))
 
 	var result trays.Tray
