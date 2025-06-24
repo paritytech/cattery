@@ -3,24 +3,38 @@ package githubClient
 import (
 	"cattery/lib/config"
 	"context"
+	"errors"
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 )
 
-var githubClient *github.Client = nil
+var githubClients = make(map[string]*github.Client)
 
 type GithubClient struct {
 	client *github.Client
 	Org    *config.GitHubOrganization
 }
 
-func NewGithubClient(org *config.GitHubOrganization) *GithubClient {
+func NewGithubClientWithOrgConfig(org *config.GitHubOrganization) *GithubClient {
 	return &GithubClient{
 		client: createClient(org),
 		Org:    org,
 	}
+}
+
+func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
+
+	var orgConfig = config.AppConfig.GetGitHubOrg(orgName)
+	if orgConfig == nil {
+		return nil, errors.New("GitHub organization not found")
+	}
+
+	return &GithubClient{
+		client: createClient(orgConfig),
+		Org:    orgConfig,
+	}, nil
 }
 
 // CreateJITConfig creates a new JIT config
@@ -46,7 +60,7 @@ func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 // createClient creates a new GitHub client
 func createClient(org *config.GitHubOrganization) *github.Client {
 
-	if githubClient != nil {
+	if githubClient, ok := githubClients[org.Name]; ok {
 		return githubClient
 	}
 
@@ -66,6 +80,7 @@ func createClient(org *config.GitHubOrganization) *github.Client {
 	// Use installation transport with github.com/google/go-github
 	client := github.NewClient(&http.Client{Transport: itr})
 
-	githubClient = client
+	githubClients[org.Name] = client
+
 	return client
 }

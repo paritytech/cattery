@@ -5,61 +5,55 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"time"
 )
 
 type Tray struct {
-	id       string
-	labels   []string
-	trayType config.TrayType
+	Id             string `bson:"id"`
+	TrayType       string `bson:"trayType"`
+	trayTypeConfig config.TrayType
 
-	JobRunId int64
+	GitHubOrgName  string     `bson:"gitHubOrgName"`
+	GitHubRunnerId int64      `bson:"gitHubRunnerId"`
+	JobRunId       int64      `bson:"jobRunId"`
+	Status         TrayStatus `bson:"status"`
+	StatusChanged  time.Time  `bson:"statusChanged"`
 }
 
-func NewTray(
-	labels []string,
-	trayType config.TrayType) *Tray {
+func NewTray(trayType config.TrayType) *Tray {
 
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		id:       fmt.Sprintf("%s-%s", trayType.Name, id),
-		labels:   labels,
-		trayType: trayType,
+		Id:             fmt.Sprintf("%s-%s", trayType.Name, id),
+		TrayType:       trayType.Name,
+		trayTypeConfig: trayType,
+		Status:         TrayStatusCreating,
+		GitHubOrgName:  trayType.GitHubOrg,
+		JobRunId:       0,
 	}
 
 	return tray
 }
 
-func (tray *Tray) Id() string {
-	return tray.id
+func (tray *Tray) GetId() string {
+	return tray.Id
 }
 
-func (tray *Tray) GitHubOrgName() string {
-	return tray.trayType.GitHubOrg
+func (tray *Tray) GetGitHubOrgName() string {
+	return tray.GitHubOrgName
 }
 
-func (tray *Tray) TypeName() string {
-	return tray.trayType.Name
+func (tray *Tray) GetTrayType() string {
+	return tray.TrayType
 }
 
-func (tray *Tray) Provider() string {
-	return tray.trayType.Provider
-}
-
-func (tray *Tray) Labels() []string {
-	return tray.labels
-}
-
-func (tray *Tray) TrayConfig() config.TrayConfig {
-	return tray.trayType.Config
-}
-
-func (tray *Tray) RunnerGroupId() int64 {
-	return tray.trayType.RunnerGroupId
-}
-
-func (tray *Tray) Shutdown() bool {
-	return tray.trayType.Shutdown
+func (tray *Tray) GetTrayConfig() config.TrayConfig {
+	return config.AppConfig.GetTrayType(tray.TrayType).Config
 }
