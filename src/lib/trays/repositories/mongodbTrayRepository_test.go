@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -116,6 +117,7 @@ func TestGetById(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for non-existent tray, got nil")
 	}
+
 }
 
 // TestSave tests the Save method
@@ -327,11 +329,14 @@ func TestMarkRedundant(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray1, testTray2, testTray3, testTray4})
 
 	// Test MarkRedundant
-	// Note: There's a bug in the implementation where it appends to the result array
-	// when there's an error that is not mongo.ErrNoDocuments. This test accounts for that bug.
 	redundantTrays, err := repo.MarkRedundant("test-type", 2)
 	if err != nil {
 		t.Fatalf("MarkRedundant failed: %v", err)
+	}
+
+	// Verify that the correct number of trays were marked as redundant
+	if len(redundantTrays) != 2 {
+		t.Errorf("Expected 2 redundant trays, got %d", len(redundantTrays))
 	}
 
 	// Verify that the trays were actually marked as deleting in the database
@@ -430,6 +435,23 @@ func TestMarkRedundant(t *testing.T) {
 	if len(redundantTrays) != 0 {
 		t.Errorf("Expected 0 redundant trays for non-existent type, got %d", len(redundantTrays))
 	}
+
+	// Test MarkRedundant with empty collection
+	// Clear the collection
+	err = collection.Drop(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to drop collection: %v", err)
+	}
+
+	// Try to mark redundant trays in an empty collection
+	redundantTrays, err = repo.MarkRedundant("test-type", 2)
+	if err != nil {
+		t.Fatalf("MarkRedundant with empty collection failed: %v", err)
+	}
+
+	if len(redundantTrays) != 0 {
+		t.Errorf("Expected 0 redundant trays for empty collection, got %d", len(redundantTrays))
+	}
 }
 
 // TestGetStale tests the GetStale method
@@ -513,6 +535,69 @@ func TestGetStale(t *testing.T) {
 	// Verify that no stale trays are returned
 	if len(staleTrays) != 0 {
 		t.Errorf("Expected 0 stale trays, got %d", len(staleTrays))
+	}
+}
+
+// TestNewMongodbTrayRepository tests the NewMongodbTrayRepository constructor
+func TestNewMongodbTrayRepository(t *testing.T) {
+	// Create a new repository
+	repo := NewMongodbTrayRepository()
+
+	// Verify that the repository is not nil
+	if repo == nil {
+		t.Fatal("NewMongodbTrayRepository returned nil")
+	}
+
+	// Verify that the collection is nil (not connected yet)
+	if repo.collection != nil {
+		t.Errorf("Expected nil collection, got non-nil")
+	}
+}
+
+// TestConnect tests the Connect method
+func TestConnect(t *testing.T) {
+	// Setup test collection
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	// Create a new repository
+	repo := NewMongodbTrayRepository()
+
+	// Verify that the collection is nil before connecting
+	if repo.collection != nil {
+		t.Errorf("Expected nil collection before Connect, got non-nil")
+	}
+
+	// Connect to the collection
+	repo.Connect(collection)
+
+	// Verify that the collection is set correctly
+	if repo.collection == nil {
+		t.Fatal("Collection is nil after Connect")
+	}
+
+	// Verify that the collection is the same as the one we passed in
+	if !reflect.DeepEqual(repo.collection, collection) {
+		t.Errorf("Collection not set correctly")
+	}
+
+	// Test that we can use the repository after connecting
+	// Insert a test tray
+	testTray := createTestTray("test-connect", "test-type", trays.TrayStatusCreating, 0)
+	insertTestTrays(t, collection, []*TestTray{testTray})
+
+	// Try to get the tray using the repository
+	tray, err := repo.GetById("test-connect")
+	if err != nil {
+		t.Fatalf("GetById failed after Connect: %v", err)
+	}
+
+	if tray == nil {
+		t.Fatal("GetById returned nil tray after Connect")
+	}
+
+	if tray.Id != "test-connect" {
+		t.Errorf("Expected tray ID 'test-connect', got '%s'", tray.Id)
 	}
 }
 

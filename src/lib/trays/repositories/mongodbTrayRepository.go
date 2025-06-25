@@ -35,7 +35,11 @@ func (m *MongodbTrayRepository) GetById(trayId string) (*trays.Tray, error) {
 }
 
 func (m *MongodbTrayRepository) GetStale(d time.Duration) ([]*trays.Tray, error) {
-	dbResult, err := m.collection.Find(context.Background(), bson.M{"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)}})
+	dbResult, err := m.collection.Find(context.Background(),
+		bson.M{
+			"status":        bson.M{"$ne": trays.TrayStatusRunning},
+			"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +70,11 @@ func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*tr
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				break
 			}
-			resultTrays = append(resultTrays, &result)
-			ids = append(ids, result.Id)
+			return nil, err
 		}
+
+		resultTrays = append(resultTrays, &result)
+		ids = append(ids, result.Id)
 	}
 
 	return resultTrays, nil
