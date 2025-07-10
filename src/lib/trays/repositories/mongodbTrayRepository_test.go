@@ -15,7 +15,7 @@ import (
 // TestTray is a helper struct to create test trays
 type TestTray struct {
 	Id            string           `bson:"id"`
-	TrayType      string           `bson:"trayType"`
+	TrayTypeName  string           `bson:"trayTypeName"`
 	GitHubOrgName string           `bson:"gitHubOrgName"`
 	JobRunId      int64            `bson:"jobRunId"`
 	Status        trays.TrayStatus `bson:"status"`
@@ -54,10 +54,10 @@ func setupTestCollection(t *testing.T) (*mongo.Client, *mongo.Collection) {
 }
 
 // createTestTray creates a test tray with the given parameters
-func createTestTray(id string, trayType string, status trays.TrayStatus, jobRunId int64) *TestTray {
+func createTestTray(id string, trayTypeName string, status trays.TrayStatus, jobRunId int64) *TestTray {
 	return &TestTray{
 		Id:            id,
-		TrayType:      trayType,
+		TrayTypeName:  trayTypeName,
 		GitHubOrgName: "test-org",
 		JobRunId:      jobRunId,
 		Status:        status,
@@ -341,7 +341,7 @@ func TestMarkRedundant(t *testing.T) {
 
 	// Verify that the trays were actually marked as deleting in the database
 	// by querying the database directly
-	cursor, err := collection.Find(context.Background(), bson.M{"trayType": "test-type", "status": trays.TrayStatusDeleting})
+	cursor, err := collection.Find(context.Background(), bson.M{"trayTypeName": "test-type", "status": trays.TrayStatusDeleting})
 	if err != nil {
 		t.Fatalf("Failed to query database: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestMarkRedundant(t *testing.T) {
 	}
 
 	// Verify that only 1 more tray was marked as deleting
-	cursor, err = collection.Find(context.Background(), bson.M{"trayType": "test-type", "status": trays.TrayStatusDeleting})
+	cursor, err = collection.Find(context.Background(), bson.M{"trayTypeName": "test-type", "status": trays.TrayStatusDeleting})
 	if err != nil {
 		t.Fatalf("Failed to query database: %v", err)
 	}
