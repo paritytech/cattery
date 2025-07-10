@@ -43,7 +43,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var trayType = config.AppConfig.GetTrayType(tray.GetTrayType())
+	var trayType = config.AppConfig.GetTrayType(tray.GetTrayTypeName())
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 

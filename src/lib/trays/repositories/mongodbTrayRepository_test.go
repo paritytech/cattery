@@ -104,8 +104,8 @@ func TestGetById(t *testing.T) {
 		t.Errorf("Expected tray ID 'test-tray-1', got '%s'", tray.Id)
 	}
 
-	if tray.TrayType != "test-type" {
-		t.Errorf("Expected tray type 'test-type', got '%s'", tray.TrayType)
+	if tray.TrayTypeName != "test-type" {
+		t.Errorf("Expected tray type 'test-type', got '%s'", tray.TrayTypeName)
 	}
 
 	if tray.Status != trays.TrayStatusCreating {
@@ -160,8 +160,8 @@ func TestSave(t *testing.T) {
 		t.Errorf("Expected saved tray ID '%s', got '%s'", tray.Id, savedTray.Id)
 	}
 
-	if savedTray.TrayType != tray.TrayType {
-		t.Errorf("Expected saved tray type '%s', got '%s'", tray.TrayType, savedTray.TrayType)
+	if savedTray.TrayTypeName != tray.TrayTypeName {
+		t.Errorf("Expected saved tray type '%s', got '%s'", tray.TrayTypeName, savedTray.TrayTypeName)
 	}
 
 	if savedTray.Status != tray.Status {

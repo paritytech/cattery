@@ -9,9 +9,9 @@ import (
 )
 
 type Tray struct {
-	Id             string `bson:"id"`
-	TrayType       string `bson:"trayType"`
-	trayTypeConfig config.TrayType
+	Id           string `bson:"id"`
+	TrayTypeName string `bson:"trayTypeName"`
+	trayType     config.TrayType
 
 	GitHubOrgName  string     `bson:"gitHubOrgName"`
 	GitHubRunnerId int64      `bson:"gitHubRunnerId"`
@@ -31,12 +31,12 @@ func NewTray(trayType config.TrayType) *Tray {
 	id := hex.EncodeToString(b)
 
 	var tray = &Tray{
-		Id:             fmt.Sprintf("%s-%s", trayType.Name, id),
-		TrayType:       trayType.Name,
-		trayTypeConfig: trayType,
-		Status:         TrayStatusCreating,
-		GitHubOrgName:  trayType.GitHubOrg,
-		JobRunId:       0,
+		Id:            fmt.Sprintf("%s-%s", trayType.Name, id),
+		TrayTypeName:  trayType.Name,
+		trayType:      trayType,
+		Status:        TrayStatusCreating,
+		GitHubOrgName: trayType.GitHubOrg,
+		JobRunId:      0,
 	}
 
 	return tray
@@ -50,10 +50,14 @@ func (tray *Tray) GetGitHubOrgName() string {
 	return tray.GitHubOrgName
 }
 
-func (tray *Tray) GetTrayType() string {
-	return tray.TrayType
+func (tray *Tray) GetTrayTypeName() string {
+	return tray.TrayTypeName
+}
+
+func (tray *Tray) GetTrayType() config.TrayType {
+	return tray.trayType
 }
 
 func (tray *Tray) GetTrayConfig() config.TrayConfig {
-	return config.AppConfig.GetTrayType(tray.TrayType).Config
+	return config.AppConfig.GetTrayType(tray.TrayTypeName).Config
 }

@@ -14,7 +14,7 @@ var logger = log.WithFields(log.Fields{
 })
 
 func GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
-	return GetProviderByTrayTypeName(tray.TrayType)
+	return GetProviderByTrayTypeName(tray.TrayTypeName)
 }
 
 func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
