@@ -132,7 +132,10 @@ type TrayType struct {
 	GitHubOrg     string `yaml:"githubOrg" validate:"required"`
 	MaxTrays      int    `yaml:"limit"`
 	Config        TrayConfig
+	ExtraMetadata TrayExtraMetadata
 }
+
+type TrayExtraMetadata map[string]string
 
 type TrayConfig map[string]string
 
