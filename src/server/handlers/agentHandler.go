@@ -122,6 +122,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
 	}
 
 	logger = logger.WithFields(log.Fields{
