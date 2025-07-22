@@ -1,3 +1,4 @@
 .idea
 bin
 /stuff/
+.DS_Store
