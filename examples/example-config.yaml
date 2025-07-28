@@ -42,6 +42,8 @@ trayTypes:
     shutdown: true
     runnerGroupId: 3
     githubOrg: paritytech-stg
+    extraMetadata:
+      alloy_metrics_push_url: http://prometheus/api/v1/write
     config:
       namePrefix: cattery-stg
       project: parity-ci-2024
