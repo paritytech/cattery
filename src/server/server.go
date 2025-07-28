@@ -61,7 +61,7 @@ func Start() {
 	handlers.TrayManager = trayManager.NewTrayManager(trayRepository)
 
 	//QueueManager initialization
-	handlers.QueueManager = jobQueue.NewQueueManager(false)
+	handlers.QueueManager = jobQueue.NewQueueManager()
 	handlers.QueueManager.Connect(database.Collection("jobs"))
 
 	err = handlers.QueueManager.Load()

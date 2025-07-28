@@ -14,17 +14,15 @@ import (
 type QueueManager struct {
 	jobQueue  *JobQueue
 	waitGroup sync.WaitGroup
-	listen    bool
 
 	collection   *mongo.Collection
 	changeStream *mongo.ChangeStream
 }
 
-func NewQueueManager(listen bool) *QueueManager {
+func NewQueueManager() *QueueManager {
 	return &QueueManager{
 		jobQueue:  NewJobQueue(),
 		waitGroup: sync.WaitGroup{},
-		listen:    listen,
 	}
 }
 
@@ -38,13 +36,11 @@ func (qm *QueueManager) Load() error {
 
 	collection := qm.collection
 
-	if qm.listen {
-		changeStream, err := collection.Watch(nil, mongo.Pipeline{}, options.ChangeStream().SetFullDocument(options.UpdateLookup))
-		if err != nil {
-			return err
-		}
-		qm.changeStream = changeStream
+	changeStream, err := collection.Watch(nil, mongo.Pipeline{}, options.ChangeStream().SetFullDocument(options.UpdateLookup))
+	if err != nil {
+		return err
 	}
+	qm.changeStream = changeStream
 
 	allJobs, err := collection.Find(nil, bson.M{})
 	if err != nil {
@@ -61,33 +57,31 @@ func (qm *QueueManager) Load() error {
 		qm.jobQueue.Add(&job)
 	}
 
-	if qm.listen {
-		go func() {
-			for qm.changeStream.Next(nil) {
-				var event changeEvent[jobs.Job]
-				decodeErr := qm.changeStream.Decode(&event)
-				if decodeErr != nil {
-					log.Error("Error decoding change stream: ", decodeErr)
-					qm.Load()
-				}
-
-				var job = event.FullDocument
-
-				switch event.OperationType {
-				case "replace":
-					fallthrough
-				case "update":
-					fallthrough
-				case "insert":
-					qm.jobQueue.Add(&event.FullDocument)
-				case "delete":
-					qm.jobQueue.Delete(job.Id)
-				default:
-					log.Warn("Unknown operation type: ", event.OperationType)
-				}
+	go func() {
+		for qm.changeStream.Next(nil) {
+			var event changeEvent[jobs.Job]
+			decodeErr := qm.changeStream.Decode(&event)
+			if decodeErr != nil {
+				log.Error("Error decoding change stream: ", decodeErr)
+				qm.Load()
 			}
-		}()
-	}
+
+			var job = event.FullDocument
+
+			switch event.OperationType {
+			case "replace":
+				fallthrough
+			case "update":
+				fallthrough
+			case "insert":
+				qm.jobQueue.Add(&event.FullDocument)
+			case "delete":
+				qm.jobQueue.Delete(job.Id)
+			default:
+				log.Warn("Unknown operation type: ", event.OperationType)
+			}
+		}
+	}()
 
 	return nil
 }
