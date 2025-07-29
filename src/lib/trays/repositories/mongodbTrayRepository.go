@@ -4,10 +4,11 @@ import (
 	"cattery/lib/trays"
 	"context"
 	"errors"
+	"time"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"time"
 )
 
 type MongodbTrayRepository struct {
@@ -105,7 +106,7 @@ func (m *MongodbTrayRepository) Save(tray *trays.Tray) error {
 	return nil
 }
 
-func (m *MongodbTrayRepository) UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64, ghRunnerId int64) (*trays.Tray, error) {
+func (m *MongodbTrayRepository) UpdateStatus(trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64) (*trays.Tray, error) {
 
 	var setQuery = bson.M{"status": status, "statusChanged": time.Now().UTC()}
 
@@ -115,6 +116,10 @@ func (m *MongodbTrayRepository) UpdateStatus(trayId string, status trays.TraySta
 
 	if ghRunnerId != 0 {
 		setQuery["gitHubRunnerId"] = ghRunnerId
+	}
+
+	if workflowRunId != 0 {
+		setQuery["workflowRunId"] = workflowRunId
 	}
 
 	dbResult := m.collection.FindOneAndUpdate(
