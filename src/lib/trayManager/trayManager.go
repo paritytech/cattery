@@ -10,8 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type TrayManager struct {
@@ -63,7 +64,7 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 }
 
 func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, ghRunnerId)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId)
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +89,8 @@ func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray,
 	return tray, nil
 }
 
-func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, 0)
+func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error
 
 func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
-	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0)
+	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0, 0)
 	if err != nil {
 		return nil, err
 	}

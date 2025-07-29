@@ -4,9 +4,10 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/jobs"
 	"fmt"
+	"net/http"
+
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
-	"net/http"
 )
 
 var logger = log.WithFields(log.Fields{
@@ -99,7 +100,7 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	tray, err := TrayManager.SetJob(job.RunnerName, job.Id)
+	tray, err := TrayManager.SetJob(job.RunnerName, job.Id, job.WorkflowId)
 	if tray == nil {
 		logger.Errorf("Failed to set job '%s/%s' as in progress to tray, tray not found: %v", job.WorkflowName, job.Name, err)
 	}
