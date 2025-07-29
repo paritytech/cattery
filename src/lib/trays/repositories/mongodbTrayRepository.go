@@ -60,7 +60,7 @@ func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*tr
 	for i := 0; i < limit; i++ {
 		dbResult := m.collection.FindOneAndUpdate(
 			context.Background(),
-			bson.M{"status": trays.TrayStatusCreating, "trayType": trayType},
+			bson.M{"status": trays.TrayStatusCreating, "trayTypeName": trayType},
 			bson.M{"$set": bson.M{"status": trays.TrayStatusDeleting, "statusChanged": time.Now().UTC(), "jobRunId": 0}},
 			options.FindOneAndUpdate().SetReturnDocument(options.After))
 
@@ -147,7 +147,7 @@ func (m *MongodbTrayRepository) Delete(trayId string) error {
 func (m *MongodbTrayRepository) CountByTrayType(trayType string) (map[trays.TrayStatus]int, int, error) {
 
 	var matchStage = bson.D{
-		{"$match", bson.D{{"trayType", trayType}}},
+		{"$match", bson.D{{"trayTypeName", trayType}}},
 	}
 	var groupStage = bson.D{
 		{"$group", bson.D{

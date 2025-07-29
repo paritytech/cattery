@@ -68,8 +68,8 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 		return nil, err
 	}
 	if tray == nil {
-		log.Errorf("Failed to set tray %s as 'registering', tray not found", trayId)
-		return nil, err
+		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
+		return nil, errors.New(errorMsg)
 	}
 
 	return tray, nil
@@ -81,8 +81,8 @@ func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray,
 		return nil, err
 	}
 	if tray == nil {
-		log.Errorf("Failed to set tray %s as 'registered', tray not found", trayId)
-		return nil, err
+		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
+		return nil, errors.New(errorMsg)
 	}
 
 	return tray, nil
@@ -94,8 +94,8 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error
 		return nil, err
 	}
 	if tray == nil {
-		log.Errorf("Failed to set jobId %d, tray %s not found", jobRunId, trayId)
-		return nil, err
+		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
+		return nil, errors.New(errorMsg)
 	}
 
 	return tray, nil

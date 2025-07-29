@@ -63,28 +63,12 @@ func insertTestJobs(t *testing.T, collection *mongo.Collection, jobs []*jobs.Job
 
 // TestNewQueueManager tests the NewQueueManager function
 func TestNewQueueManager(t *testing.T) {
-	// Test with listen=true
-	qm := NewQueueManager(true)
+	qm := NewQueueManager()
 	if qm == nil {
 		t.Error("Expected non-nil QueueManager")
 	}
 	if qm.jobQueue == nil {
 		t.Error("Expected non-nil jobQueue")
-	}
-	if !qm.listen {
-		t.Error("Expected listen to be true")
-	}
-
-	// Test with listen=false
-	qm = NewQueueManager(false)
-	if qm == nil {
-		t.Error("Expected non-nil QueueManager")
-	}
-	if qm.jobQueue == nil {
-		t.Error("Expected non-nil jobQueue")
-	}
-	if qm.listen {
-		t.Error("Expected listen to be false")
 	}
 }
 
@@ -93,7 +77,7 @@ func TestConnect(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	if qm.collection != collection {
@@ -111,8 +95,7 @@ func TestLoad(t *testing.T) {
 	job2 := createTestJob(2, "Test Job 2", "TestTray")
 	insertTestJobs(t, collection, []*jobs.Job{job1, job2})
 
-	// Test Load with listen=false
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 	err := qm.Load()
 	if err != nil {
@@ -127,9 +110,9 @@ func TestLoad(t *testing.T) {
 		t.Error("Expected job 2 to be loaded")
 	}
 
-	// Skip testing with listen=true in unit tests as it requires a running MongoDB replica set
+	// Note: Change stream listening is now always enabled but requires a MongoDB replica set
 	// In a real environment, this would be tested with a properly configured MongoDB replica set
-	t.Log("Skipping test with listen=true as it requires a MongoDB replica set")
+	t.Log("Change stream listening requires a MongoDB replica set")
 }
 
 // TestAddJob tests the AddJob method
@@ -137,7 +120,7 @@ func TestAddJob(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	// Create a test job
@@ -177,7 +160,7 @@ func TestJobInProgress(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	// Create and add a test job
@@ -217,7 +200,7 @@ func TestUpdateJobStatus(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	// Create and add a test job
@@ -307,7 +290,7 @@ func TestDeleteJob(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	// Create and add a test job
@@ -341,7 +324,7 @@ func TestQueueManagerGetJobsCount(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	qm := NewQueueManager(false)
+	qm := NewQueueManager()
 	qm.Connect(collection)
 
 	// Test with empty queue

@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 type CatteryClient struct {
@@ -33,7 +34,12 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 
 	var client = c.httpClient
 
-	var request, _ = http.NewRequest("GET", CatteryServerUrl+"/agent/register/"+id, nil)
+	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "register/", id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var request, _ = http.NewRequest("GET", requestUrl, nil)
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +72,12 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 		return err
 	}
 
-	var request, _ = http.NewRequest("POST", CatteryServerUrl+"/agent/unregister/"+agent.AgentId, bytes.NewBuffer(requestJson))
+	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "unregister/", agent.AgentId)
+	if err != nil {
+		return err
+	}
+
+	var request, _ = http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
 	response, err := client.Do(request)
 	if err != nil {
 		return err

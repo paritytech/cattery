@@ -65,6 +65,14 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		machineType      = tray.GetTrayConfig().Get("machineType")
 	)
 
+	var metadata = createGcpMetadata(
+		map[string]string{
+			"cattery-url":      config.AppConfig.Server.AdvertiseUrl,
+			"cattery-agent-id": tray.GetId(),
+		},
+		tray.GetTrayType().ExtraMetadata,
+	)
+
 	_, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project:                project,
 		Zone:                   zone,
@@ -72,18 +80,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		InstanceResource: &computepb.Instance{
 			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
 			Name:        proto.String(tray.GetId()),
-			Metadata: &computepb.Metadata{
-				Items: []*computepb.Items{
-					{
-						Key:   proto.String("cattery-url"),
-						Value: proto.String(config.AppConfig.Server.AdvertiseUrl),
-					},
-					{
-						Key:   proto.String("cattery-agent-id"),
-						Value: proto.String(tray.GetId()),
-					},
-				},
-			},
+			Metadata:    metadata,
 		},
 	})
 	if err != nil {
@@ -151,23 +148,18 @@ func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) 
 	return instancesClient, err
 }
 
-/*
-vr startupScript = `#! /bin/bash
-apt-get update
-apt-get install -y git dotnet-runtime-8.0 golang-go tar curl
+func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {
 
-mkdir /actions-runner
-cd /actions-runner
+	var items []*computepb.Items
 
-curl -sL -o actions-runner-linux-x64-2.323.0.tar.gz https://github.com/actions/runner/releases/download/v2.323.0/actions-runner-linux-x64-2.323.0.tar.gz
-ls -al
-tar xzf ./actions-runner-linux-x64-2.323.0.tar.gz
+	for _, fieldMap := range fieldMaps {
+		if fieldMap == nil {
+			continue
+		}
+		for k, v := range fieldMap {
+			items = append(items, &computepb.Items{Key: proto.String(k), Value: proto.String(v)})
+		}
+	}
 
-git clone https://github.com/paritytech/cattery.git
-
-cd cattery/src
-export GOMODCACHE=$HOME/golang/pkg/mod
-export HOME=/root
-go build -o /usr/local/bin/cattery
-`
-*/
+	return &computepb.Metadata{Items: items}
+}
