@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func Start() {
@@ -29,6 +30,7 @@ func Start() {
 	webhookMux.HandleFunc("/{$}", handlers.Index)
 	webhookMux.HandleFunc("GET /agent/register/{id}", handlers.AgentRegister)
 	webhookMux.HandleFunc("POST /agent/unregister/{id}", handlers.AgentUnregister)
+	webhookMux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
 
 	webhookMux.HandleFunc("POST /github/{org}", handlers.Webhook)
 
@@ -39,7 +41,10 @@ func Start() {
 
 	// Db connection
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(config.AppConfig.Database.Uri).SetServerAPIOptions(serverAPI)
+	opts := options.Client().
+		ApplyURI(config.AppConfig.Database.Uri).
+		SetServerAPIOptions(serverAPI).
+		SetTimeout(3 * time.Second)
 
 	client, err := mongo.Connect(opts)
 	if err != nil {
