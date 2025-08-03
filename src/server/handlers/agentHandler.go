@@ -9,6 +9,8 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net/http"
+	"os"
+	"path/filepath"
 )
 
 // AgentRegister is a handler for agent registration requests
@@ -138,4 +140,52 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
+}
+
+func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
+	logger = log.WithFields(log.Fields{
+		"handler": "agent",
+		"call":    "AgentDownloadBinary",
+	})
+	logger.Tracef("AgentDownloadBinary: %v", r)
+
+	if r.Method != http.MethodGet {
+		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the current executable path
+	execPath, err := os.Executable()
+	if err != nil {
+		logger.Errorf("Failed to get executable path: %v", err)
+		http.Error(responseWriter, "Failed to get binary path", http.StatusInternalServerError)
+		return
+	}
+
+	// Open the binary file
+	file, err := os.Open(execPath)
+	if err != nil {
+		logger.Errorf("Failed to open binary file: %v", err)
+		http.Error(responseWriter, "Failed to open binary file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// Get file info for size and name
+	fileInfo, err := file.Stat()
+	if err != nil {
+		logger.Errorf("Failed to get file info: %v", err)
+		http.Error(responseWriter, "Failed to get file info", http.StatusInternalServerError)
+		return
+	}
+
+	// Set appropriate headers
+	responseWriter.Header().Set("Content-Type", "application/octet-stream")
+	responseWriter.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(execPath)))
+	responseWriter.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+
+	// Serve the file
+	http.ServeContent(responseWriter, r, filepath.Base(execPath), fileInfo.ModTime(), file)
+
+	logger.Infof("Binary file served: %s (%d bytes)", execPath, fileInfo.Size())
 }
