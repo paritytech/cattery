@@ -4,13 +4,14 @@ import (
 	"cattery/agent/tools"
 	"cattery/lib/agents"
 	"cattery/lib/messages"
-	"github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path"
 	"sync"
 	"syscall"
+
+	"github.com/sirupsen/logrus"
 )
 
 var RunnerFolder string
