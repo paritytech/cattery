@@ -10,6 +10,7 @@ import (
 	"path"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -89,12 +90,9 @@ func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
 		return
 	}
 
-	if isInterrupted {
 	a.logger.Info("Interrupting runner")
 	err := runnerProcess.Signal(syscall.SIGINT)
-	//sleep 5 seconds to allow graceful shutdown
-	a.logger.Info("Waiting 5 seconds for runner to stop gracefully")
-	sleep(5 * time.Second)
+	time.Sleep(5 * time.Second)
 	if err != nil {
 		var errMsg = "Failed to stop runner: " + err.Error()
 		a.logger.Error(errMsg)
