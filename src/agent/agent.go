@@ -92,7 +92,6 @@ func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
 	if isInterrupted {
 		a.logger.Info("Stopping runner")
 		err := runnerProcess.Signal(syscall.SIGINT)
-		//todo: wait for actual stop
 
 		if err != nil {
 			var errMsg = "Failed to stop runner: " + err.Error()
