@@ -31,7 +31,7 @@ type CatteryAgent struct {
 	agent         *agents.Agent
 	agentId       string
 
-	stopped          bool
+	interrupted      bool
 	listenerExecPath string
 }
 
@@ -42,6 +42,7 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 		catteryClient:    createClient(catteryServerUrl),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
+		interrupted:      false,
 	}
 }
 
@@ -68,7 +69,7 @@ func (a *CatteryAgent) Start() {
 		sig := <-sigs
 		a.logger.Info("Got signal ", sig)
 
-		a.stop(commandRun.Process, true)
+		a.interrupt(commandRun.Process)
 	}()
 
 	err = commandRun.Run()
@@ -77,35 +78,36 @@ func (a *CatteryAgent) Start() {
 		a.logger.Error(errMsg)
 	}
 
-	a.stop(commandRun.Process, false)
+	a.stop()
 }
 
-// stop stops the runner process
-func (a *CatteryAgent) stop(runnerProcess *os.Process, isInterrupted bool) {
+func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	if a.stopped {
+	if a.interrupted {
 		return
 	}
 
 	if isInterrupted {
-		a.logger.Info("Stopping runner")
-		err := runnerProcess.Signal(syscall.SIGINT)
-
-		if err != nil {
-			var errMsg = "Failed to stop runner: " + err.Error()
-			a.logger.Error(errMsg)
-		}
+	a.logger.Info("Interrupting runner")
+	err := runnerProcess.Signal(syscall.SIGINT)
+	if err != nil {
+		var errMsg = "Failed to stop runner: " + err.Error()
+		a.logger.Error(errMsg)
 	}
+
+	a.interrupted = true
+}
+
+// stop stops the runner process
+func (a *CatteryAgent) stop() {
 
 	a.logger.Info("Runner stopped")
 
-	a.stopped = true
-
 	var reason messages.UnregisterReason
 
-	if isInterrupted {
+	if a.interrupted {
 		reason = messages.UnregisterReasonPreempted
 	} else {
 		reason = messages.UnregisterReasonDone
