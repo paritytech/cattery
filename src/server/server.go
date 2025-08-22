@@ -7,19 +7,20 @@ import (
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
-	log "github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func Start() {
 
-	var logger = log.Logger{}
+	var logger = log.New()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
