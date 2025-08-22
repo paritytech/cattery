@@ -4,10 +4,11 @@ import (
 	"cattery/lib/trays"
 	"context"
 	"errors"
+	"time"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"time"
 )
 
 type MongodbTrayRepository struct {
@@ -34,11 +35,18 @@ func (m *MongodbTrayRepository) GetById(trayId string) (*trays.Tray, error) {
 	return &result, nil
 }
 
-func (m *MongodbTrayRepository) GetStale(d time.Duration) ([]*trays.Tray, error) {
+func (m *MongodbTrayRepository) GetStale(d time.Duration, rd time.Duration) ([]*trays.Tray, error) {
 	dbResult, err := m.collection.Find(context.Background(),
-		bson.M{
-			"status":        bson.M{"$ne": trays.TrayStatusRunning},
-			"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
+		bson.M{"$or": []bson.M{
+			{
+				"status":        bson.M{"$ne": trays.TrayStatusRunning},
+				"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
+			},
+			{
+				"status":        trays.TrayStatusRunning,
+				"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-rd)},
+			},
+		},
 		})
 	if err != nil {
 		return nil, err
