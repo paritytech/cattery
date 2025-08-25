@@ -3,11 +3,12 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
-	compute "cloud.google.com/go/compute/apiv1"
-	"cloud.google.com/go/compute/apiv1/computepb"
 	"context"
 	"errors"
 	"fmt"
+
+	compute "cloud.google.com/go/compute/apiv1"
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -113,7 +114,8 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 			if e.Code != 404 {
 				return err
 			} else {
-				g.logger.Tracef("Tray deletion error, tray %s not found: %v", tray.GetId(), err)
+				g.logger.Tracef("Tray deletion error, tray %s not found, skipping: %v", tray.GetId(), err)
+				return nil
 			}
 		}
 		return err

@@ -10,8 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type TrayManager struct {
@@ -153,7 +154,7 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 				time.Sleep(interval / 2)
 
-				stale, err := tm.trayRepository.GetStale(interval)
+				stale, err := tm.trayRepository.GetStale(interval, interval*2)
 				if err != nil {
 					return
 				}
