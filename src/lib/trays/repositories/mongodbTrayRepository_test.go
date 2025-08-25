@@ -482,7 +482,7 @@ func TestGetStale(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{staleTray1, staleTray2, freshTray1, freshTray2})
 
 	// Test GetStale with 5 minute duration
-	staleTrays, err := repo.GetStale(5 * time.Minute)
+	staleTrays, err := repo.GetStale(5*time.Minute, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestGetStale(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{freshTray1, freshTray2})
 
 	// Test GetStale again with 5 minute duration
-	staleTrays, err = repo.GetStale(5 * time.Minute)
+	staleTrays, err = repo.GetStale(5*time.Minute, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
