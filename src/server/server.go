@@ -80,10 +80,10 @@ func Start() {
 
 	// Start the server
 	go func() {
-		log.Println("Starting webhook server on", config.AppConfig.Server.ListenAddress)
+		logger.Infof("Starting webhook server on %s", config.AppConfig.Server.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 			return
 		}
 	}()

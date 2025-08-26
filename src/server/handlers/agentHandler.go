@@ -7,16 +7,17 @@ import (
 	"cattery/lib/messages"
 	"encoding/json"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // AgentRegister is a handler for agent registration requests
 func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRegister",
 	})
@@ -104,7 +105,7 @@ func validateAgentId(agentId string) string {
 
 // AgentUnregister is a handler for agent unregister requests
 func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentUnregister",
 	})
@@ -143,7 +144,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentDownloadBinary",
 	})

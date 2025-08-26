@@ -4,18 +4,20 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/jobs"
 	"fmt"
+	"net/http"
+
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
-	"net/http"
 )
-
-var logger = log.WithFields(log.Fields{
-	"name": "server",
-})
 
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
-	var logger = logger.WithField("action", "Webhook")
+	var logger = log.WithFields(
+		log.Fields{
+			"handler": "webhook",
+			"call":    "Webhook",
+		},
+	)
 	var webhookData *github.WorkflowJobEvent
 
 	if r.Method != http.MethodPost {
@@ -36,6 +38,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
+	logger = logger.WithField("githubOrg", organizationName)
 
 	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
 	if err != nil {
@@ -58,12 +61,14 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Tracef("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
 		return
 	}
+	logger = logger.WithField("jobRunId", webhookData.WorkflowJob.GetID())
 
-	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
 	logger.Debugf("Action: %s", webhookData.GetAction())
 
 	var job = jobs.FromGithubModel(webhookData)
 	job.TrayType = trayType.Name
+
+	logger = logger.WithField("trayType", trayType.Name)
 
 	switch webhookData.GetAction() {
 	case "queued":
