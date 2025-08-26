@@ -72,7 +72,7 @@ func Start() {
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
-		logger.Errorf("Error loading queue manager: %v", err)
+		logger.Errorf("Failed to load queue manager: %v", err)
 	}
 
 	handlers.TrayManager.HandleJobsQueue(context.Background(), handlers.QueueManager)
@@ -80,10 +80,10 @@ func Start() {
 
 	// Start the server
 	go func() {
-		log.Println("Starting webhook server on", config.AppConfig.Server.ListenAddress)
+		logger.Infof("Starting webhook server on %s", config.AppConfig.Server.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 			return
 		}
 	}()
