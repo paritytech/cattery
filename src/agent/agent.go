@@ -4,13 +4,14 @@ import (
 	"cattery/agent/tools"
 	"cattery/lib/agents"
 	"cattery/lib/messages"
-	"github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path"
 	"sync"
 	"syscall"
+
+	"github.com/sirupsen/logrus"
 )
 
 var RunnerFolder string
@@ -37,7 +38,7 @@ type CatteryAgent struct {
 func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId string) *CatteryAgent {
 	return &CatteryAgent{
 		mutex:            sync.Mutex{},
-		logger:           logrus.WithField("name", "agent"),
+		logger:           logrus.WithFields(logrus.Fields{"name": "agent", "agentId": agentId}),
 		catteryClient:    createClient(catteryServerUrl),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
@@ -47,6 +48,8 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 
 func (a *CatteryAgent) Start() {
 
+	a.logger.Info("Starting Cattery Agent")
+
 	agent, jitConfig, err := a.catteryClient.RegisterAgent(a.agentId)
 	if err != nil {
 		errMsg := "Failed to register agent: " + err.Error()
@@ -54,6 +57,8 @@ func (a *CatteryAgent) Start() {
 		return
 	}
 	a.agent = agent
+
+	a.logger.Info("Agent registered, starting Listener")
 
 	var commandRun = exec.Command(a.listenerExecPath, "run", "--jitconfig", *jitConfig)
 	commandRun.Stdout = os.Stdout
@@ -101,14 +106,14 @@ func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
 // stop stops the runner process
 func (a *CatteryAgent) stop() {
 
-	a.logger.Info("Runner stopped")
-
 	var reason messages.UnregisterReason
 
 	if a.interrupted {
 		reason = messages.UnregisterReasonPreempted
+		a.logger.Infof("Runner has been interrupted")
 	} else {
 		reason = messages.UnregisterReasonDone
+		a.logger.Infof("Runner has finished its job")
 	}
 
 	err := a.catteryClient.UnregisterAgent(a.agent, reason)
@@ -118,6 +123,7 @@ func (a *CatteryAgent) stop() {
 	}
 
 	if a.agent.Shutdown {
+		a.logger.Debugf("Shutdown now")
 		tools.Shutdown()
 	}
 }
