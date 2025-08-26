@@ -42,14 +42,14 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
 	if err != nil {
-		logger.Errorf("Error validating payload: %v", err)
-		http.Error(responseWriter, "Error validating payload", http.StatusBadRequest)
+		logger.Errorf("Failed to validate payload: %v", err)
+		http.Error(responseWriter, "Failed to validate payload", http.StatusBadRequest)
 		return
 	}
 
 	hook, err := github.ParseWebHook(r.Header.Get("X-GitHub-Event"), payload)
 	if err != nil {
-		logger.Errorf("Error parsing webhook: %v", err)
+		logger.Errorf("Failed to parse webhook: %v", err)
 		return
 	}
 	webhookData = hook.(*github.WorkflowJobEvent)
@@ -89,12 +89,12 @@ func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.
 
 	err := QueueManager.UpdateJobStatus(job.Id, jobs.JobStatusFinished)
 	if err != nil {
-		logger.Errorf("Error updating job status: %v", err)
+		logger.Errorf("Failed to update job status: %v", err)
 	}
 
 	_, err = TrayManager.DeleteTray(job.RunnerName)
 	if err != nil {
-		logger.Errorf("Error deleting tray: %v", err)
+		logger.Errorf("Failed to delete tray: %v", err)
 	}
 }
 

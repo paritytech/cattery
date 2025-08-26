@@ -62,7 +62,7 @@ func (qm *QueueManager) Load() error {
 			var event changeEvent[jobs.Job]
 			decodeErr := qm.changeStream.Decode(&event)
 			if decodeErr != nil {
-				log.Error("Error decoding change stream: ", decodeErr)
+				log.Error("Failed to decode change stream: ", decodeErr)
 				qm.Load()
 			}
 

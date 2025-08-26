@@ -72,7 +72,7 @@ func Start() {
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
-		logger.Errorf("Error loading queue manager: %v", err)
+		logger.Errorf("Failed to load queue manager: %v", err)
 	}
 
 	handlers.TrayManager.HandleJobsQueue(context.Background(), handlers.QueueManager)

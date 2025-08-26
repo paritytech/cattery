@@ -85,7 +85,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		},
 	})
 	if err != nil {
-		g.logger.Errorf("Error creating tray: %v", err)
+		g.logger.Errorf("Failed to create tray: %v", err)
 		return err
 	}
 
@@ -114,7 +114,7 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 			if e.Code != 404 {
 				return err
 			} else {
-				g.logger.Tracef("Tray deletion error, tray %s not found, skipping: %v", tray.GetId(), err)
+				g.logger.Tracef("Tray not found during deletion; skipping: %v (tray %s)", err, tray.GetId())
 				return nil
 			}
 		}

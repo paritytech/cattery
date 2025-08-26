@@ -61,7 +61,7 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	err := dockerCommand.Run()
 
 	if err != nil {
-		d.logger.Error("Error running docker command: ", err)
+		d.logger.Error("Failed to run docker command: ", err)
 		return err
 	}
 
