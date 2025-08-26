@@ -47,6 +47,13 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	var trayType = config.AppConfig.GetTrayType(tray.GetTrayTypeName())
+	if trayType == nil {
+		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.GetTrayTypeName())
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
+	logger = logger.WithFields(log.Fields{"trayType": trayType.Name})
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
@@ -56,7 +63,9 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		var errMsg = fmt.Sprintf("Organization '%s' is invalid: %v", tray.GetGitHubOrgName(), err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
 	}
+	logger = logger.WithFields(log.Fields{"githubOrg": tray.GetGitHubOrgName()})
 
 	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.GetId(),
