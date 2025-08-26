@@ -32,11 +32,11 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var id = r.PathValue("id")
 	var agentId = validateAgentId(id)
 
-	logger = log.WithFields(log.Fields{
+	logger = logger.WithFields(log.Fields{
 		"agentId": agentId,
 	})
 
-	logger.Debugln("Agent registration request")
+	logger.Debug("Agent registration request")
 
 	var tray, err = TrayManager.Registering(agentId)
 	if err != nil {
@@ -65,7 +65,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("Failed to generate jitRunnerConfig: %v", err)
 		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
 		return
 	}
@@ -85,14 +85,14 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	err = json.NewEncoder(responseWriter).Encode(registerResponse)
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("Failed to encode response: %v", err)
 		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
 	_, err = TrayManager.Registered(agentId, jitRunnerConfig.GetRunner().GetID())
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("%v", err)
 	}
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
@@ -137,7 +137,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
 
 	if err != nil {
-		logger.Errorln("Failed to delete tray:", err)
+		logger.Errorf("Failed to delete tray: %v", err)
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)

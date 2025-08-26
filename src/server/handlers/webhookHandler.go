@@ -114,7 +114,7 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 		logger.Errorf("Failed to set job '%s/%s' as in progress to tray, tray not found: %v", job.WorkflowName, job.Name, err)
 	}
 	if err != nil {
-		log.Errorf("Failed to set job '%s/%s' as in progress to tray: %v", job.WorkflowName, job.Name, err)
+		logger.Errorf("Failed to set job '%s/%s' as in progress to tray: %v", job.WorkflowName, job.Name, err)
 	}
 
 	logger.Infof("Tray '%s' is running '%s/%s' in '%s/%s'",
