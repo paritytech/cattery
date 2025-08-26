@@ -31,7 +31,7 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	provider.providerConfig = providerConfig
 
 	provider.instanceClient = nil
-	provider.logger = logrus.WithFields(logrus.Fields{name: "gceProvider"})
+	provider.logger = logrus.WithFields(logrus.Fields{"name": "gceProvider"})
 
 	client, err := provider.createInstancesClient()
 	if err != nil {
