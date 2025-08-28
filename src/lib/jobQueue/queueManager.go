@@ -4,11 +4,12 @@ import (
 	"cattery/lib/jobs"
 	"context"
 	"errors"
+	"sync"
+
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"sync"
 )
 
 type QueueManager struct {
@@ -97,6 +98,7 @@ func (qm *QueueManager) AddJob(job *jobs.Job) error {
 }
 
 func (qm *QueueManager) JobInProgress(jobId int64) error {
+	//TODO: remove method, use UpdateJobStatus
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
 		log.Errorf("No job found with id %v", jobId)
@@ -115,8 +117,7 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
-		log.Errorf("No job found with id %v", jobId)
-		return errors.New("No job found with id ")
+		return nil
 	}
 
 	switch status {
