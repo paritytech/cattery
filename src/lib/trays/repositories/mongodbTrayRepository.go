@@ -42,10 +42,6 @@ func (m *MongodbTrayRepository) GetStale(d time.Duration, rd time.Duration) ([]*
 				"status":        bson.M{"$ne": trays.TrayStatusRunning},
 				"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
 			},
-			{
-				"status":        trays.TrayStatusRunning,
-				"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-rd)},
-			},
 		},
 		})
 	if err != nil {
