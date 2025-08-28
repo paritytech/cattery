@@ -280,8 +280,8 @@ func TestUpdateJobStatus(t *testing.T) {
 
 	// Test UpdateJobStatus with non-existent job
 	err = qm.UpdateJobStatus(999, jobs.JobStatusInProgress)
-	if err == nil {
-		t.Error("Expected error for non-existent job, got nil")
+	if err != nil {
+		t.Fatalf("Did not expect error for non-existent job, got: %v", err)
 	}
 }
 
