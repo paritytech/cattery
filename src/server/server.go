@@ -32,7 +32,7 @@ func Start() {
 	webhookMux.HandleFunc("GET /agent/register/{id}", handlers.AgentRegister)
 	webhookMux.HandleFunc("POST /agent/unregister/{id}", handlers.AgentUnregister)
 	webhookMux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
-	// webhookMux.HandleFunc("POST /agent/restart/{id}", handlers.AgentRestart)
+	webhookMux.HandleFunc("POST /agent/interrupt/{id}", handlers.AgentInterrupt)
 
 	webhookMux.HandleFunc("POST /github/{org}", handlers.Webhook)
 

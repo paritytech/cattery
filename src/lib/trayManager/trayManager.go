@@ -63,6 +63,18 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 	return nil
 }
 
+func (tm *TrayManager) GetTrayById(trayId string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.GetById(trayId)
+	if err != nil {
+		return nil, err
+	}
+	if tray == nil {
+		log.Debugf("Tray '%s' not found", trayId)
+		return nil, nil
+	}
+	return tray, nil
+}
+
 func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0)
 	if err != nil {

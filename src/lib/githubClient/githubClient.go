@@ -4,10 +4,11 @@ import (
 	"cattery/lib/config"
 	"context"
 	"errors"
+	"net/http"
+
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
-	"net/http"
 )
 
 var githubClients = make(map[string]*github.Client)
@@ -84,3 +85,5 @@ func createClient(org *config.GitHubOrganization) *github.Client {
 
 	return client
 }
+
+// func
