@@ -74,7 +74,7 @@ func (m *MongoSyncMap[T, Y]) Load(collection *mongo.Collection) error {
 				var event changeEvent[Y]
 				decodeErr := m.changeStream.Decode(&event)
 				if decodeErr != nil {
-					log.Error("Error decoding change stream: ", decodeErr)
+					log.Error("Failed to decode change stream: ", decodeErr)
 					m.Load(collection)
 				}
 

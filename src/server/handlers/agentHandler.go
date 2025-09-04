@@ -7,16 +7,17 @@ import (
 	"cattery/lib/messages"
 	"encoding/json"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // AgentRegister is a handler for agent registration requests
 func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRegister",
 	})
@@ -31,11 +32,11 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	var id = r.PathValue("id")
 	var agentId = validateAgentId(id)
 
-	logger = log.WithFields(log.Fields{
+	logger = logger.WithFields(log.Fields{
 		"agentId": agentId,
 	})
 
-	logger.Debugln("Agent registration request")
+	logger.Debug("Agent registration request")
 
 	var tray, err = TrayManager.Registering(agentId)
 	if err != nil {
@@ -46,6 +47,13 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	var trayType = config.AppConfig.GetTrayType(tray.GetTrayTypeName())
+	if trayType == nil {
+		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.GetTrayTypeName())
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
+	logger = logger.WithFields(log.Fields{"trayType": trayType.Name})
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
@@ -55,7 +63,9 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		var errMsg = fmt.Sprintf("Organization '%s' is invalid: %v", tray.GetGitHubOrgName(), err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
 	}
+	logger = logger.WithFields(log.Fields{"githubOrg": tray.GetGitHubOrgName()})
 
 	jitRunnerConfig, err := client.CreateJITConfig(
 		tray.GetId(),
@@ -64,7 +74,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("Failed to generate jitRunnerConfig: %v", err)
 		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
 		return
 	}
@@ -84,14 +94,14 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	err = json.NewEncoder(responseWriter).Encode(registerResponse)
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("Failed to encode response: %v", err)
 		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
 	_, err = TrayManager.Registered(agentId, jitRunnerConfig.GetRunner().GetID())
 	if err != nil {
-		logger.Errorln(err)
+		logger.Errorf("%v", err)
 	}
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
@@ -104,7 +114,7 @@ func validateAgentId(agentId string) string {
 
 // AgentUnregister is a handler for agent unregister requests
 func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentUnregister",
 	})
@@ -136,14 +146,14 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
 
 	if err != nil {
-		logger.Errorln("Failed to delete tray:", err)
+		logger.Errorf("Failed to delete tray: %v", err)
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
-	logger = log.WithFields(log.Fields{
+	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentDownloadBinary",
 	})

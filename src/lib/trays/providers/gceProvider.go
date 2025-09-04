@@ -3,11 +3,12 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
-	compute "cloud.google.com/go/compute/apiv1"
-	"cloud.google.com/go/compute/apiv1/computepb"
 	"context"
 	"errors"
 	"fmt"
+
+	compute "cloud.google.com/go/compute/apiv1"
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -30,7 +31,7 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 	provider.providerConfig = providerConfig
 
 	provider.instanceClient = nil
-	provider.logger = logrus.WithFields(logrus.Fields{name: "gceProvider"})
+	provider.logger = logrus.WithFields(logrus.Fields{"name": "gceProvider"})
 
 	client, err := provider.createInstancesClient()
 	if err != nil {
@@ -84,7 +85,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		},
 	})
 	if err != nil {
-		g.logger.Errorf("Error creating tray: %v", err)
+		g.logger.Errorf("Failed to create tray: %v", err)
 		return err
 	}
 
@@ -113,7 +114,8 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 			if e.Code != 404 {
 				return err
 			} else {
-				g.logger.Tracef("Tray deletion error, tray %s not found: %v", tray.GetId(), err)
+				g.logger.Tracef("Tray not found during deletion; skipping: %v (tray %s)", err, tray.GetId())
+				return nil
 			}
 		}
 		return err

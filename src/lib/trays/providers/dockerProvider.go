@@ -57,11 +57,11 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 		image,
 		"/action-runner/cattery/cattery", "agent", "-i", tray.GetId(), "-s", "http://host.docker.internal:5137", "--runner-folder", "/action-runner")
 
+	d.logger.Info("Running docker command: ", dockerCommand.String())
 	err := dockerCommand.Run()
-	log.Info("Running docker command: ", dockerCommand.String())
 
 	if err != nil {
-		d.logger.Error("Error running docker command: ", err)
+		d.logger.Error("Failed to run docker command: ", err)
 		return err
 	}
 

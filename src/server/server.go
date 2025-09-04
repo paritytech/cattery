@@ -7,19 +7,20 @@ import (
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
-	log "github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func Start() {
 
-	var logger = log.Logger{}
+	var logger = log.New()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
@@ -71,7 +72,7 @@ func Start() {
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
-		logger.Errorf("Error loading queue manager: %v", err)
+		logger.Errorf("Failed to load queue manager: %v", err)
 	}
 
 	handlers.TrayManager.HandleJobsQueue(context.Background(), handlers.QueueManager)
@@ -79,10 +80,10 @@ func Start() {
 
 	// Start the server
 	go func() {
-		log.Println("Starting webhook server on", config.AppConfig.Server.ListenAddress)
+		logger.Infof("Starting webhook server on %s", config.AppConfig.Server.ListenAddress)
 		err := webhookServer.ListenAndServe()
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 			return
 		}
 	}()

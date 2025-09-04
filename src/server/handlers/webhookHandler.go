@@ -10,12 +10,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var logger = log.WithFields(log.Fields{
-	"name": "server",
-})
-
 func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = logger.WithField("action", "Webhook")
+
+	var logger = log.WithFields(
+		log.Fields{
+			"handler": "webhook",
+			"call":    "Webhook",
+		},
+	)
+	var webhookData *github.WorkflowJobEvent
+
+	logger.Tracef("Webhook received")
 
 	if r.Method != http.MethodPost {
 		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
@@ -47,17 +52,18 @@ func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
+	logger = logger.WithField("githubOrg", organizationName)
 
 	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
 	if err != nil {
-		logger.Errorf("Error validating payload: %v", err)
-		http.Error(responseWriter, "Error validating payload", http.StatusBadRequest)
+		logger.Errorf("Failed to validate payload: %v", err)
+		http.Error(responseWriter, "Failed to validate payload", http.StatusBadRequest)
 		return
 	}
 
 	hook, err := github.ParseWebHook(r.Header.Get("X-GitHub-Event"), payload)
 	if err != nil {
-		logger.Errorf("Error parsing webhook: %v", err)
+		logger.Errorf("Failed to parse webhook: %v", err)
 		return
 	}
 	webhookData, ok := hook.(*github.WorkflowJobEvent)
@@ -73,12 +79,14 @@ func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		logger.Tracef("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
 		return
 	}
+	logger = logger.WithField("jobRunId", webhookData.WorkflowJob.GetID())
 
-	logger = logger.WithField("runId", webhookData.WorkflowJob.GetID())
 	logger.Debugf("Action: %s", webhookData.GetAction())
 
 	job := jobs.FromGithubModel(webhookData)
 	job.TrayType = trayType.Name
+
+	logger = logger.WithField("trayType", trayType.Name)
 
 	switch webhookData.GetAction() {
 	case "queued":
@@ -129,14 +137,14 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 // handles the 'completed' action of the workflow job event
 func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	err := QueueManager.UpdateJobStatus(job.Id, jobs.JobStatusFinished)
-	if err != nil {
-		logger.Errorf("Error updating job status: %v", err)
-	}
+	//err := QueueManager.UpdateJobStatus(job.Id, jobs.JobStatusFinished)
+	//if err != nil {
+	//	logger.Errorf("Failed to update job status: %v", err)
+	//}
 
-	_, err = TrayManager.DeleteTray(job.RunnerName)
+	_, err := TrayManager.DeleteTray(job.RunnerName)
 	if err != nil {
-		logger.Errorf("Error deleting tray: %v", err)
+		logger.Errorf("Failed to delete tray: %v", err)
 	}
 }
 
@@ -156,13 +164,12 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 		logger.Errorf("Failed to set job '%s/%s' as in progress to tray, tray not found: %v", job.WorkflowName, job.Name, err)
 	}
 	if err != nil {
-		log.Errorf("Failed to set job '%s/%s' as in progress to tray: %v", job.WorkflowName, job.Name, err)
+		logger.Errorf("Failed to set job '%s/%s' as in progress to tray: %v", job.WorkflowName, job.Name, err)
 	}
 
-	logger.Infof("Tray '%s' is running '%s/%s' in '%s/%s'",
+	logger.Infof("Tray '%s' is running '%s/%s/%s/%s'",
 		job.RunnerName,
-		job.WorkflowName, job.Name,
-		job.Organization, job.Repository,
+		job.Organization, job.Repository, job.WorkflowName, job.Name,
 	)
 }
 
@@ -177,7 +184,7 @@ func handleQueuedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Ent
 		return
 	}
 
-	logger.Infof("Enqueued job %s/%s/%s ", job.Repository, job.WorkflowName, job.Name)
+	logger.Infof("Enqueued job %s/%s/%s/%s ", job.Organization, job.Repository, job.WorkflowName, job.Name)
 }
 
 func getTrayType(webhookData *github.WorkflowJobEvent) *config.TrayType {
