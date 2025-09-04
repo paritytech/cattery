@@ -18,7 +18,6 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 			"call":    "Webhook",
 		},
 	)
-	var webhookData *github.WorkflowJobEvent
 
 	logger.Tracef("Webhook received")
 
@@ -27,10 +26,20 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("X-GitHub-Event") != "workflow_job" {
-		logger.Debugf("Ignoring webhook request: X-GitHub-Event is not 'workflow_job'")
+	event := r.Header.Get("X-GitHub-Event")
+	if event != "workflow_job" && event != "workflow_run" {
+		logger.Debugf("Ignoring webhook request: X-GitHub-Event is not 'workflow_job' or 'workflow_run', got '%s'", event)
 		return
 	}
+	switch event {
+	case "workflow_job":
+		handleWorkflowJobWebhook(responseWriter, r, logger)
+	case "workflow_run":
+		handleWorkflowRunWebhook(responseWriter, r, logger)
+	}
+}
+func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
+	var webhookData *github.WorkflowJobEvent
 
 	var organizationName = r.PathValue("org")
 	var org = config.AppConfig.GetGitHubOrg(organizationName)
@@ -54,11 +63,15 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorf("Failed to parse webhook: %v", err)
 		return
 	}
-	webhookData = hook.(*github.WorkflowJobEvent)
+	webhookData, ok := hook.(*github.WorkflowJobEvent)
+	if !ok {
+		logger.Errorf("Webhook payload is not WorkflowJobEvent")
+		return
+	}
 
 	logger.Tracef("Event payload: %v", payload)
 
-	var trayType = getTrayType(webhookData)
+	trayType := getTrayType(webhookData)
 	if trayType == nil {
 		logger.Tracef("Ignoring action: '%s', for job '%s', no tray type found for labels: %v", webhookData.GetAction(), *webhookData.WorkflowJob.Name, webhookData.WorkflowJob.Labels)
 		return
@@ -67,7 +80,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugf("Action: %s", webhookData.GetAction())
 
-	var job = jobs.FromGithubModel(webhookData)
+	job := jobs.FromGithubModel(webhookData)
 	job.TrayType = trayType.Name
 
 	logger = logger.WithField("trayType", trayType.Name)
@@ -83,6 +96,38 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Debugf("Ignoring action: '%s', for job '%s'", webhookData.GetAction(), *webhookData.WorkflowJob.Name)
 		return
 	}
+}
+
+func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
+	logger.Debugf("Received workflow_run webhook")
+	var webhookData *github.WorkflowRunEvent
+	organizationName := r.PathValue("org")
+	org := config.AppConfig.GetGitHubOrg(organizationName)
+	if org == nil {
+		errMsg := fmt.Sprintf("Organization '%s' not found in config", organizationName)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
+	}
+	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
+	if err != nil {
+		logger.Errorf("Error validating payload: %v", err)
+		http.Error(responseWriter, "Error validating payload", http.StatusBadRequest)
+		return
+	}
+	hook, err := github.ParseWebHook(r.Header.Get("X-GitHub-Event"), payload)
+	if err != nil {
+		logger.Errorf("Error parsing webhook: %v", err)
+		http.Error(responseWriter, "Error parsing webhook", http.StatusBadRequest)
+		return
+	}
+	webhookData, ok := hook.(*github.WorkflowRunEvent)
+	if !ok {
+		logger.Errorf("Webhook payload is not WorkflowRunEvent")
+		http.Error(responseWriter, "Webhook payload is not WorkflowRunEvent", http.StatusBadRequest)
+		return
+	}
+	logger.Debugf("Action: %s, Workflow run ID: %d", webhookData.GetAction(), webhookData.GetWorkflowRun().GetID())
 }
 
 // handleCompletedWorkflowJob
@@ -111,7 +156,7 @@ func handleInProgressWorkflowJob(responseWriter http.ResponseWriter, logger *log
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 	}
 
-	tray, err := TrayManager.SetJob(job.RunnerName, job.Id)
+	tray, err := TrayManager.SetJob(job.RunnerName, job.Id, job.WorkflowId)
 	if tray == nil {
 		logger.Errorf("Failed to set job '%s/%s' as in progress to tray, tray not found: %v", job.WorkflowName, job.Name, err)
 	}
