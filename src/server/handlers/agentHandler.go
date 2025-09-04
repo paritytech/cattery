@@ -150,6 +150,8 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
+
+	// if unregisterReuest
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
@@ -199,3 +201,30 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("Binary file served: %s (%d bytes)", execPath, fileInfo.Size())
 }
+
+// func AgentRestart(responseWriter http.ResponseWriter, r *http.Request) {
+// 	var logger = log.WithFields(log.Fields{
+// 		"handler": "agent",
+// 		"call":    "AgentRestart",
+// 	})
+
+// 	logger.Tracef("AgentRestart: %v", r)
+
+// 	if r.Method != http.MethodPost {
+// 		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
+// 		return
+// 	}
+
+// 	var id = r.PathValue("id")
+// 	var agentId = validateAgentId(id)
+
+// 	logger = logger.WithFields(log.Fields{
+// 		"agentId": agentId,
+// 	})
+
+// 	logger.Debug("Agent restart request with id " + agentId)
+
+// 	// Find the tray associated with the agent ID and get workflow ID
+
+// 	// Put workflow ID to restart queue
+// }

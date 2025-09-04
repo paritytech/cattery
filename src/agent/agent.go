@@ -94,11 +94,19 @@ func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
 	}
 
 	a.logger.Info("Interrupting runner")
-	err := runnerProcess.Signal(syscall.SIGINT)
+	// SIGINT from go kills listener immediately, so we use pkill
+	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
+	err := commandInterruptRun.Run()
 	if err != nil {
-		var errMsg = "Failed to stop runner: " + err.Error()
+		var errMsg = "Failed to interrupt runner: " + err.Error()
 		a.logger.Error(errMsg)
 	}
+	// TODO: debug why SIGINT does not work correctly
+	// err := runnerProcess.Signal(syscall.SIGINT)
+	// if err != nil {
+	// 	var errMsg = "Failed to stop runner: " + err.Error()
+	// 	a.logger.Error(errMsg)
+	// }
 
 	a.interrupted = true
 }

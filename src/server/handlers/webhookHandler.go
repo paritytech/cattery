@@ -127,7 +127,14 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		http.Error(responseWriter, "Webhook payload is not WorkflowRunEvent", http.StatusBadRequest)
 		return
 	}
-	logger.Debugf("Action: %s, Workflow run ID: %d", webhookData.GetAction(), webhookData.GetWorkflowRun().GetID())
+	conclusion := webhookData.GetWorkflowRun().GetConclusion()
+	logger.Debugf("Action: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), webhookData.GetWorkflowRun().GetID(), conclusion)
+
+	// Parse the whole object to get all the data
+
+	// On "completed" action check restart queue and restart failed jobs
+
+	// On conclusion "cancelled" or "failure"
 }
 
 // handleCompletedWorkflowJob
