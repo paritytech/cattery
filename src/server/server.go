@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	restarterRepo "cattery/lib/restarter/repositories"
+
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -70,6 +72,10 @@ func Start() {
 	//QueueManager initialization
 	handlers.QueueManager = jobQueue.NewQueueManager()
 	handlers.QueueManager.Connect(database.Collection("jobs"))
+
+	// Initialize restarter repository
+	var RestartManager = restarterRepo.NewMongodbRestarterRepository()
+	RestartManager.Connect(database.Collection("restarters"))
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
