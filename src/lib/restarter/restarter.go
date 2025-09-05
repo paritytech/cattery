@@ -3,7 +3,8 @@ package restarter
 import (
 	"cattery/lib/githubClient"
 	"cattery/lib/restarter/repositories"
-	"fmt"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type WorkflowRestarter struct {
@@ -20,11 +21,27 @@ func (wr *WorkflowRestarter) RequestRestart(workflowRunId int64) error {
 	return wr.repository.SaveRestartRequest(workflowRunId)
 }
 
-func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string) error {
+func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string, repoName string) error {
+
+	// check that workflow is in db
+	log.Debugf("Checking restart request for workflow run id %d", workflowRunId)
+	exists, err := wr.repository.CheckRestartRequest(workflowRunId)
+	if err != nil {
+		log.Errorf("Failed to check restart request: %s", err.Error())
+		return err
+	}
+	if !exists {
+		log.Debugf("No restart request found for workflow run id %d", workflowRunId)
+		return nil
+	}
 	ghClient, err := githubClient.NewGithubClientWithOrgName(ghOrg)
 	if err != nil {
-		fmt.Errorf("Failed to get GitHub client: %s", err.Error())
+		log.Errorf("Failed to get GitHub client: %s", err.Error())
 	}
-	_ = ghClient
+	err = ghClient.RestartFailedJobs(repoName, workflowRunId)
+	if err != nil {
+		log.Errorf("Failed to restart workflow run id %d: %s", workflowRunId, err.Error())
+		return err
+	}
 	return nil
 }

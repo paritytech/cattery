@@ -128,13 +128,20 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		return
 	}
 	conclusion := webhookData.GetWorkflowRun().GetConclusion()
-	logger.Debugf("Action: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), webhookData.GetWorkflowRun().GetID(), conclusion)
+	repoName := webhookData.GetRepo().GetName()
+	orgName := webhookData.GetOrg().GetLogin()
+	logger.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
 
-	// Parse the whole object to get all the data
-
-	// On "completed" action check restart queue and restart failed jobs
-
-	// On conclusion "cancelled" or "failure"
+	// On "completed" action and "failure" conlcustion trigger restart
+	if webhookData.GetAction() == "completed" && conclusion == "failure" {
+		logger.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		err := RestartManager.Restart(*webhookData.WorkflowRun.ID, orgName, repoName)
+		if err != nil {
+			logger.Errorf("Failed to request restart: %v", err)
+			http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
+		}
+		return
+	}
 }
 
 // handleCompletedWorkflowJob

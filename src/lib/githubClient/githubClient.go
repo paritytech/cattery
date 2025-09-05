@@ -58,6 +58,12 @@ func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 	return err
 }
 
+func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
+	// _, err := gc.client.Actions.RerunWorkflowByID(context.Background(), gc.Org.Name, "", workflowId)
+	_, err := gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)
+	return err
+}
+
 // createClient creates a new GitHub client
 func createClient(org *config.GitHubOrganization) *github.Client {
 
