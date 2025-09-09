@@ -59,8 +59,13 @@ func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 }
 
 func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
-	// _, err := gc.client.Actions.RerunWorkflowByID(context.Background(), gc.Org.Name, "", workflowId)
-	_, err := gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)
+	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowId)
+	if err != nil {
+		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
+		// return err
+	}
+	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
+	_, err = gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)
 	return err
 }
 
@@ -91,5 +96,3 @@ func createClient(org *config.GitHubOrganization) *github.Client {
 
 	return client
 }
-
-// func

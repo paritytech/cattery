@@ -3,6 +3,7 @@ package server
 import (
 	"cattery/lib/config"
 	"cattery/lib/jobQueue"
+	"cattery/lib/restarter"
 	"cattery/lib/trayManager"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
@@ -74,8 +75,10 @@ func Start() {
 	handlers.QueueManager.Connect(database.Collection("jobs"))
 
 	// Initialize restarter repository
-	var RestartManager = restarterRepo.NewMongodbRestarterRepository()
-	RestartManager.Connect(database.Collection("restarters"))
+	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
+	restartManagerRepository.Connect(database.Collection("restarters"))
+
+	handlers.RestartManager = restarter.NewWorkflowRestarter(restartManagerRepository)
 
 	err = handlers.QueueManager.Load()
 	if err != nil {

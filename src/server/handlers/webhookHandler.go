@@ -27,15 +27,15 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
-	if event != "workflow_job" && event != "workflow_run" {
-		logger.Debugf("Ignoring webhook request: X-GitHub-Event is not 'workflow_job' or 'workflow_run', got '%s'", event)
-		return
-	}
+
 	switch event {
 	case "workflow_job":
 		handleWorkflowJobWebhook(responseWriter, r, logger)
 	case "workflow_run":
 		handleWorkflowRunWebhook(responseWriter, r, logger)
+	default:
+		logger.Debugf("Ignoring webhook request: X-GitHub-Event is not 'workflow_job' or 'workflow_run', got '%s'", event)
+		return
 	}
 }
 func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
@@ -132,7 +132,7 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 	orgName := webhookData.GetOrg().GetLogin()
 	logger.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
 
-	// On "completed" action and "failure" conlcustion trigger restart
+	// On "completed" action and "failure" conclusion trigger restart
 	if webhookData.GetAction() == "completed" && conclusion == "failure" {
 		logger.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
 		err := RestartManager.Restart(*webhookData.WorkflowRun.ID, orgName, repoName)

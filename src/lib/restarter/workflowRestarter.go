@@ -40,7 +40,7 @@ func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string, repoName
 	}
 	err = ghClient.RestartFailedJobs(repoName, workflowRunId)
 	if err != nil {
-		log.Errorf("Failed to restart workflow run id %d: %s", workflowRunId, err.Error())
+		log.Errorf("Failed to restart workflow run id %d: %v", workflowRunId, err)
 		return err
 	}
 	return nil
