@@ -43,5 +43,10 @@ func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string, repoName
 		log.Errorf("Failed to restart workflow run id %d: %v", workflowRunId, err)
 		return err
 	}
+	err = wr.repository.DeleteRestartRequest(workflowRunId)
+	if err != nil {
+		log.Errorf("Failed to delete restart request for workflow run id %d: %v", workflowRunId, err)
+		return err
+	}
 	return nil
 }
