@@ -63,8 +63,20 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 	return nil
 }
 
+func (tm *TrayManager) GetTrayById(trayId string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.GetById(trayId)
+	if err != nil {
+		return nil, err
+	}
+	if tray == nil {
+		log.Debugf("Tray '%s' not found", trayId)
+		return nil, nil
+	}
+	return tray, nil
+}
+
 func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +89,7 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, ghRunnerId)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +101,8 @@ func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray,
 	return tray, nil
 }
 
-func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, 0)
+func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +116,7 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64) (*trays.Tray, error
 
 func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
-	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0)
+	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0, 0)
 	if err != nil {
 		return nil, err
 	}

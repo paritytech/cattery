@@ -4,10 +4,11 @@ import (
 	"cattery/lib/config"
 	"context"
 	"errors"
+	"net/http"
+
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
-	"net/http"
 )
 
 var githubClients = make(map[string]*github.Client)
@@ -54,6 +55,17 @@ func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels
 
 func (gc *GithubClient) RemoveRunner(runnerId int64) error {
 	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org.Name, runnerId)
+	return err
+}
+
+func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
+	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowId)
+	if err != nil {
+		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
+		// return err
+	}
+	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
+	_, err = gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)
 	return err
 }
 

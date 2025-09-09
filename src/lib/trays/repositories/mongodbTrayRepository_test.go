@@ -4,12 +4,13 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
 	"context"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"reflect"
 	"testing"
 	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // TestTray is a helper struct to create test trays
@@ -183,7 +184,7 @@ func TestUpdateStatus(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test UpdateStatus with jobRunId only
-	updatedTray, err := repo.UpdateStatus("test-tray-1", trays.TrayStatusRegistered, 123, 0)
+	updatedTray, err := repo.UpdateStatus("test-tray-1", trays.TrayStatusRegistered, 123, 0, 0)
 	if err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with ghRunnerId
-	updatedTray, err = repo.UpdateStatus("test-tray-1", trays.TrayStatusRunning, 456, 789)
+	updatedTray, err = repo.UpdateStatus("test-tray-1", trays.TrayStatusRunning, 456, 333, 789)
 	if err != nil {
 		t.Fatalf("UpdateStatus with ghRunnerId failed: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with non-existent ID
-	updatedTray, err = repo.UpdateStatus("non-existent", trays.TrayStatusRegistered, 123, 0)
+	updatedTray, err = repo.UpdateStatus("non-existent", trays.TrayStatusRegistered, 123, 0, 0)
 	if err != nil {
 		t.Fatalf("UpdateStatus with non-existent ID failed: %v", err)
 	}

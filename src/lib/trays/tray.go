@@ -16,6 +16,7 @@ type Tray struct {
 	GitHubOrgName  string     `bson:"gitHubOrgName"`
 	GitHubRunnerId int64      `bson:"gitHubRunnerId"`
 	JobRunId       int64      `bson:"jobRunId"`
+	WorkflowRunId  int64      `bson:"workflowRunId"`
 	Status         TrayStatus `bson:"status"`
 	StatusChanged  time.Time  `bson:"statusChanged"`
 }
@@ -37,6 +38,7 @@ func NewTray(trayType config.TrayType) *Tray {
 		Status:        TrayStatusCreating,
 		GitHubOrgName: trayType.GitHubOrg,
 		JobRunId:      0,
+		WorkflowRunId: 0,
 	}
 
 	return tray

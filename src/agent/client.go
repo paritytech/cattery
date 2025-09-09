@@ -6,10 +6,11 @@ import (
 	"cattery/lib/messages"
 	"encoding/json"
 	"errors"
-	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/sirupsen/logrus"
 )
 
 type CatteryClient struct {
@@ -73,6 +74,36 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 	}
 
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "unregister/", agent.AgentId)
+	if err != nil {
+		return err
+	}
+
+	var request, _ = http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+
+	if response.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(response.Body)
+		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+	}
+
+	return nil
+}
+
+func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
+
+	var client = c.httpClient
+
+	requestJson, err := json.Marshal(messages.UnregisterRequest{
+		Agent: *agent,
+	})
+	if err != nil {
+		return err
+	}
+
+	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "interrupt/", agent.AgentId)
 	if err != nil {
 		return err
 	}

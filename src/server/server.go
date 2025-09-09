@@ -3,6 +3,7 @@ package server
 import (
 	"cattery/lib/config"
 	"cattery/lib/jobQueue"
+	"cattery/lib/restarter"
 	"cattery/lib/trayManager"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
@@ -12,6 +13,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	restarterRepo "cattery/lib/restarter/repositories"
 
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -32,6 +35,7 @@ func Start() {
 	webhookMux.HandleFunc("GET /agent/register/{id}", handlers.AgentRegister)
 	webhookMux.HandleFunc("POST /agent/unregister/{id}", handlers.AgentUnregister)
 	webhookMux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
+	webhookMux.HandleFunc("POST /agent/interrupt/{id}", handlers.AgentInterrupt)
 
 	webhookMux.HandleFunc("POST /github/{org}", handlers.Webhook)
 
@@ -69,6 +73,12 @@ func Start() {
 	//QueueManager initialization
 	handlers.QueueManager = jobQueue.NewQueueManager()
 	handlers.QueueManager.Connect(database.Collection("jobs"))
+
+	// Initialize restarter repository
+	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
+	restartManagerRepository.Connect(database.Collection("restarters"))
+
+	handlers.RestartManager = restarter.NewWorkflowRestarter(restartManagerRepository)
 
 	err = handlers.QueueManager.Load()
 	if err != nil {
