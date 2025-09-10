@@ -26,7 +26,7 @@ func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
 }
 
 func (tm *TrayManager) createTrays(trayType *config.TrayType, n int) error {
-	for i := range make([]struct{}, n) {
+	for i := 0; i < n; i++ {
 		log.Infof("Creating tray %d for type: %s", i+1, trayType.Name)
 		err := tm.CreateTray(trayType)
 		if err != nil {
@@ -195,7 +195,6 @@ func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.Qu
 			default:
 				var groups = manager.GetJobsCount()
 				for typeName, jobsCount := range groups {
-					log.Tracef("Handling tray type '%s' with %d jobs in queue", typeName, jobsCount)
 					err := tm.handleType(typeName, jobsCount)
 					if err != nil {
 						log.Error(err)
@@ -209,39 +208,33 @@ func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.Qu
 }
 
 func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
+	log.Tracef("Handling tray type %s with %d jobs in queue", trayTypeName, jobsInQueue)
 	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
 	if err != nil {
 		log.Errorf("Failed to count trays for type %s: %v", trayTypeName, err)
 		return err
 	}
 
-	// traysWithNoJob should only count trays that are available for jobs (not running or deleting)
-	traysWithNoJob := countByStatus[trays.TrayStatusCreating] +
-		countByStatus[trays.TrayStatusRegistering] +
-		countByStatus[trays.TrayStatusRegistered]
+	var traysWithNoJob = countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
+	log.Tracef("Tray type %s has %d trays, %d with no job", trayTypeName, total, traysWithNoJob)
+	if jobsInQueue > traysWithNoJob {
+		var trayType = getTrayType(trayTypeName)
+		//TODO: handle nil
 
-	// Only create trays if traysWithNoJob < jobsInQueue and there is room for more trays
-	if traysWithNoJob < jobsInQueue {
-		trayType := getTrayType(trayTypeName)
-		if trayType == nil {
-			return fmt.Errorf("tray type '%s' not found", trayTypeName)
-		}
-
-		remainingTrays := trayType.MaxTrays - total
-		traysToCreate := jobsInQueue - traysWithNoJob
+		var remainingTrays = trayType.MaxTrays - total
+		var traysToCreate = jobsInQueue - traysWithNoJob
 		if traysToCreate > remainingTrays {
 			traysToCreate = remainingTrays
 		}
-		if traysToCreate > 0 {
-			err := tm.createTrays(trayType, traysToCreate)
-			if err != nil {
-				return err
-			}
+
+		err := tm.createTrays(trayType, traysToCreate)
+		if err != nil {
+			return err
 		}
 	}
 
-	if traysWithNoJob > jobsInQueue {
-		traysToDelete := traysWithNoJob - jobsInQueue
+	if jobsInQueue < traysWithNoJob {
+		var traysToDelete = traysWithNoJob - jobsInQueue
 		redundant, err := tm.trayRepository.MarkRedundant(trayTypeName, traysToDelete)
 		if err != nil {
 			return err
@@ -250,6 +243,7 @@ func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
 		for _, tray := range redundant {
 			tm.DeleteTray(tray.Id)
 		}
+
 	}
 
 	return nil
