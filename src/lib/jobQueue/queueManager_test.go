@@ -3,10 +3,12 @@ package jobQueue
 import (
 	"cattery/lib/jobs"
 	"context"
+	"testing"
+	"time"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"testing"
 )
 
 // setupTestCollection creates a test collection and returns a client and collection
@@ -55,6 +57,18 @@ func insertTestJobs(t *testing.T, collection *mongo.Collection, jobs []*jobs.Job
 
 	for _, job := range jobs {
 		_, err := collection.InsertOne(context.Background(), job)
+		if err != nil {
+			t.Fatalf("Failed to insert test job: %v", err)
+		}
+	}
+}
+
+// deleteTestJobs deletes test jobs from the collection
+func deleteTestJobs(t *testing.T, collection *mongo.Collection, jobIds []int64) {
+	t.Helper()
+
+	for _, id := range jobIds {
+		_, err := collection.DeleteOne(context.Background(), bson.M{"_id": id})
 		if err != nil {
 			t.Fatalf("Failed to insert test job: %v", err)
 		}
@@ -110,6 +124,32 @@ func TestLoad(t *testing.T) {
 		t.Error("Expected job 2 to be loaded")
 	}
 
+	job3 := createTestJob(3, "Test Job 3", "TestTray")
+	job4 := createTestJob(4, "Test Job 4", "TestTray")
+	insertTestJobs(t, collection, []*jobs.Job{job3, job4})
+
+	time.Sleep(2 * time.Second)
+
+	// Verify jobs were sync
+	if qm.jobQueue.Get(3) == nil {
+		t.Error("Expected job 3 to be sync (add)")
+	}
+	if qm.jobQueue.Get(4) == nil {
+		t.Error("Expected job 4 to be sync (add)")
+	}
+
+	deleteTestJobs(t, collection, []int64{3, 4})
+
+	time.Sleep(2 * time.Second)
+
+	// Verify jobs were sync
+	if qm.jobQueue.Get(3) != nil {
+		t.Error("Expected job 3 to be sync (delete)")
+	}
+	if qm.jobQueue.Get(4) != nil {
+		t.Error("Expected job 4 to be sync (delete)")
+	}
+
 	// Note: Change stream listening is now always enabled but requires a MongoDB replica set
 	// In a real environment, this would be tested with a properly configured MongoDB replica set
 	t.Log("Change stream listening requires a MongoDB replica set")
@@ -139,7 +179,7 @@ func TestAddJob(t *testing.T) {
 
 	// Verify job was added to the database
 	var dbJob jobs.Job
-	err = collection.FindOne(context.Background(), bson.M{"id": 1}).Decode(&dbJob)
+	err = collection.FindOne(context.Background(), bson.M{"_id": 1}).Decode(&dbJob)
 	if err != nil {
 		t.Fatalf("Failed to find job in database: %v", err)
 	}
@@ -229,23 +269,23 @@ func TestUpdateJobStatus(t *testing.T) {
 	}
 
 	// Add the job back for the next test
-	job = createTestJob(1, "Test Job", "TestTray")
+	job = createTestJob(2, "Test Job", "TestTray")
 	insertTestJobs(t, collection, []*jobs.Job{job})
 	qm.jobQueue.Add(job)
 
 	// Test UpdateJobStatus with JobStatusFinished
-	err = qm.UpdateJobStatus(1, jobs.JobStatusFinished)
+	err = qm.UpdateJobStatus(2, jobs.JobStatusFinished)
 	if err != nil {
 		t.Fatalf("UpdateJobStatus failed: %v", err)
 	}
 
 	// Verify job was removed from the queue
-	if qm.jobQueue.Get(1) != nil {
+	if qm.jobQueue.Get(2) != nil {
 		t.Error("Expected job to be removed from the queue")
 	}
 
 	// Verify job was removed from the database
-	count, err = collection.CountDocuments(context.Background(), bson.M{"id": 1})
+	count, err = collection.CountDocuments(context.Background(), bson.M{"_id": 2})
 	if err != nil {
 		t.Fatalf("Failed to count documents: %v", err)
 	}
@@ -254,23 +294,23 @@ func TestUpdateJobStatus(t *testing.T) {
 	}
 
 	// Add the job back for the next test
-	job = createTestJob(1, "Test Job", "TestTray")
+	job = createTestJob(3, "Test Job", "TestTray")
 	insertTestJobs(t, collection, []*jobs.Job{job})
 	qm.jobQueue.Add(job)
 
 	// Test UpdateJobStatus with other status (should do nothing)
-	err = qm.UpdateJobStatus(1, jobs.JobStatusQueued)
+	err = qm.UpdateJobStatus(3, jobs.JobStatusQueued)
 	if err != nil {
 		t.Fatalf("UpdateJobStatus failed: %v", err)
 	}
 
 	// Verify job is still in the queue
-	if qm.jobQueue.Get(1) == nil {
+	if qm.jobQueue.Get(3) == nil {
 		t.Error("Expected job to still be in the queue")
 	}
 
 	// Verify job is still in the database
-	count, err = collection.CountDocuments(context.Background(), bson.M{"id": 1})
+	count, err = collection.CountDocuments(context.Background(), bson.M{"_id": 3})
 	if err != nil {
 		t.Fatalf("Failed to count documents: %v", err)
 	}
