@@ -4,11 +4,12 @@ import (
 	"cattery/lib/jobs"
 	"context"
 	"errors"
+	"sync"
+
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"sync"
 )
 
 type QueueManager struct {
@@ -149,4 +150,17 @@ func (qm *QueueManager) deleteJob(jobId int64) error {
 
 func (qm *QueueManager) GetJobsCount() map[string]int {
 	return qm.jobQueue.GetJobsCount()
+}
+
+func (qm *QueueManager) CleanupByWorkflowRun(workflowRunId int64) error {
+	log.Debugf("Cleaning up jobs for workflow run id %v", workflowRunId)
+	var jobsToDelete = qm.jobQueue.GetByWorkflowRunId(workflowRunId)
+	for _, job := range jobsToDelete {
+		err := qm.deleteJob(job.Id)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

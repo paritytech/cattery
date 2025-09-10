@@ -85,3 +85,17 @@ func (qm *JobQueue) Delete(jobId int64) {
 	}
 
 }
+
+func (qm *JobQueue) GetByWorkflowRunId(workflowRunId int64) []*jobs.Job {
+	qm.rwMutex.RLock()
+	defer qm.rwMutex.RUnlock()
+
+	var result []*jobs.Job
+	for _, job := range qm.jobs {
+		if job.WorkflowId == workflowRunId {
+			result = append(result, &job)
+		}
+	}
+
+	return result
+}
