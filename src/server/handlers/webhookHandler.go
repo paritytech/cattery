@@ -142,6 +142,16 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	// On "completed" action and "cancelled" or "success" conclusion trigger cleanup
+	if webhookData.GetAction() == "completed" && (conclusion == "cancelled" || conclusion == "success") {
+		logger.Infof("Cleaning up restart requests for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		err := RestartManager.Cleanup(*webhookData.WorkflowRun.ID, orgName, repoName)
+		if err != nil {
+			logger.Errorf("Failed to cleanup restart requests: %v", err)
+			http.Error(responseWriter, "Failed to cleanup restart requests", http.StatusInternalServerError)
+		}
+		return
+	}
 }
 
 // handleCompletedWorkflowJob
