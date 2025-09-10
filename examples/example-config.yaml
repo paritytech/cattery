@@ -4,6 +4,7 @@ server:
 
 database:
   uri: mongodb://localhost:27017/cattery
+  database: cattery
 
 github:
   - name: paritytech-stg
@@ -25,7 +26,7 @@ providers:
 
   - name: gce-stg
     type: google
-    project: parity-ci-2024
+    project: my-gcp-project
     credentialsFile: path/to/credentials.json
 
 trayTypes:
@@ -33,22 +34,22 @@ trayTypes:
     provider: docker-local
     shutdown: false
     runnerGroupId: 3
-    githubOrg: paritytech
+    githubOrg: My-Github-Org
     config:
       image: cattery-runner-tiny:latest
 
   - name: cattery-gce
-    provider: gce-stg
-    shutdown: true
-    runnerGroupId: 3
-    githubOrg: paritytech-stg
-    extraMetadata:
-      alloy_metrics_push_url: http://prometheus/api/v1/write
     config:
-      namePrefix: cattery-stg
-      project: parity-ci-2024
-      zone: europe-west1-d
-      machineType: e2-standard-4
-      preemptible: true
-      network: <network-url>
-      subnetwork: <subnetwork-url>
+      instanceTemplate: global/instanceTemplates/<instance-template>
+      machineType: e2-standard-2
+      project: my-gcp-project
+      zone: us-west1-a
+    extraMetadata:
+      # can be: version (0.0.2), server (to download binary from server) or a commit hash
+      cattery-agent-version: 0.0.4
+      # cattery-agent-version: 13d197aa1e73db09514772e55794b3a0f9b7952b
+    githubOrg: My-Github-Org
+    maxTrays: 3 # max number of VMs of this type
+    provider: gce
+    runnerGroupId: 3 # check in github org settings -> Runner groups
+    shutdown: true
