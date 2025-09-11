@@ -100,7 +100,7 @@ func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Reques
 }
 
 func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
-	logger.Debugf("Received workflow_run webhook")
+	log.Debugf("Received workflow_run webhook")
 	logger = logger.WithField("type", "workflow_run")
 	var webhookData *github.WorkflowRunEvent
 	organizationName := r.PathValue("org")
