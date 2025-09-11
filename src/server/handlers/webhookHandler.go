@@ -148,12 +148,12 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 // handles the 'completed' action of the workflow job event
 func handleCompletedWorkflowJob(responseWriter http.ResponseWriter, logger *log.Entry, job *jobs.Job) {
 
-	//err := QueueManager.UpdateJobStatus(job.Id, jobs.JobStatusFinished)
-	//if err != nil {
-	//	logger.Errorf("Failed to update job status: %v", err)
-	//}
+	err := QueueManager.UpdateJobStatus(job.Id, jobs.JobStatusFinished)
+	if err != nil {
+		logger.Errorf("Failed to update job status: %v", err)
+	}
 
-	_, err := TrayManager.DeleteTray(job.RunnerName)
+	_, err = TrayManager.DeleteTray(job.RunnerName)
 	if err != nil {
 		logger.Errorf("Failed to delete tray: %v", err)
 	}
