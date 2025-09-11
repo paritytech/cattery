@@ -42,7 +42,7 @@ func (qm *QueueManager) Load() error {
 		return err
 	}
 	qm.changeStream = changeStream
-
+	//options.ChangeStream().SetFullDocumentBeforeChange(options.UpdateLookup)
 	allJobs, err := collection.Find(nil, bson.M{})
 	if err != nil {
 		return err
@@ -65,9 +65,8 @@ func (qm *QueueManager) Load() error {
 			if decodeErr != nil {
 				log.Error("Failed to decode change stream: ", decodeErr)
 				qm.Load()
+				return
 			}
-
-			var job = event.FullDocument
 
 			switch event.OperationType {
 			case "replace":
@@ -77,7 +76,7 @@ func (qm *QueueManager) Load() error {
 			case "insert":
 				qm.jobQueue.Add(&event.FullDocument)
 			case "delete":
-				qm.jobQueue.Delete(job.Id)
+				qm.jobQueue.Delete(event.DocumentKey.Id)
 			default:
 				log.Warn("Unknown operation type: ", event.OperationType)
 			}
@@ -98,6 +97,7 @@ func (qm *QueueManager) AddJob(job *jobs.Job) error {
 }
 
 func (qm *QueueManager) JobInProgress(jobId int64) error {
+	//TODO: remove method, use UpdateJobStatus
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
 		log.Errorf("No job found with id %v", jobId)
@@ -116,8 +116,7 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
-		log.Errorf("No job found with id %v", jobId)
-		return errors.New("No job found with id ")
+		return nil
 	}
 
 	switch status {
@@ -140,7 +139,7 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 
 func (qm *QueueManager) deleteJob(jobId int64) error {
 	qm.jobQueue.Delete(jobId)
-	_, err := qm.collection.DeleteOne(context.Background(), bson.M{"id": jobId})
+	_, err := qm.collection.DeleteOne(context.Background(), bson.M{"_id": jobId})
 	if err != nil {
 		return err
 	}

@@ -63,3 +63,8 @@ func (tray *Tray) GetTrayType() config.TrayType {
 func (tray *Tray) GetTrayConfig() config.TrayConfig {
 	return config.AppConfig.GetTrayType(tray.TrayTypeName).Config
 }
+
+func (tray *Tray) String() string {
+	return fmt.Sprintf("id: %s, trayTypeName: %s, status: %s, gitHubOrgName: %s,  statusChanged: %s",
+		tray.Id, tray.TrayTypeName, tray.Status, tray.GitHubOrgName, tray.StatusChanged.Format(time.RFC3339))
+}
