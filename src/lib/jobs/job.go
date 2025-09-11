@@ -3,7 +3,7 @@ package jobs
 import "github.com/google/go-github/v70/github"
 
 type Job struct {
-	Id           int64    `bson:"id"`
+	Id           int64    `bson:"_id"`
 	Name         string   `bson:"name"`
 	Action       string   `bson:"action"`
 	WorkflowId   int64    `bson:"workflowId"`

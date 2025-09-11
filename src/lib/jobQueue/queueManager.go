@@ -4,11 +4,12 @@ import (
 	"cattery/lib/jobs"
 	"context"
 	"errors"
+	"sync"
+
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"sync"
 )
 
 type QueueManager struct {
@@ -41,7 +42,7 @@ func (qm *QueueManager) Load() error {
 		return err
 	}
 	qm.changeStream = changeStream
-
+	//options.ChangeStream().SetFullDocumentBeforeChange(options.UpdateLookup)
 	allJobs, err := collection.Find(nil, bson.M{})
 	if err != nil {
 		return err
@@ -64,9 +65,8 @@ func (qm *QueueManager) Load() error {
 			if decodeErr != nil {
 				log.Error("Failed to decode change stream: ", decodeErr)
 				qm.Load()
+				return
 			}
-
-			var job = event.FullDocument
 
 			switch event.OperationType {
 			case "replace":
@@ -76,7 +76,7 @@ func (qm *QueueManager) Load() error {
 			case "insert":
 				qm.jobQueue.Add(&event.FullDocument)
 			case "delete":
-				qm.jobQueue.Delete(job.Id)
+				qm.jobQueue.Delete(event.DocumentKey.Id)
 			default:
 				log.Warn("Unknown operation type: ", event.OperationType)
 			}
@@ -139,7 +139,7 @@ func (qm *QueueManager) UpdateJobStatus(jobId int64, status jobs.JobStatus) erro
 
 func (qm *QueueManager) deleteJob(jobId int64) error {
 	qm.jobQueue.Delete(jobId)
-	_, err := qm.collection.DeleteOne(context.Background(), bson.M{"id": jobId})
+	_, err := qm.collection.DeleteOne(context.Background(), bson.M{"_id": jobId})
 	if err != nil {
 		return err
 	}
