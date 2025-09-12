@@ -7,8 +7,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type MongodbRestarterRepository struct {
@@ -51,14 +49,13 @@ func (m *MongodbRestarterRepository) DeleteRestartRequest(workflowRunId int64) e
 }
 
 func (m *MongodbRestarterRepository) CheckRestartRequest(workflowRunId int64) (bool, error) {
-	log.Debugf("Checking restart request for workflow run id %d in MongoDB", workflowRunId)
+	// log.Debugf("Checking restart request for workflow run id %d in MongoDB", workflowRunId)
 	dbResult := m.collection.FindOne(
 		context.Background(),
 		bson.M{
 			"workflowRunId": workflowRunId,
 		},
 	)
-	log.Debugf("MongoDB result: %+v", dbResult)
 	var result bson.M
 	err := dbResult.Decode(&result)
 	if err != nil {

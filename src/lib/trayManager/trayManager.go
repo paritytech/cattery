@@ -208,6 +208,7 @@ func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.Qu
 }
 
 func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
+	// log.Debugf("Handling tray type %s with %d jobs in queue", trayTypeName, jobsInQueue)
 	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
 	if err != nil {
 		log.Errorf("Failed to count trays for type %s: %v", trayTypeName, err)
@@ -215,7 +216,7 @@ func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
 	}
 
 	var traysWithNoJob = countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
-
+	// log.Debugf("Tray type %s has %d trays, %d with no job", trayTypeName, total, traysWithNoJob)
 	if jobsInQueue > traysWithNoJob {
 		var trayType = getTrayType(trayTypeName)
 		//TODO: handle nil

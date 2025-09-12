@@ -85,3 +85,17 @@ func (qm *JobQueue) Delete(jobId int64) {
 	}
 
 }
+
+func (qm *JobQueue) DeleteJobsByWorkflowRunId(workflowRunId int64) {
+	qm.rwMutex.Lock()
+	defer qm.rwMutex.Unlock()
+
+	for jobId, job := range qm.jobs {
+		if job.WorkflowId == workflowRunId {
+			delete(qm.jobs, jobId)
+
+			var group = qm.getGroup(job.TrayType)
+			delete(group, job.Id)
+		}
+	}
+}

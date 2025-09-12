@@ -50,6 +50,7 @@ func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Reques
 		return
 	}
 	logger = logger.WithField("githubOrg", organizationName)
+	logger = logger.WithField("type", "workflow_job")
 
 	payload, err := github.ValidatePayload(r, []byte(org.WebhookSecret))
 	if err != nil {
@@ -99,7 +100,8 @@ func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Reques
 }
 
 func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
-	logger.Debugf("Received workflow_run webhook")
+	log.Debugf("Received workflow_run webhook")
+	logger = logger.WithField("type", "workflow_run")
 	var webhookData *github.WorkflowRunEvent
 	organizationName := r.PathValue("org")
 	org := config.AppConfig.GetGitHubOrg(organizationName)
@@ -130,18 +132,37 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 	conclusion := webhookData.GetWorkflowRun().GetConclusion()
 	repoName := webhookData.GetRepo().GetName()
 	orgName := webhookData.GetOrg().GetLogin()
-	logger.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
+	log.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
 
 	// On "completed" action and "failure" conclusion trigger restart
 	if webhookData.GetAction() == "completed" && conclusion == "failure" {
-		logger.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		log.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
 		err := RestartManager.Restart(*webhookData.WorkflowRun.ID, orgName, repoName)
 		if err != nil {
-			logger.Errorf("Failed to request restart: %v", err)
+			log.Errorf("Failed to request restart: %v", err)
 			http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
 		}
 		return
 	}
+	// On "completed" action and "cancelled" or "success" conclusion trigger cleanup
+	if webhookData.GetAction() == "completed" && (conclusion == "cancelled" || conclusion == "success") {
+		if conclusion == "cancelled" {
+			log.Infof("Cleaning up jobs for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+			err := QueueManager.CleanupByWorkflowRun(*webhookData.WorkflowRun.ID)
+			if err != nil {
+				log.Errorf("Failed to cleanup jobs: %v", err)
+				http.Error(responseWriter, "Failed to cleanup jobs", http.StatusInternalServerError)
+			}
+		}
+		log.Infof("Cleaning up restart requests for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		err = RestartManager.Cleanup(*webhookData.WorkflowRun.ID, orgName, repoName)
+		if err != nil {
+			log.Errorf("Failed to cleanup restart requests: %v", err)
+			http.Error(responseWriter, "Failed to cleanup restart requests", http.StatusInternalServerError)
+		}
+		return
+	}
+
 }
 
 // handleCompletedWorkflowJob

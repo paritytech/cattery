@@ -150,3 +150,13 @@ func (qm *QueueManager) deleteJob(jobId int64) error {
 func (qm *QueueManager) GetJobsCount() map[string]int {
 	return qm.jobQueue.GetJobsCount()
 }
+
+func (qm *QueueManager) CleanupByWorkflowRun(workflowRunId int64) error {
+	qm.jobQueue.DeleteJobsByWorkflowRunId(workflowRunId)
+	_, err := qm.collection.DeleteMany(context.Background(), bson.M{"workflowRunId": workflowRunId})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
