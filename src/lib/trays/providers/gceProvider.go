@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -59,11 +60,13 @@ func (g *GceProvider) ListTrays() ([]*trays.Tray, error) {
 func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
 
+	var trayConfig = tray.GetTrayConfig().(config.GoogleTrayConfig)
+
 	var (
 		project          = g.providerConfig.Get("project")
-		instanceTemplate = tray.GetTrayConfig().Get("instanceTemplate")
-		zone             = tray.GetTrayConfig().Get("zone")
-		machineType      = tray.GetTrayConfig().Get("machineType")
+		instanceTemplate = trayConfig.InstanceTemplate
+		zones            = trayConfig.Zones
+		machineType      = trayConfig.MachineType
 	)
 
 	var metadata = createGcpMetadata(
@@ -73,6 +76,8 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		},
 		tray.GetTrayType().ExtraMetadata,
 	)
+
+	var zone = zones[rand.Intn(len(zones))]
 
 	_, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project:                project,
@@ -89,6 +94,8 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		return err
 	}
 
+	tray.ProviderData["zone"] = zone
+
 	return nil
 }
 
@@ -99,7 +106,7 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 	}
 
 	var (
-		zone    = tray.GetTrayConfig().Get("zone")
+		zone    = tray.ProviderData["zone"]
 		project = g.providerConfig.Get("project")
 	)
 

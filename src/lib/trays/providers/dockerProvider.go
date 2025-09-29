@@ -49,7 +49,10 @@ func (d *DockerProvider) ListTrays() ([]*trays.Tray, error) {
 func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
 	var containerName = tray.GetId()
-	var image = tray.GetTrayConfig().Get("image")
+
+	var trayConfig = tray.GetTrayConfig().(config.DockerTrayConfig)
+
+	var image = trayConfig.Image
 
 	var dockerCommand = exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
