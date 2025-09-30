@@ -35,7 +35,7 @@ providers:
   - name: "docker"
     type: "docker"
 trayTypes:
-  - name: "default"
+  - name: "docker"
     provider: "docker"
     runnerGroupId: 1
     shutdown: true
@@ -68,7 +68,7 @@ trayTypes:
 		assert.Len(t, config.Providers, 1)
 		assert.Equal(t, "docker", config.Providers[0].Get("name"))
 		assert.Len(t, config.TrayTypes, 1)
-		assert.Equal(t, "default", config.TrayTypes[0].Name)
+		assert.Equal(t, "docker", config.TrayTypes[0].Name)
 		assert.Equal(t, "docker", config.TrayTypes[0].Provider)
 		assert.Equal(t, int64(1), config.TrayTypes[0].RunnerGroupId)
 		assert.Equal(t, true, config.TrayTypes[0].Shutdown)
@@ -77,7 +77,9 @@ trayTypes:
 		// For now, we'll expect the actual value (0) instead of the expected value (5)
 		// This is a known issue that should be fixed in the future
 		assert.Equal(t, 0, config.TrayTypes[0].MaxTrays)
-		assert.Equal(t, "test-image", config.TrayTypes[0].Config["image"])
+		if dc, ok := config.TrayTypes[0].Config.(*DockerTrayConfig); assert.True(t, ok) {
+			assert.Equal(t, "test-image", dc.Image)
+		}
 		assert.Equal(t, "value", config.TrayTypes[0].ExtraMetadata["key"])
 	})
 
@@ -198,8 +200,8 @@ func TestGetTrayType(t *testing.T) {
 				Shutdown:      true,
 				GitHubOrg:     "test-org",
 				MaxTrays:      5,
-				Config: TrayConfig{
-					"image": "test-image",
+				Config: &DockerTrayConfig{
+					Image: "test-image",
 				},
 				ExtraMetadata: TrayExtraMetadata{
 					"key": "value",
@@ -218,7 +220,9 @@ func TestGetTrayType(t *testing.T) {
 		assert.Equal(t, true, trayType.Shutdown)
 		assert.Equal(t, "test-org", trayType.GitHubOrg)
 		assert.Equal(t, 5, trayType.MaxTrays)
-		assert.Equal(t, "test-image", trayType.Config.Get("image"))
+		if dc, ok := trayType.Config.(*DockerTrayConfig); assert.True(t, ok) {
+			assert.Equal(t, "test-image", dc.Image)
+		}
 		assert.Equal(t, "value", trayType.ExtraMetadata["key"])
 	})
 
@@ -226,32 +230,6 @@ func TestGetTrayType(t *testing.T) {
 	t.Run("NonExistingTrayType", func(t *testing.T) {
 		trayType := config.GetTrayType("non-existing-tray-type")
 		assert.Nil(t, trayType)
-	})
-}
-
-func TestTrayConfigGet(t *testing.T) {
-	// Setup test tray config
-	trayConfig := TrayConfig{
-		"name":     "test-tray",
-		"provider": "docker",
-	}
-
-	// Test case 1: Existing key
-	t.Run("ExistingKey", func(t *testing.T) {
-		value := trayConfig.Get("name")
-		assert.Equal(t, "test-tray", value)
-	})
-
-	// Test case 2: Existing key with different case
-	t.Run("ExistingKeyDifferentCase", func(t *testing.T) {
-		value := trayConfig.Get("NAME")
-		assert.Equal(t, "test-tray", value)
-	})
-
-	// Test case 3: Non-existing key
-	t.Run("NonExistingKey", func(t *testing.T) {
-		value := trayConfig.Get("non-existing-key")
-		assert.Equal(t, "", value)
 	})
 }
 

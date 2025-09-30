@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
@@ -24,6 +25,7 @@ type CatteryConfig struct {
 }
 
 func LoadConfig(configPath *string) (*CatteryConfig, error) {
+
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	if *configPath == "" {
@@ -63,6 +65,24 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	appConfig.trayTypesMap = make(map[string]*TrayType)
 	for _, trayType := range appConfig.TrayTypes {
 		appConfig.trayTypesMap[trayType.Name] = trayType
+
+		switch trayType.Name {
+		case "google":
+			var gc GoogleTrayConfig
+			if err := mapstructure.Decode(trayType.Config, &gc); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal google: %w", err)
+			}
+			trayType.Config = &gc
+		case "docker":
+			var dc DockerTrayConfig
+			if err := mapstructure.Decode(trayType.Config, &dc); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal docker: %w", err)
+			}
+			trayType.Config = &dc
+		//case "scaleway":
+		default:
+
+		}
 	}
 
 	AppConfig = appConfig
@@ -125,23 +145,17 @@ type GitHubOrganization struct {
 }
 
 type TrayType struct {
-	Name          string `yaml:"name" validate:"required"`
-	Provider      string `yaml:"provider" validate:"required"`
-	RunnerGroupId int64  `yaml:"runnerGroupId" validate:"required"`
-	Shutdown      bool   `yaml:"shutdown"`
-	GitHubOrg     string `yaml:"githubOrg" validate:"required"`
-	MaxTrays      int    `yaml:"limit"`
-	Config        TrayConfig
+	Name          string     `yaml:"name" validate:"required"`
+	Provider      string     `yaml:"provider" validate:"required"`
+	RunnerGroupId int64      `yaml:"runnerGroupId" validate:"required"`
+	Shutdown      bool       `yaml:"shutdown"`
+	GitHubOrg     string     `yaml:"githubOrg" validate:"required"`
+	MaxTrays      int        `yaml:"limit"`
+	Config        TrayConfig `yaml:"config"`
 	ExtraMetadata TrayExtraMetadata
 }
 
 type TrayExtraMetadata map[string]string
-
-type TrayConfig map[string]string
-
-func (t TrayConfig) Get(key string) string {
-	return t[strings.ToLower(key)]
-}
 
 type ProviderConfig map[string]string
 

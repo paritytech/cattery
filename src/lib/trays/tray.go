@@ -19,6 +19,8 @@ type Tray struct {
 	WorkflowRunId  int64      `bson:"workflowRunId"`
 	Status         TrayStatus `bson:"status"`
 	StatusChanged  time.Time  `bson:"statusChanged"`
+
+	ProviderData map[string]string `bson:"providerData"`
 }
 
 func NewTray(trayType config.TrayType) *Tray {
@@ -30,15 +32,17 @@ func NewTray(trayType config.TrayType) *Tray {
 	}
 
 	id := hex.EncodeToString(b)
+	var trayId = fmt.Sprintf("%s-%s", trayType.Name, id)
 
 	var tray = &Tray{
-		Id:            fmt.Sprintf("%s-%s", trayType.Name, id),
+		Id:            trayId,
 		TrayTypeName:  trayType.Name,
 		trayType:      trayType,
 		Status:        TrayStatusCreating,
 		GitHubOrgName: trayType.GitHubOrg,
 		JobRunId:      0,
 		WorkflowRunId: 0,
+		ProviderData:  make(map[string]string),
 	}
 
 	return tray

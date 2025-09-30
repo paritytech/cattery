@@ -133,13 +133,16 @@ func TestSave(t *testing.T) {
 	// Create a tray to save
 	trayType := config.TrayType{
 		Name:          "test-type",
-		Provider:      "test-provider",
+		Provider:      "docker",
 		RunnerGroupId: 123,
 		GitHubOrg:     "test-org",
-		Config:        config.TrayConfig{},
+		Config:        &config.DockerTrayConfig{Image: "alpine", NamePrefix: "test"},
 	}
 
 	tray := trays.NewTray(trayType)
+	// Set ProviderData and verify it round-trips
+	tray.ProviderData["zone"] = "abc123"
+	tray.ProviderData["something"] = "worker-1"
 
 	// Test Save
 	err := repo.Save(tray)
@@ -167,6 +170,17 @@ func TestSave(t *testing.T) {
 
 	if savedTray.Status != tray.Status {
 		t.Errorf("Expected saved tray status %v, got %v", tray.Status, savedTray.Status)
+	}
+
+	// Verify ProviderData was saved and loaded correctly
+	if savedTray.ProviderData == nil {
+		t.Fatalf("Expected ProviderData to be non-nil")
+	}
+	if savedTray.ProviderData["zone"] != "abc123" {
+		t.Errorf("Expected ProviderData.zone to be 'abc123', got '%s'", savedTray.ProviderData["containerId"])
+	}
+	if savedTray.ProviderData["something"] != "worker-1" {
+		t.Errorf("Expected ProviderData.something to be 'worker-1', got '%s'", savedTray.ProviderData["node"])
 	}
 }
 
