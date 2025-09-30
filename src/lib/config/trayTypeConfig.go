@@ -6,7 +6,7 @@ type TrayConfig interface {
 type GoogleTrayConfig struct {
 	TrayConfig
 	Project          string   `yaml:"project"`
-	Zones            []string `yaml:"zone"`
+	Zones            []string `yaml:"zones"`
 	MachineType      string   `yaml:"machineType"`
 	InstanceTemplate string   `yaml:"instanceTemplate"`
 	NamePrefix       string   `yaml:"namePrefix"`
