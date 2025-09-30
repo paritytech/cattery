@@ -43,7 +43,9 @@ trayTypes:
       instanceTemplate: global/instanceTemplates/<instance-template>
       machineType: e2-standard-2
       project: my-gcp-project
-      zone: us-west1-a
+      zones:
+        - us-west1-a
+        - us-west1-b
     extraMetadata:
       # can be: version (0.0.2), server (to download binary from server) or a commit hash
       cattery-agent-version: 0.0.4
