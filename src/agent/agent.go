@@ -94,10 +94,14 @@ func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
 	}
 
 	a.logger.Info("Interrupting runner")
-	a.catteryClient.InterruptAgent(a.agent)
+	err := a.catteryClient.InterruptAgent(a.agent)
+	if err != nil {
+		var errMsg = "Failed to interrupt agent: " + err.Error()
+		a.logger.Error(errMsg)
+	}
 	// SIGINT from go kills listener immediately, so we use pkill
 	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
-	err := commandInterruptRun.Run()
+	err = commandInterruptRun.Run()
 	if err != nil {
 		var errMsg = "Failed to interrupt runner: " + err.Error()
 		a.logger.Error(errMsg)
