@@ -66,7 +66,13 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	for _, trayType := range appConfig.TrayTypes {
 		appConfig.trayTypesMap[trayType.Name] = trayType
 
-		switch trayType.Name {
+		var providerConfig, ok = appConfig.providerMap[trayType.Provider]
+
+		if !ok {
+			return nil, fmt.Errorf("provider %s for trayType %s not found", trayType.Provider, trayType.Name)
+		}
+
+		switch providerConfig.Get("type") {
 		case "google":
 			var gc GoogleTrayConfig
 			if err := mapstructure.Decode(trayType.Config, &gc); err != nil {

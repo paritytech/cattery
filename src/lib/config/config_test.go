@@ -32,11 +32,11 @@ github:
     webhookSecret: "secret"
     privateKeyPath: "path/to/key.pem"
 providers:
-  - name: "docker"
+  - name: "docker-provider"
     type: "docker"
 trayTypes:
-  - name: "docker"
-    provider: "docker"
+  - name: "docker-local"
+    provider: "docker-provider"
     runnerGroupId: 1
     shutdown: true
     githubOrg: "test-org"
@@ -56,6 +56,10 @@ trayTypes:
 		configPath := tempFile.Name()
 		config, err := LoadConfig(&configPath)
 
+		if err != nil {
+			t.Fatalf("Failed to load config: %v", err)
+		}
+
 		// Assertions
 		assert.NoError(t, err)
 		assert.NotNil(t, config)
@@ -66,10 +70,10 @@ trayTypes:
 		assert.Len(t, config.Github, 1)
 		assert.Equal(t, "test-org", config.Github[0].Name)
 		assert.Len(t, config.Providers, 1)
-		assert.Equal(t, "docker", config.Providers[0].Get("name"))
+		assert.Equal(t, "docker-provider", config.Providers[0].Get("name"))
 		assert.Len(t, config.TrayTypes, 1)
-		assert.Equal(t, "docker", config.TrayTypes[0].Name)
-		assert.Equal(t, "docker", config.TrayTypes[0].Provider)
+		assert.Equal(t, "docker-local", config.TrayTypes[0].Name)
+		assert.Equal(t, "docker-provider", config.TrayTypes[0].Provider)
 		assert.Equal(t, int64(1), config.TrayTypes[0].RunnerGroupId)
 		assert.Equal(t, true, config.TrayTypes[0].Shutdown)
 		assert.Equal(t, "test-org", config.TrayTypes[0].GitHubOrg)
