@@ -47,17 +47,17 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 
 	tray := trays.NewTray(*trayType)
 
-	err = tm.trayRepository.Save(tray)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to create tray %s: %v", trayType.Name, err)
-		log.Error(errMsg)
-		return errors.New(errMsg)
-	}
-
 	err = provider.RunTray(tray)
 	if err != nil {
-		log.Errorf("Failed to create tray for provider %s, tray %s: %v", trayType.Provider, tray.GetId(), err)
+		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.GetId(), err)
 		return err
+	}
+
+	err = tm.trayRepository.Save(tray)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to save tray %s: %v", trayType.Name, err)
+		log.Error(errMsg)
+		return errors.New(errMsg)
 	}
 
 	return nil
