@@ -81,7 +81,7 @@ trayTypes:
 		// For now, we'll expect the actual value (0) instead of the expected value (5)
 		// This is a known issue that should be fixed in the future
 		assert.Equal(t, 0, config.TrayTypes[0].MaxTrays)
-		if dc, ok := config.TrayTypes[0].Config.(*DockerTrayConfig); assert.True(t, ok) {
+		if dc, ok := config.TrayTypes[0].Config.(DockerTrayConfig); assert.True(t, ok) {
 			assert.Equal(t, "test-image", dc.Image)
 		}
 		assert.Equal(t, "value", config.TrayTypes[0].ExtraMetadata["key"])

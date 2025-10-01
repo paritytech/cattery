@@ -72,22 +72,23 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 			return nil, fmt.Errorf("provider %s for trayType %s not found", trayType.Provider, trayType.Name)
 		}
 
+		var decodeError error
 		switch providerConfig.Get("type") {
 		case "google":
 			var gc GoogleTrayConfig
-			if err := mapstructure.Decode(trayType.Config, &gc); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal google: %w", err)
-			}
-			trayType.Config = &gc
+			decodeError = mapstructure.Decode(trayType.Config, &gc)
+			trayType.Config = gc
 		case "docker":
 			var dc DockerTrayConfig
-			if err := mapstructure.Decode(trayType.Config, &dc); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal docker: %w", err)
-			}
-			trayType.Config = &dc
+			decodeError = mapstructure.Decode(trayType.Config, &dc)
+			trayType.Config = dc
 		//case "scaleway":
 		default:
 
+		}
+
+		if decodeError != nil {
+			return nil, fmt.Errorf("failed to decode '%s' %w", providerConfig.Get("type"), decodeError)
 		}
 	}
 

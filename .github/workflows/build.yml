@@ -10,6 +10,9 @@ on:
       tag_name:
           description: 'Tag name'
           required: true
+  push:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,8 +35,9 @@ jobs:
       - name: run tests
         run: go test -C src ./...
 
-  build:
+  release:
     needs: [tests]
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     runs-on: cattery-gce
@@ -57,7 +61,6 @@ jobs:
      - run: ls -la bin/
 
      - name: create-release
-       if: github.event_name == 'workflow_dispatch'
        uses: softprops/action-gh-release@v2
        with:
          tag_name: ${{ github.event.inputs.tag_name }}
@@ -70,12 +73,13 @@ jobs:
 
   docker-build:
     needs: [tests]
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push') || github.event_name == 'push'
     runs-on: cattery-gce
     environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
     env:
       REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}/cattery
       VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
+      EXTRA_TAG: ${{ github.event_name == 'workflow_dispatch' && 'latest' || 'main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -92,7 +96,7 @@ jobs:
           file: ./Dockerfile
           tags: |
             ${{ env.REGISTRY_PATH }}:${{ env.VERSION }}
-            ${{ env.REGISTRY_PATH }}:latest
+            ${{ env.REGISTRY_PATH }}:${{ env.EXTRA_TAG }}
           push: true
           build-args: |
             CATTERY_VERSION=${{ env.VERSION }}
