@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -59,7 +60,7 @@ func (m *MongodbRestarterRepository) CheckRestartRequest(workflowRunId int64) (b
 	var result bson.M
 	err := dbResult.Decode(&result)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return false, nil
 		}
 		return false, err
