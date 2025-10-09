@@ -168,7 +168,8 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 				stale, err := tm.trayRepository.GetStale(interval, interval*2)
 				if err != nil {
-					return
+					log.Errorf("Failed to get stale trays: %v", err)
+					continue
 				}
 
 				log.Infof("Found %d stale trays: %v", len(stale), stale)
