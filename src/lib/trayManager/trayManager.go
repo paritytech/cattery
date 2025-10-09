@@ -168,7 +168,8 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 				stale, err := tm.trayRepository.GetStale(interval, interval*2)
 				if err != nil {
-					return
+					log.Errorf("Failed to get stale trays: %v", err)
+					continue
 				}
 
 				log.Infof("Found %d stale trays: %v", len(stale), stale)
@@ -219,7 +220,10 @@ func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
 	// log.Debugf("Tray type %s has %d trays, %d with no job", trayTypeName, total, traysWithNoJob)
 	if jobsInQueue > traysWithNoJob {
 		var trayType = getTrayType(trayTypeName)
-		//TODO: handle nil
+		if trayType == nil {
+			log.Warnf("Tray type '%s' not found in config; skipping creation", trayTypeName)
+			return nil
+		}
 
 		var remainingTrays = trayType.MaxTrays - total
 		var traysToCreate = jobsInQueue - traysWithNoJob
@@ -241,7 +245,9 @@ func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
 		}
 
 		for _, tray := range redundant {
-			tm.DeleteTray(tray.Id)
+			if _, delErr := tm.DeleteTray(tray.Id); delErr != nil {
+				log.Errorf("Failed to delete redundant tray %s: %v", tray.Id, delErr)
+			}
 		}
 
 	}

@@ -55,7 +55,7 @@ func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string, repoName
 	return nil
 }
 
-// cleanup db on cancelled or completed workflow runs
+// Cleanup clean db on cancelled or completed workflow runs
 func (wr *WorkflowRestarter) Cleanup(workflowRunId int64, ghOrg string, repoName string) error {
 	log.Debugf("Cleanup for workflow run id %d", workflowRunId)
 	log.Debugf("Checking restart request for workflow run id %d", workflowRunId)
