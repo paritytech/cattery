@@ -69,6 +69,17 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	return err
 }
 
+func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, error) {
+	wfJob, _, err := gc.client.Actions.GetWorkflowJobByID(context.Background(), gc.Org.Name, repoName, jobId)
+	if err != nil {
+		return false, err
+	}
+
+	var status = wfJob.GetStatus()
+
+	return status == "completed", nil
+}
+
 // createClient creates a new GitHub client
 func createClient(org *config.GitHubOrganization) *github.Client {
 

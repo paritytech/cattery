@@ -132,14 +132,14 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 	conclusion := webhookData.GetWorkflowRun().GetConclusion()
 	repoName := webhookData.GetRepo().GetName()
 	orgName := webhookData.GetOrg().GetLogin()
-	log.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
+	logger.Debugf("Action: %s, Org: %s, Repo: %s, Workflow run ID: %d, conclusion: %s", webhookData.GetAction(), orgName, repoName, webhookData.GetWorkflowRun().GetID(), conclusion)
 
 	// On "completed" action and "failure" conclusion trigger restart
 	if webhookData.GetAction() == "completed" && conclusion == "failure" {
-		log.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		logger.Infof("Requesting restart for failed jobs in workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
 		err := RestartManager.Restart(*webhookData.WorkflowRun.ID, orgName, repoName)
 		if err != nil {
-			log.Errorf("Failed to request restart: %v", err)
+			logger.Errorf("Failed to request restart: %v", err)
 			http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
 		}
 		return
@@ -147,17 +147,17 @@ func handleWorkflowRunWebhook(responseWriter http.ResponseWriter, r *http.Reques
 	// On "completed" action and "cancelled" or "success" conclusion trigger cleanup
 	if webhookData.GetAction() == "completed" && (conclusion == "cancelled" || conclusion == "success") {
 		if conclusion == "cancelled" {
-			log.Infof("Cleaning up jobs for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+			logger.Infof("Cleaning up jobs for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
 			err := QueueManager.CleanupByWorkflowRun(*webhookData.WorkflowRun.ID)
 			if err != nil {
-				log.Errorf("Failed to cleanup jobs: %v", err)
+				logger.Errorf("Failed to cleanup jobs: %v", err)
 				http.Error(responseWriter, "Failed to cleanup jobs", http.StatusInternalServerError)
 			}
 		}
-		log.Infof("Cleaning up restart requests for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
+		logger.Infof("Cleaning up restart requests for workflow run ID: %d", webhookData.GetWorkflowRun().GetID())
 		err = RestartManager.Cleanup(*webhookData.WorkflowRun.ID, orgName, repoName)
 		if err != nil {
-			log.Errorf("Failed to cleanup restart requests: %v", err)
+			logger.Errorf("Failed to cleanup restart requests: %v", err)
 			http.Error(responseWriter, "Failed to cleanup restart requests", http.StatusInternalServerError)
 		}
 		return
