@@ -1,6 +1,7 @@
 package jobQueue
 
 import (
+	"cattery/lib/githubClient"
 	"cattery/lib/jobs"
 	"context"
 	"errors"
@@ -18,12 +19,15 @@ type QueueManager struct {
 
 	collection   *mongo.Collection
 	changeStream *mongo.ChangeStream
+
+	logger *log.Entry
 }
 
 func NewQueueManager() *QueueManager {
 	return &QueueManager{
 		jobQueue:  NewJobQueue(),
 		waitGroup: sync.WaitGroup{},
+		logger:    log.WithFields(log.Fields{"name": "QueueManager"}),
 	}
 }
 
@@ -63,7 +67,7 @@ func (qm *QueueManager) Load() error {
 			var event changeEvent[jobs.Job]
 			decodeErr := qm.changeStream.Decode(&event)
 			if decodeErr != nil {
-				log.Error("Failed to decode change stream: ", decodeErr)
+				qm.logger.Error("Failed to decode change stream: ", decodeErr)
 				qm.Load()
 				return
 			}
@@ -78,7 +82,7 @@ func (qm *QueueManager) Load() error {
 			case "delete":
 				qm.jobQueue.Delete(event.DocumentKey.Id)
 			default:
-				log.Warn("Unknown operation type: ", event.OperationType)
+				qm.logger.Warn("Unknown operation type: ", event.OperationType)
 			}
 		}
 	}()
@@ -100,7 +104,7 @@ func (qm *QueueManager) JobInProgress(jobId int64) error {
 	//TODO: remove method, use UpdateJobStatus
 	job := qm.jobQueue.Get(jobId)
 	if job == nil {
-		log.Errorf("No job found with id %v", jobId)
+		qm.logger.Errorf("No job found with id %v", jobId)
 		return errors.New("No job found with id ")
 	}
 
@@ -156,6 +160,28 @@ func (qm *QueueManager) CleanupByWorkflowRun(workflowRunId int64) error {
 	_, err := qm.collection.DeleteMany(context.Background(), bson.M{"workflowRunId": workflowRunId})
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (qm *QueueManager) CleanupCompletedJobs() error {
+
+	for _, job := range qm.jobQueue.jobs {
+		var ghClient, err = githubClient.NewGithubClientWithOrgName(job.Organization)
+		if err != nil {
+			return err
+		}
+
+		completed, err := ghClient.CheckJobCompleted(job.Repository, job.Id)
+		if err != nil {
+			return err
+		}
+
+		if completed {
+			qm.logger.Warn("Removed completed job: ", job.Id)
+			qm.jobQueue.Delete(job.Id)
+		}
 	}
 
 	return nil

@@ -17,11 +17,14 @@ import (
 
 type TrayManager struct {
 	trayRepository repositories.ITrayRepository
+
+	isStaleTraysFound bool
 }
 
 func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
 	return &TrayManager{
-		trayRepository: trayRepository,
+		trayRepository:    trayRepository,
+		isStaleTraysFound: false,
 	}
 }
 
@@ -155,7 +158,7 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
 func (tm *TrayManager) HandleStale(ctx context.Context) {
 
-	var interval = time.Minute * 5
+	var interval = time.Minute * 2
 
 	go func() {
 		for {
@@ -172,7 +175,10 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 					continue
 				}
 
-				log.Infof("Found %d stale trays: %v", len(stale), stale)
+				if len(stale) > 0 {
+					log.Infof("Found %d stale trays: %v", len(stale), stale)
+					tm.isStaleTraysFound = true
+				}
 
 				for _, tray := range stale {
 					log.Debugf("Deleting stale tray: %s", tray.GetId())
@@ -194,6 +200,15 @@ func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.Qu
 			case <-ctx.Done():
 				return
 			default:
+
+				if tm.isStaleTraysFound {
+					err := manager.CleanupCompletedJobs()
+					if err != nil {
+						log.Errorf("Failed to cleanup completed jobs: %v", err)
+					}
+					tm.isStaleTraysFound = false
+				}
+
 				var groups = manager.GetJobsCount()
 				for typeName, jobsCount := range groups {
 					err := tm.handleType(typeName, jobsCount)

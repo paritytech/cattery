@@ -38,6 +38,7 @@ func (wr *WorkflowRestarter) Restart(workflowRunId int64, ghOrg string, repoName
 	ghClient, err := githubClient.NewGithubClientWithOrgName(ghOrg)
 	if err != nil {
 		log.Errorf("Failed to get GitHub client: %s", err.Error())
+		return err
 	}
 	log.Debugf("Restarting failed jobs for workflow run id %d", workflowRunId)
 	err = ghClient.RestartFailedJobs(repoName, workflowRunId)
