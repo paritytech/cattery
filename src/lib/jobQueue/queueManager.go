@@ -80,8 +80,10 @@ func (qm *QueueManager) Load() error {
 				fallthrough
 			case "insert":
 				qm.jobQueue.Add(&event.FullDocument)
+				qm.logger.Debug("Inserted object from changeStream: ", event.FullDocument)
 			case "delete":
 				qm.jobQueue.Delete(event.DocumentKey.Id)
+				qm.logger.Debug("Deleted object from changeStream: ", event.DocumentKey.Id)
 			default:
 				qm.logger.Warn("Unknown operation type: ", event.OperationType)
 			}
@@ -181,7 +183,7 @@ func (qm *QueueManager) CleanupCompletedJobs() error {
 
 		if completed {
 			qm.logger.Warn("Removed completed job: ", job.Id)
-			qm.jobQueue.Delete(job.Id)
+			qm.deleteJob(job.Id)
 
 			metrics.StaleJobsInc(job.Organization, job.Repository, job.Name, job.TrayType)
 		}
