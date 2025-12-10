@@ -38,6 +38,7 @@ func Webhook(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
+
 func handleWorkflowJobWebhook(responseWriter http.ResponseWriter, r *http.Request, logger *log.Entry) {
 	var webhookData *github.WorkflowJobEvent
 

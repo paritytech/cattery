@@ -5,6 +5,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
+	"cattery/lib/metrics"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -104,6 +105,8 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		logger.Errorf("%v", err)
 	}
 
+	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, 1)
+
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
 }
 
@@ -128,8 +131,16 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var trayId = r.PathValue("id")
 
+	var tray, err = TrayManager.GetTrayById(trayId)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+		return
+	}
+
 	var unregisterRequest messages.UnregisterRequest
-	err := json.NewDecoder(r.Body).Decode(&unregisterRequest)
+	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
 		logger.Error(errMsg)
@@ -138,18 +149,23 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	logger = logger.WithFields(log.Fields{
-		"trayId": unregisterRequest.Agent.AgentId,
+		"trayId": tray.Id,
 	})
 
 	logger.Tracef("Agent unregister request")
 
-	_, err = TrayManager.DeleteTray(unregisterRequest.Agent.AgentId)
+	_, err = TrayManager.DeleteTray(tray.Id)
 
 	if err != nil {
 		logger.Errorf("Failed to delete tray: %v", err)
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
+
+	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, -1)
+	if unregisterRequest.Reason == messages.UnregisterReasonPreempted {
+		metrics.PreemptedTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
+	}
 
 }
 

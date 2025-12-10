@@ -16,6 +16,7 @@ import (
 
 	restarterRepo "cattery/lib/restarter/repositories"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -38,6 +39,8 @@ func Start() {
 	webhookMux.HandleFunc("POST /agent/interrupt/{id}", handlers.AgentInterrupt)
 
 	webhookMux.HandleFunc("POST /github/{org}", handlers.Webhook)
+
+	webhookMux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	var webhookServer = &http.Server{
 		Addr:    config.AppConfig.Server.ListenAddress,
