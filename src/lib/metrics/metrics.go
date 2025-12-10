@@ -26,12 +26,12 @@ var (
 	// Gauges
 
 	registeredTraysTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "cattery_trays_total",
+		Name: "cattery_registered_trays",
 		Help: "",
 	}, []string{"org", "tray_type"})
 
 	jobsInQueueTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "cattery_jobs_in_queue_total",
+		Name: "cattery_jobs_in_queue",
 		Help: "",
 	}, []string{"org", "repository", "job_name", "tray_type"})
 )
