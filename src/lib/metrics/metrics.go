@@ -21,7 +21,7 @@ var (
 	preemptedTraysCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cattery_preempted_trays_count",
 		Help: "",
-	}, []string{"org", "repository", "job_name", "tray_type"})
+	}, []string{"org", "tray_type"})
 
 	// Gauges
 
@@ -48,12 +48,12 @@ func StaleTraysInc(org string, trayType string) {
 
 // PreemptedTrays
 
-func PreemptedTraysAdd(org string, repository string, jobName string, trayType string, count int) {
-	preemptedTraysCount.WithLabelValues(org, repository, jobName, trayType).Add(float64(count))
+func PreemptedTraysAdd(org string, trayType string, count int) {
+	preemptedTraysCount.WithLabelValues(org, trayType).Add(float64(count))
 }
 
-func PreemptedTraysInc(org string, repository string, jobName string, trayType string) {
-	PreemptedTraysAdd(org, repository, jobName, trayType, 1)
+func PreemptedTraysInc(org string, trayType string) {
+	PreemptedTraysAdd(org, trayType, 1)
 }
 
 // StaleJobs

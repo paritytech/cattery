@@ -2,6 +2,7 @@ package jobQueue
 
 import (
 	"cattery/lib/jobs"
+	"cattery/lib/metrics"
 	"sync"
 )
 
@@ -70,6 +71,8 @@ func (qm *JobQueue) Add(job *jobs.Job) {
 
 	var group = qm.getGroup(job.TrayType)
 	group[job.Id] = *job
+
+	metrics.JobsInQueueAdd(job.Organization, job.Repository, job.Name, job.TrayType, 1)
 }
 
 func (qm *JobQueue) Delete(jobId int64) {
@@ -82,8 +85,9 @@ func (qm *JobQueue) Delete(jobId int64) {
 
 		var group = qm.getGroup(job.TrayType)
 		delete(group, job.Id)
-	}
 
+		metrics.JobsInQueueAdd(job.Organization, job.Repository, job.Name, job.TrayType, -1)
+	}
 }
 
 func (qm *JobQueue) DeleteJobsByWorkflowRunId(workflowRunId int64) {
@@ -96,6 +100,8 @@ func (qm *JobQueue) DeleteJobsByWorkflowRunId(workflowRunId int64) {
 
 			var group = qm.getGroup(job.TrayType)
 			delete(group, job.Id)
+
+			metrics.JobsInQueueAdd(job.Organization, job.Repository, job.Name, job.TrayType, -1)
 		}
 	}
 }
