@@ -4,6 +4,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/githubClient"
 	"cattery/lib/jobQueue"
+	"cattery/lib/metrics"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
@@ -187,6 +188,8 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 					if err != nil {
 						log.Errorf("Failed to delete tray %s: %v", tray.GetId(), err)
 					}
+
+					metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 				}
 			}
 		}

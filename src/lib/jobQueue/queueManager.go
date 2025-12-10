@@ -3,6 +3,7 @@ package jobQueue
 import (
 	"cattery/lib/githubClient"
 	"cattery/lib/jobs"
+	"cattery/lib/metrics"
 	"context"
 	"errors"
 	"sync"
@@ -181,6 +182,8 @@ func (qm *QueueManager) CleanupCompletedJobs() error {
 		if completed {
 			qm.logger.Warn("Removed completed job: ", job.Id)
 			qm.jobQueue.Delete(job.Id)
+
+			metrics.StaleJobsInc(job.Organization, job.Repository, job.Name, job.TrayType)
 		}
 	}
 
