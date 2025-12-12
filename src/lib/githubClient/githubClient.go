@@ -74,7 +74,7 @@ func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, e
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			log.Tracef("Workflow job not found: %s/%s %d", gc.Org.Name, repoName, jobId)
-			return false, nil
+			return true, nil
 		}
 		return false, err
 	}
