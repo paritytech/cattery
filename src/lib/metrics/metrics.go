@@ -23,6 +23,11 @@ var (
 		Help: "",
 	}, []string{"org", "tray_type"})
 
+	trayProviderErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cattery_tray_provider_errors",
+		Help: "",
+	}, []string{"org", "provider", "tray_type", "operation_type"})
+
 	// Gauges
 
 	registeredTraysTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -76,4 +81,10 @@ func RegisteredTraysAdd(org string, trayType string, count int) {
 
 func JobsInQueueAdd(org string, repository string, jobName string, trayType string, count int) {
 	jobsInQueueTotal.WithLabelValues(org, repository, jobName, trayType).Add(float64(count))
+}
+
+// TrayProviderErrors
+
+func TrayProviderErrors(org string, provider, trayType string, operationType string) {
+	trayProviderErrors.WithLabelValues(org, provider, trayType, operationType).Inc()
 }
