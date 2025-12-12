@@ -70,8 +70,12 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 }
 
 func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, error) {
-	wfJob, _, err := gc.client.Actions.GetWorkflowJobByID(context.Background(), gc.Org.Name, repoName, jobId)
+	wfJob, resp, err := gc.client.Actions.GetWorkflowJobByID(context.Background(), gc.Org.Name, repoName, jobId)
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			log.Tracef("Workflow job not found: %s/%s %d", gc.Org.Name, repoName, jobId)
+			return false, nil
+		}
 		return false, err
 	}
 
