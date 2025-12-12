@@ -54,6 +54,7 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 	err = provider.RunTray(tray)
 	if err != nil {
 		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.GetId(), err)
+		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
 		return err
 	}
 
@@ -146,6 +147,7 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 	err = provider.CleanTray(tray)
 	if err != nil {
 		log.Errorf("Failed to delete tray for provider %s, tray %s: %v", provider.GetProviderName(), tray.GetId(), err)
+		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
 		return nil, err
 	}
 

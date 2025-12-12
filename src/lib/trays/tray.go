@@ -13,6 +13,7 @@ type Tray struct {
 	TrayTypeName string `bson:"trayTypeName"`
 	trayType     config.TrayType
 
+	ProviderName   string     `bson:"providerName"`
 	GitHubOrgName  string     `bson:"gitHubOrgName"`
 	GitHubRunnerId int64      `bson:"gitHubRunnerId"`
 	JobRunId       int64      `bson:"jobRunId"`
@@ -38,6 +39,7 @@ func NewTray(trayType config.TrayType) *Tray {
 		Id:            trayId,
 		TrayTypeName:  trayType.Name,
 		trayType:      trayType,
+		ProviderName:  trayType.Provider,
 		Status:        TrayStatusCreating,
 		GitHubOrgName: trayType.GitHubOrg,
 		JobRunId:      0,
