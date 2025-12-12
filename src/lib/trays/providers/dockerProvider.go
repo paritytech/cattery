@@ -75,7 +75,10 @@ func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
 	var dockerCommand = exec.Command("docker", "container", "stop", tray.GetId())
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(dockerCommandOutput), "no such container") {
+		output := string(dockerCommandOutput)
+		d.logger.Trace(output)
+
+		if strings.Contains(strings.ToLower(output), "no such container") {
 			d.logger.Trace("No such container: ", tray.GetId())
 			return nil
 		}

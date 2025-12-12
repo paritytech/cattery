@@ -4,6 +4,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/jobQueue"
 	"cattery/lib/restarter"
+	restarterRepo "cattery/lib/restarter/repositories"
 	"cattery/lib/trayManager"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
@@ -12,9 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
-
-	restarterRepo "cattery/lib/restarter/repositories"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -51,8 +49,7 @@ func Start() {
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().
 		ApplyURI(config.AppConfig.Database.Uri).
-		SetServerAPIOptions(serverAPI).
-		SetTimeout(3 * time.Second)
+		SetServerAPIOptions(serverAPI) //.SetTimeout(3 * time.Second)
 
 	client, err := mongo.Connect(opts)
 	if err != nil {

@@ -42,13 +42,15 @@ func (qm *QueueManager) Load() error {
 
 	collection := qm.collection
 
-	changeStream, err := collection.Watch(nil, mongo.Pipeline{}, options.ChangeStream().SetFullDocument(options.UpdateLookup))
+	ctx, _ := context.WithCancel(context.Background())
+
+	changeStream, err := collection.Watch(ctx, mongo.Pipeline{}, options.ChangeStream().SetFullDocument(options.UpdateLookup))
 	if err != nil {
 		return err
 	}
 	qm.changeStream = changeStream
 	//options.ChangeStream().SetFullDocumentBeforeChange(options.UpdateLookup)
-	allJobs, err := collection.Find(nil, bson.M{})
+	allJobs, err := collection.Find(context.Background(), bson.M{})
 	if err != nil {
 		return err
 	}
@@ -64,13 +66,13 @@ func (qm *QueueManager) Load() error {
 	}
 
 	go func() {
-		for qm.changeStream.Next(nil) {
+		for qm.changeStream.Next(ctx) {
+			qm.logger.Debug("changeStream event")
 			var event changeEvent[jobs.Job]
 			decodeErr := qm.changeStream.Decode(&event)
 			if decodeErr != nil {
 				qm.logger.Error("Failed to decode change stream: ", decodeErr)
-				qm.Load()
-				return
+				continue
 			}
 
 			switch event.OperationType {
@@ -88,6 +90,11 @@ func (qm *QueueManager) Load() error {
 				qm.logger.Warn("Unknown operation type: ", event.OperationType)
 			}
 		}
+		qm.logger.Debug("changeStream finished")
+		if err := qm.changeStream.Err(); err != nil {
+			qm.logger.Error("changeStream error: ", err)
+		}
+		changeStream.Close(nil)
 	}()
 
 	return nil
