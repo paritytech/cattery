@@ -9,7 +9,7 @@ import (
 	"path"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 var RunnerFolder string
@@ -24,7 +24,7 @@ func Start() {
 
 type CatteryAgent struct {
 	mutex         sync.Mutex
-	logger        *logrus.Entry
+	logger        *log.Entry
 	catteryClient *CatteryClient
 	agent         *agents.Agent
 	agentId       string
@@ -36,7 +36,7 @@ type CatteryAgent struct {
 func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId string) *CatteryAgent {
 	return &CatteryAgent{
 		mutex:            sync.Mutex{},
-		logger:           logrus.WithFields(logrus.Fields{"name": "agent", "agentId": agentId}),
+		logger:           log.WithFields(log.Fields{"name": "agent", "agentId": agentId}),
 		catteryClient:    createClient(catteryServerUrl),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
@@ -74,7 +74,7 @@ func (a *CatteryAgent) Start() {
 // stop stops the runner process
 func (a *CatteryAgent) stop(event shutdownEvents.ShutdownEvent) {
 
-	logrus.Infof("Stopping Cattery Agent with reason: %d, message: `%s`", event.Reason, event.Message)
+	log.Infof("Stopping Cattery Agent with reason: %d, message: `%s`", event.Reason, event.Message)
 
 	err := a.catteryClient.UnregisterAgent(a.agent, event.Reason, event.Message)
 	if err != nil {
