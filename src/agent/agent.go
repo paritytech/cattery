@@ -1,15 +1,13 @@
 package agent
 
 import (
+	"cattery/agent/Watchers"
+	"cattery/agent/githubListener"
+	"cattery/agent/shutdownEvents"
 	"cattery/agent/tools"
 	"cattery/lib/agents"
-	"cattery/lib/messages"
-	"os"
-	"os/exec"
-	"os/signal"
 	"path"
 	"sync"
-	"syscall"
 
 	"github.com/sirupsen/logrus"
 )
@@ -60,76 +58,25 @@ func (a *CatteryAgent) Start() {
 
 	a.logger.Info("Agent registered, starting Listener")
 
-	var commandRun = exec.Command(a.listenerExecPath, "run", "--jitconfig", *jitConfig)
-	commandRun.Stdout = os.Stdout
-	commandRun.Stderr = os.Stderr
+	Watchers.WatchSignal()
+	Watchers.WatchFile()
 
-	go func() {
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT)
-		signal.Notify(sigs, syscall.SIGTERM)
-		signal.Notify(sigs, syscall.SIGKILL)
+	var ghListener = githubListener.NewGithubListener(a.listenerExecPath)
+	ghListener.Start(jitConfig)
 
-		sig := <-sigs
-		a.logger.Info("Got signal ", sig)
+	// blocking call
+	var event = shutdownEvents.WaitEvent()
 
-		a.interrupt(commandRun.Process)
-	}()
-
-	err = commandRun.Run()
-	if err != nil {
-		var errMsg = "Runner failed: " + err.Error()
-		a.logger.Error(errMsg)
-	}
-
-	a.stop()
-}
-
-func (a *CatteryAgent) interrupt(runnerProcess *os.Process) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-
-	if a.interrupted {
-		return
-	}
-
-	a.logger.Info("Interrupting runner")
-	err := a.catteryClient.InterruptAgent(a.agent)
-	if err != nil {
-		var errMsg = "Failed to interrupt agent: " + err.Error()
-		a.logger.Error(errMsg)
-	}
-	// SIGINT from go kills listener immediately, so we use pkill
-	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
-	err = commandInterruptRun.Run()
-	if err != nil {
-		var errMsg = "Failed to interrupt runner: " + err.Error()
-		a.logger.Error(errMsg)
-	}
-	// TODO: debug why SIGINT does not work correctly
-	// err := runnerProcess.Signal(syscall.SIGINT)
-	// if err != nil {
-	// 	var errMsg = "Failed to stop runner: " + err.Error()
-	// 	a.logger.Error(errMsg)
-	// }
-
-	a.interrupted = true
+	ghListener.Stop()
+	a.stop(event)
 }
 
 // stop stops the runner process
-func (a *CatteryAgent) stop() {
+func (a *CatteryAgent) stop(event shutdownEvents.ShutdownEvent) {
 
-	var reason messages.UnregisterReason
+	logrus.Infof("Stopping Cattery Agent with reason: %d, message: `%s`", event.Reason, event.Message)
 
-	if a.interrupted {
-		reason = messages.UnregisterReasonPreempted
-		a.logger.Infof("Runner has been interrupted")
-	} else {
-		reason = messages.UnregisterReasonDone
-		a.logger.Infof("Runner has finished its job")
-	}
-
-	err := a.catteryClient.UnregisterAgent(a.agent, reason)
+	err := a.catteryClient.UnregisterAgent(a.agent, event.Reason, event.Message)
 	if err != nil {
 		var errMsg = "Failed to unregister agent: " + err.Error()
 		a.logger.Error(errMsg)

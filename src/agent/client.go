@@ -61,13 +61,14 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 }
 
 // UnregisterAgent sends a POST request to the Cattery server to unregister the agent
-func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.UnregisterReason) error {
+func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.UnregisterReason, message string) error {
 
 	var client = c.httpClient
 
 	requestJson, err := json.Marshal(messages.UnregisterRequest{
-		Agent:  *agent,
-		Reason: reason,
+		Agent:   *agent,
+		Reason:  reason,
+		Message: message,
 	})
 	if err != nil {
 		return err
