@@ -24,3 +24,8 @@ const (
 	UnregisterReasonSigTerm
 	UnregisterReasonControllerKill
 )
+
+type PingResponse struct {
+	Terminate bool   `json:"terminate"`
+	Message   string `json:"message"`
+}

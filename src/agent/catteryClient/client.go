@@ -1,4 +1,4 @@
-package agent
+package catteryClient
 
 import (
 	"bytes"
@@ -6,9 +6,11 @@ import (
 	"cattery/lib/messages"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -17,13 +19,15 @@ type CatteryClient struct {
 	httpClient *http.Client
 	baseURL    string
 	logger     *logrus.Entry
+	agentId    string
 }
 
-func NewCatteryClient(baseURL string) *CatteryClient {
+func NewCatteryClient(baseURL string, agentId string) *CatteryClient {
 	return &CatteryClient{
 		httpClient: &http.Client{},
 		baseURL:    baseURL,
 		logger:     logrus.WithField("name", "catteryClient"),
+		agentId:    agentId,
 	}
 }
 
@@ -45,6 +49,8 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
@@ -85,12 +91,37 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 		return err
 	}
 
+	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
 		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
 	}
 
 	return nil
+}
+
+func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
+
+	var response, err = c.get("/agent", "ping")
+	if err != nil {
+		return nil, errors.New("get error: " + err.Error())
+	}
+
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(response.Body)
+		return nil, errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+	}
+
+	var pingResponse = &messages.PingResponse{}
+	err = json.NewDecoder(response.Body).Decode(pingResponse)
+	if err != nil {
+		return nil, errors.New("error decoding ping response: " + err.Error())
+	}
+
+	return pingResponse, nil
 }
 
 func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
@@ -115,10 +146,28 @@ func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
 		return err
 	}
 
+	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
 		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
 	}
 
 	return nil
+}
+
+// get
+func (c *CatteryClient) get(path ...string) (*http.Response, error) {
+	client := c.httpClient
+	requestUrl, err := url.JoinPath(c.baseURL, path...)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("failed to join path %s, %s", strings.Join(path, " "), err.Error()))
+	}
+
+	response, err := client.Get(requestUrl)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("failed to do request %s, %s", requestUrl, err.Error()))
+	}
+
+	return response, nil
 }

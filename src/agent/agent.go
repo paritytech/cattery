@@ -2,10 +2,12 @@ package agent
 
 import (
 	"cattery/agent/Watchers"
+	catteryClient2 "cattery/agent/catteryClient"
 	"cattery/agent/githubListener"
 	"cattery/agent/shutdownEvents"
 	"cattery/agent/tools"
 	"cattery/lib/agents"
+	"context"
 	"path"
 	"sync"
 
@@ -25,7 +27,7 @@ func Start() {
 type CatteryAgent struct {
 	mutex         sync.Mutex
 	logger        *log.Entry
-	catteryClient *CatteryClient
+	catteryClient *catteryClient2.CatteryClient
 	agent         *agents.Agent
 	agentId       string
 
@@ -37,7 +39,7 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 	return &CatteryAgent{
 		mutex:            sync.Mutex{},
 		logger:           log.WithFields(log.Fields{"name": "agent", "agentId": agentId}),
-		catteryClient:    createClient(catteryServerUrl),
+		catteryClient:    createClient(catteryServerUrl, agentId),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
 		interrupted:      false,
@@ -60,6 +62,7 @@ func (a *CatteryAgent) Start() {
 
 	Watchers.WatchSignal()
 	Watchers.WatchFile()
+	Watchers.WatchPing(context.Background(), a.catteryClient)
 
 	var ghListener = githubListener.NewGithubListener(a.listenerExecPath)
 	ghListener.Start(jitConfig)
@@ -89,6 +92,6 @@ func (a *CatteryAgent) stop(event shutdownEvents.ShutdownEvent) {
 }
 
 // createClient creates a new http client
-func createClient(baseUrl string) *CatteryClient {
-	return NewCatteryClient(baseUrl)
+func createClient(baseUrl string, agentId string) *catteryClient2.CatteryClient {
+	return catteryClient2.NewCatteryClient(baseUrl, agentId)
 }

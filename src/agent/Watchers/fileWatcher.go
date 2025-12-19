@@ -3,10 +3,13 @@ package Watchers
 import (
 	"cattery/agent/shutdownEvents"
 	"cattery/lib/messages"
+	"os"
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 )
+
+var filename = "./shutdown_file"
 
 func WatchFile() {
 	go func() {
@@ -16,7 +19,9 @@ func WatchFile() {
 		}
 		defer watcher.Close()
 
-		err = watcher.Add("./shutdown_file")
+		createFile(filename)
+
+		err = watcher.Add(filename)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -43,4 +48,12 @@ func WatchFile() {
 
 		shutdownEvents.Emit(messages.UnregisterReasonPreempted, message)
 	}()
+}
+
+func createFile(filename string) {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	f.Close()
 }
