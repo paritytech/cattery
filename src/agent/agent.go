@@ -2,7 +2,7 @@ package agent
 
 import (
 	"cattery/agent/Watchers"
-	catteryClient2 "cattery/agent/catteryClient"
+	"cattery/agent/catteryClient"
 	"cattery/agent/githubListener"
 	"cattery/agent/shutdownEvents"
 	"cattery/agent/tools"
@@ -27,7 +27,7 @@ func Start() {
 type CatteryAgent struct {
 	mutex         sync.Mutex
 	logger        *log.Entry
-	catteryClient *catteryClient2.CatteryClient
+	catteryClient *catteryClient.CatteryClient
 	agent         *agents.Agent
 	agentId       string
 
@@ -92,6 +92,6 @@ func (a *CatteryAgent) stop(event shutdownEvents.ShutdownEvent) {
 }
 
 // createClient creates a new http client
-func createClient(baseUrl string, agentId string) *catteryClient2.CatteryClient {
-	return catteryClient2.NewCatteryClient(baseUrl, agentId)
+func createClient(baseUrl string, agentId string) *catteryClient.CatteryClient {
+	return catteryClient.NewCatteryClient(baseUrl, agentId)
 }
