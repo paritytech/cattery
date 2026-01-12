@@ -61,7 +61,7 @@ func (a *CatteryAgent) Start() {
 	a.logger.Info("Agent registered, starting Listener")
 
 	Watchers.WatchSignal()
-	Watchers.WatchFile()
+	Watchers.WatchFile(context.Background())
 	Watchers.WatchPing(context.Background(), a.catteryClient)
 
 	var ghListener = githubListener.NewGithubListener(a.listenerExecPath)

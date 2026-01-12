@@ -3,6 +3,7 @@ package Watchers
 import (
 	"cattery/agent/shutdownEvents"
 	"cattery/lib/messages"
+	"context"
 	"os"
 
 	"github.com/fsnotify/fsnotify"
@@ -11,7 +12,7 @@ import (
 
 var filename = "./shutdown_file"
 
-func WatchFile() {
+func WatchFile(ctx context.Context) {
 	go func() {
 		watcher, err := fsnotify.NewWatcher()
 		if err != nil {
@@ -28,15 +29,21 @@ func WatchFile() {
 
 		var message string
 
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
 		select {
+		case <-ctx.Done():
+			return
 		case event := <-watcher.Events:
-			if event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Op.Has(fsnotify.Write) {
 				message = "Modified file: " + event.Name
 			}
-			if event.Op&fsnotify.Remove == fsnotify.Remove {
+			if event.Op.Has(fsnotify.Remove) {
 				message = "Removed file: " + event.Name
 			}
-			if event.Op&fsnotify.Rename == fsnotify.Rename {
+			if event.Op.Has(fsnotify.Rename) {
 				message = "Renamed file: " + event.Name
 			}
 		case err := <-watcher.Errors:

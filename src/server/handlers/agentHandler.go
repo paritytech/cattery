@@ -6,11 +6,13 @@ import (
 	"cattery/lib/githubClient"
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
+	"cattery/lib/trays"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -215,6 +217,70 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 	http.ServeContent(responseWriter, r, filepath.Base(execPath), fileInfo.ModTime(), file)
 
 	logger.Infof("Binary file served: %s (%d bytes)", execPath, fileInfo.Size())
+}
+
+func AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
+	var logger = log.WithFields(log.Fields{
+		"handler": "agent",
+		"call":    "AgentPing",
+	})
+
+	logger.Tracef("AgentPing: %v", r)
+
+	var id = r.PathValue("id")
+	var agentId = validateAgentId(id)
+
+	var pingResponse = &messages.PingResponse{
+		Terminate: false,
+		Message:   "",
+	}
+
+	tray, err := TrayManager.GetTrayById(agentId)
+	if err != nil {
+		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+
+		pingResponse.Message = "Failed to get tray by id: " + errMsg
+		pingResponse.Terminate = true
+		writeResponse(responseWriter, pingResponse, logger)
+
+		return
+	}
+	if tray == nil {
+		var errMsg = fmt.Sprintf("Tray with id '%s' not found", agentId)
+		logger.Error(errMsg)
+		http.Error(responseWriter, errMsg, http.StatusGone)
+
+		pingResponse.Message = "Failed to get tray by id: " + errMsg
+		pingResponse.Terminate = true
+		writeResponse(responseWriter, pingResponse, logger)
+
+		return
+	}
+
+	if tray.Status == trays.TrayStatusRunning {
+		writeResponse(responseWriter, pingResponse, logger)
+		return
+	}
+
+	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*2 {
+		pingResponse.Terminate = true
+		pingResponse.Message = "Tray stale"
+		writeResponse(responseWriter, pingResponse, logger)
+		return
+	}
+
+	writeResponse(responseWriter, pingResponse, logger)
+}
+
+func writeResponse(responseWriter http.ResponseWriter, pingResponse any, logger *log.Entry) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(responseWriter).Encode(pingResponse); err != nil {
+		logger.Errorf("Failed to encode ping response: %v", err)
+		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {

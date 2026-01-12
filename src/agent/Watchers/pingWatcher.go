@@ -13,6 +13,10 @@ func WatchPing(ctx context.Context, client *catteryClient.CatteryClient) {
 		var msg string
 		var finished = false
 
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
 		for !finished {
 			select {
 			case <-ctx.Done(): // selected when context is canceled or times out
@@ -24,7 +28,7 @@ func WatchPing(ctx context.Context, client *catteryClient.CatteryClient) {
 				if err != nil {
 					msg = "error pinging controller: " + err.Error()
 					finished = true
-					break
+					continue
 				}
 
 				if pingResponse.Terminate {
