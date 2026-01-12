@@ -1,6 +1,11 @@
 package githubListener
 
-func (l *GithubListener) kill() {
+import (
+	"errors"
+	"os/exec"
+)
+
+func (l *GithubListener) kill() error {
 	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
 	err := commandInterruptRun.Run()
 	if err != nil {

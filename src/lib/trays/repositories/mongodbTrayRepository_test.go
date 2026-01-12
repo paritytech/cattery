@@ -115,8 +115,11 @@ func TestGetById(t *testing.T) {
 
 	// Test GetById with non-existent ID
 	tray, err = repo.GetById("non-existent")
-	if err == nil {
-		t.Error("Expected error for non-existent tray, got nil")
+	if err != nil {
+		t.Error("Expected no error for non-existent tray, got nil")
+	}
+	if tray != nil {
+		t.Error("Expected tray to be nil for non-existent tray")
 	}
 
 }
@@ -269,8 +272,8 @@ func TestDelete(t *testing.T) {
 
 	// Verify the tray was deleted
 	deletedTray, err := repo.GetById("test-tray-1")
-	if err == nil {
-		t.Error("Expected error for deleted tray, got nil")
+	if err != nil {
+		t.Error("Expected no error for deleted tray, got nil")
 	}
 
 	if deletedTray != nil {

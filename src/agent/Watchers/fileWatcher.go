@@ -51,7 +51,7 @@ func WatchFile(ctx context.Context) {
 			log.Error(message)
 		}
 
-		log.Infof(message)
+		log.Info(message)
 
 		shutdownEvents.Emit(messages.UnregisterReasonPreempted, message)
 	}()
