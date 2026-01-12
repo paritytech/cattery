@@ -70,6 +70,8 @@ func (a *CatteryAgent) Start() {
 	// blocking call
 	var event = shutdownEvents.WaitEvent()
 
+	a.logger.Infof("Received shutdown event: %s, reason: %d", event.Message, event.Reason)
+
 	ghListener.Stop()
 	a.stop(event)
 }

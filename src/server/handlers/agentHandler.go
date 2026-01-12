@@ -265,8 +265,11 @@ func AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*2 {
+		var errMsg = fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
+		logger.Error(errMsg)
+
 		pingResponse.Terminate = true
-		pingResponse.Message = "Tray stale"
+		pingResponse.Message = errMsg
 		writeResponse(responseWriter, pingResponse, logger)
 		return
 	}
