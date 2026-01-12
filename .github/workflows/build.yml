@@ -22,6 +22,8 @@ jobs:
 
   tests:
     runs-on: parity-ubuntu
+    env:
+      DOCKER_API_VERSION: '1.44'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
