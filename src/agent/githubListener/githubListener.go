@@ -66,5 +66,8 @@ func (l *GithubListener) Stop() {
 	}
 
 	l.process = nil
+}
 
+func (l *GithubListener) kill() error {
+	return kill(l)
 }

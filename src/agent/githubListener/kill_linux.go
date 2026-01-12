@@ -5,7 +5,7 @@ import (
 	"os/exec"
 )
 
-func (l *GithubListener) kill() error {
+func kill(l *GithubListener) error {
 	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
 	err := commandInterruptRun.Run()
 	if err != nil {
