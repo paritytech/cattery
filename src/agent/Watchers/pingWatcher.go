@@ -27,7 +27,6 @@ func WatchPing(ctx context.Context, client *catteryClient.CatteryClient) {
 				pingResponse, err := client.Ping()
 				if err != nil {
 					msg = "error pinging controller: " + err.Error()
-					finished = true
 					continue
 				}
 

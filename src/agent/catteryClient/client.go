@@ -103,7 +103,7 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 
 func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 
-	var response, err = c.get("/agent", "ping")
+	var response, err = c.get("/agent", "ping", c.agentId)
 	if err != nil {
 		return nil, errors.New("get error: " + err.Error())
 	}
