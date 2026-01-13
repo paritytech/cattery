@@ -29,6 +29,10 @@ func (m *MongodbTrayRepository) GetById(trayId string) (*trays.Tray, error) {
 	var result trays.Tray
 	err := dbResult.Decode(&result)
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Handle the "not found" case implicitly
+			return nil, nil
+		}
 		return nil, err
 	}
 
