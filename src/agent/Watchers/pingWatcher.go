@@ -6,6 +6,8 @@ import (
 	"cattery/lib/messages"
 	"context"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func WatchPing(ctx context.Context, client *catteryClient.CatteryClient) {
@@ -27,6 +29,7 @@ func WatchPing(ctx context.Context, client *catteryClient.CatteryClient) {
 				pingResponse, err := client.Ping()
 				if err != nil {
 					msg = "error pinging controller: " + err.Error()
+					log.Error(msg)
 					continue
 				}
 

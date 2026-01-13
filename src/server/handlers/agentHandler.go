@@ -140,6 +140,10 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
 	}
+	if tray == nil {
+		http.Error(responseWriter, "Tray does not exist", http.StatusNotFound)
+		return
+	}
 
 	var unregisterRequest messages.UnregisterRequest
 	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
