@@ -158,8 +158,89 @@ func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) 
 }
 
 func (g *GceProvider) DeleteMetadata(tray *trays.Tray, keys []string) error {
-	// We'll do something here
+	if len(keys) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	client, err := g.createInstancesClient()
+	if err != nil {
+		return err
+	}
+
+	var (
+		zone    = tray.ProviderData["zone"]
+		project = g.providerConfig.Get("project")
+	)
+
+	// Get current metadata
+	instance, err := client.Get(ctx, &computepb.GetInstanceRequest{
+		Project:  project,
+		Zone:     zone,
+		Instance: tray.GetId(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get instance metadata: %w", err)
+	}
+
+	currentMetadata := instance.GetMetadata()
+	if currentMetadata == nil {
+		g.logger.Infof("Instance %s has no metadata, nothing to delete", tray.GetId())
+		return nil
+	}
+
+	// Build set of keys to delete
+	keysToDelete := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		keysToDelete[k] = true
+	}
+
+	// Filter out the keys to delete
+	newItems, deletedKeys := filterMetadataKeys(currentMetadata.GetItems(), keysToDelete)
+
+	if len(deletedKeys) == 0 {
+		g.logger.Infof("None of the specified metadata keys were found on instance %s", tray.GetId())
+		return nil
+	}
+
+	// Set the new metadata with the same fingerprint
+	op, err := client.SetMetadata(ctx, &computepb.SetMetadataInstanceRequest{
+		Project:  project,
+		Zone:     zone,
+		Instance: tray.GetId(),
+		MetadataResource: &computepb.Metadata{
+			Fingerprint: currentMetadata.Fingerprint,
+			Items:       newItems,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set metadata: %w", err)
+	}
+
+	err = op.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("metadata update operation failed: %w", err)
+	}
+
+	g.logger.Infof("Deleted metadata keys %v from instance %s", deletedKeys, tray.GetId())
 	return nil
+}
+
+func filterMetadataKeys(items []*computepb.Items, keysToDelete map[string]bool) ([]*computepb.Items, []string) {
+	var newItems []*computepb.Items
+	var deletedKeys []string
+
+	for _, item := range items {
+		key := item.GetKey()
+		if keysToDelete[key] {
+			deletedKeys = append(deletedKeys, key)
+			continue
+		}
+		newItems = append(newItems, item) // build new list here
+	}
+
+	return newItems, deletedKeys
 }
 
 func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {
