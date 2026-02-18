@@ -157,6 +157,11 @@ func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) 
 	return instancesClient, err
 }
 
+func (g *GceProvider) DeleteMetadata(tray *trays.Tray, keys []string) error {
+	// We'll do something here
+	return nil
+}
+
 func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {
 
 	var items []*computepb.Items

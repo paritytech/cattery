@@ -110,6 +110,8 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, 1)
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
+
+	// we'll delete the metadata keys via a go routine here.
 }
 
 // validateAgentId validates the agent ID
