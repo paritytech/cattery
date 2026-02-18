@@ -164,7 +164,7 @@ type TrayType struct {
 }
 
 func (t *TrayType) GetMetadataKeysToDelete() []string {
-	keys := []string{"cattery-url", "cattery-agent-id"}
+	keys := make([]string, 0)
 	keys = append(keys, t.DeleteMetadata...)
 	return keys
 }
