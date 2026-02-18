@@ -18,4 +18,7 @@ type ITrayProvider interface {
 
 	// CleanTray deletes the tray with the given ID.
 	CleanTray(tray *trays.Tray) error
+
+	// DeleteMetadata removes the specified metadata keys from the tray's instance.
+	DeleteMetadata(tray *trays.Tray, keys []string) error
 }

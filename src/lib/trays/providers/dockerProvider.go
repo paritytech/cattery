@@ -71,6 +71,10 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	return nil
 }
 
+func (d *DockerProvider) DeleteMetadata(tray *trays.Tray, keys []string) error {
+	return nil
+}
+
 func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
 	var dockerCommand = exec.Command("docker", "container", "stop", tray.GetId())
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()

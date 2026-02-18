@@ -7,6 +7,7 @@ import (
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
+	"cattery/lib/trays/providers"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -110,6 +111,21 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, 1)
 
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
+
+	// Delete instance metadata keys after registration
+	keysToDelete := trayType.GetMetadataKeysToDelete()
+	if len(keysToDelete) > 0 {
+		go func() {
+			provider, err := providers.GetProviderForTray(tray)
+			if err != nil {
+				logger.Warnf("Failed to get provider for metadata deletion: %v", err)
+				return
+			}
+			if err := provider.DeleteMetadata(tray, keysToDelete); err != nil {
+				logger.Warnf("Failed to delete instance metadata: %v", err)
+			}
+		}()
+	}
 }
 
 // validateAgentId validates the agent ID

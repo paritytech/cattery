@@ -152,14 +152,21 @@ type GitHubOrganization struct {
 }
 
 type TrayType struct {
-	Name          string     `yaml:"name" validate:"required"`
-	Provider      string     `yaml:"provider" validate:"required"`
-	RunnerGroupId int64      `yaml:"runnerGroupId" validate:"required"`
-	Shutdown      bool       `yaml:"shutdown"`
-	GitHubOrg     string     `yaml:"githubOrg" validate:"required"`
-	MaxTrays      int        `yaml:"limit"`
-	Config        TrayConfig `yaml:"config"`
-	ExtraMetadata TrayExtraMetadata
+	Name           string     `yaml:"name" validate:"required"`
+	Provider       string     `yaml:"provider" validate:"required"`
+	RunnerGroupId  int64      `yaml:"runnerGroupId" validate:"required"`
+	Shutdown       bool       `yaml:"shutdown"`
+	GitHubOrg      string     `yaml:"githubOrg" validate:"required"`
+	MaxTrays       int        `yaml:"limit"`
+	Config         TrayConfig `yaml:"config"`
+	ExtraMetadata  TrayExtraMetadata
+	DeleteMetadata []string `yaml:"deleteMetadata"`
+}
+
+func (t *TrayType) GetMetadataKeysToDelete() []string {
+	keys := make([]string, 0)
+	keys = append(keys, t.DeleteMetadata...)
+	return keys
 }
 
 type TrayExtraMetadata map[string]string
