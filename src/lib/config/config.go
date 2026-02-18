@@ -163,6 +163,12 @@ type TrayType struct {
 	DeleteMetadata []string `yaml:"deleteMetadata"`
 }
 
+func (t *TrayType) GetMetadataKeysToDelete() []string {
+	keys := []string{"cattery-url", "cattery-agent-id"}
+	keys = append(keys, t.DeleteMetadata...)
+	return keys
+}
+
 type TrayExtraMetadata map[string]string
 
 type ProviderConfig map[string]string
