@@ -3,7 +3,6 @@ package handlers
 import (
 	"cattery/lib/agents"
 	"cattery/lib/config"
-	"cattery/lib/githubClient"
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
@@ -60,33 +59,26 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
-	// TODO handle
-	client, err := githubClient.NewGithubClientWithOrgName(tray.GetGitHubOrgName())
-	if err != nil {
-		var errMsg = fmt.Sprintf("Organization '%s' is invalid: %v", tray.GetGitHubOrgName(), err)
+	poller := ScaleSetManager.GetPoller(trayType.Name)
+	if poller == nil {
+		var errMsg = fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
-	logger = logger.WithFields(log.Fields{"githubOrg": tray.GetGitHubOrgName()})
 
-	jitRunnerConfig, err := client.CreateJITConfig(
-		tray.GetId(),
-		trayType.RunnerGroupId,
-		[]string{trayType.Name},
-	)
-
+	jitRunnerConfig, err := poller.Client().GenerateJitRunnerConfig(r.Context(), tray.GetId())
 	if err != nil {
 		logger.Errorf("Failed to generate jitRunnerConfig: %v", err)
 		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
 		return
 	}
 
-	var jitConfig = jitRunnerConfig.GetEncodedJITConfig()
+	var jitConfig = jitRunnerConfig.EncodedJITConfig
 
 	var newAgent = agents.Agent{
 		AgentId:  agentId,
-		RunnerId: jitRunnerConfig.GetRunner().GetID(),
+		RunnerId: int64(jitRunnerConfig.Runner.ID),
 		Shutdown: trayType.Shutdown,
 	}
 
@@ -102,7 +94,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = TrayManager.Registered(agentId, jitRunnerConfig.GetRunner().GetID())
+	_, err = TrayManager.Registered(agentId, int64(jitRunnerConfig.Runner.ID))
 	if err != nil {
 		logger.Errorf("%v", err)
 	}
@@ -326,5 +318,5 @@ func AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workflowRunId := tray.WorkflowRunId
-	RestartManager.RequestRestart(workflowRunId)
+	RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository)
 }

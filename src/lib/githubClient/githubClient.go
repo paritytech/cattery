@@ -69,6 +69,14 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	return err
 }
 
+func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int64) (string, string, error) {
+	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowRunId)
+	if err != nil {
+		return "", "", err
+	}
+	return wr.GetStatus(), wr.GetConclusion(), nil
+}
+
 func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, error) {
 	wfJob, resp, err := gc.client.Actions.GetWorkflowJobByID(context.Background(), gc.Org.Name, repoName, jobId)
 	if err != nil {

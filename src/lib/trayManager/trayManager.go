@@ -3,7 +3,6 @@ package trayManager
 import (
 	"cattery/lib/config"
 	"cattery/lib/githubClient"
-	"cattery/lib/jobQueue"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
@@ -18,14 +17,11 @@ import (
 
 type TrayManager struct {
 	trayRepository repositories.ITrayRepository
-
-	isStaleTraysFound bool
 }
 
 func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
 	return &TrayManager{
-		trayRepository:    trayRepository,
-		isStaleTraysFound: false,
+		trayRepository: trayRepository,
 	}
 }
 
@@ -81,7 +77,7 @@ func (tm *TrayManager) GetTrayById(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0, "")
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +90,7 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId)
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId, "")
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +102,8 @@ func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray,
 	return tray, nil
 }
 
-func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0)
+func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64, repository string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +117,7 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64
 
 func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
-	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0, 0)
+	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0, 0, "")
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +176,6 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 				if len(stale) > 0 {
 					log.Infof("Found %d stale trays: %v", len(stale), stale)
-					tm.isStaleTraysFound = true
 				}
 
 				for _, tray := range stale {
@@ -198,84 +193,49 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 	}()
 }
 
-func (tm *TrayManager) HandleJobsQueue(ctx context.Context, manager *jobQueue.QueueManager) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-
-				if tm.isStaleTraysFound {
-					err := manager.CleanupCompletedJobs()
-					if err != nil {
-						log.Errorf("Failed to cleanup completed jobs: %v", err)
-					}
-					tm.isStaleTraysFound = false
-				}
-
-				var groups = manager.GetJobsCount()
-				for typeName, jobsCount := range groups {
-					err := tm.handleType(typeName, jobsCount)
-					if err != nil {
-						log.Error(err)
-					}
-				}
-
-				time.Sleep(10 * time.Second)
-			}
-		}
-	}()
-}
-
-func (tm *TrayManager) handleType(trayTypeName string, jobsInQueue int) error {
-	// log.Debugf("Handling tray type %s with %d jobs in queue", trayTypeName, jobsInQueue)
-	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
+// ScaleForDemand scales trays for a given tray type based on pending job count.
+// Called by the scale set poller with statistics from GitHub.
+func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, pendingJobs int) error {
+	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayType.Name)
 	if err != nil {
-		log.Errorf("Failed to count trays for type %s: %v", trayTypeName, err)
+		log.Errorf("Failed to count trays for type %s: %v", trayType.Name, err)
 		return err
 	}
 
-	var traysWithNoJob = countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
-	// log.Debugf("Tray type %s has %d trays, %d with no job", trayTypeName, total, traysWithNoJob)
-	if jobsInQueue > traysWithNoJob {
-		var trayType = getTrayType(trayTypeName)
-		if trayType == nil {
-			log.Warnf("Tray type '%s' not found in config; skipping creation", trayTypeName)
-			return nil
-		}
+	traysWithNoJob := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
 
-		var remainingTrays = trayType.MaxTrays - total
-		var traysToCreate = jobsInQueue - traysWithNoJob
-		if traysToCreate > remainingTrays {
-			traysToCreate = remainingTrays
+	if pendingJobs > traysWithNoJob {
+		remainingCapacity := trayType.MaxTrays - total
+		traysToCreate := pendingJobs - traysWithNoJob
+		if traysToCreate > remainingCapacity {
+			traysToCreate = remainingCapacity
 		}
-
-		err := tm.createTrays(trayType, traysToCreate)
-		if err != nil {
-			return err
+		if traysToCreate > 0 {
+			err := tm.createTrays(trayType, traysToCreate)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	if jobsInQueue < traysWithNoJob {
-		var traysToDelete = traysWithNoJob - jobsInQueue
-		redundant, err := tm.trayRepository.MarkRedundant(trayTypeName, traysToDelete)
+	if pendingJobs < traysWithNoJob {
+		traysToDelete := traysWithNoJob - pendingJobs
+		redundant, err := tm.trayRepository.MarkRedundant(trayType.Name, traysToDelete)
 		if err != nil {
 			return err
 		}
-
 		for _, tray := range redundant {
 			if _, delErr := tm.DeleteTray(tray.Id); delErr != nil {
 				log.Errorf("Failed to delete redundant tray %s: %v", tray.Id, delErr)
 			}
 		}
-
 	}
 
 	return nil
 }
 
-func getTrayType(trayTypeName string) *config.TrayType {
-	var trayType = config.AppConfig.GetTrayType(trayTypeName)
-	return trayType
+// CountTrays returns the total number of trays for a given tray type.
+func (tm *TrayManager) CountTrays(trayTypeName string) (int, error) {
+	_, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
+	return total, err
 }

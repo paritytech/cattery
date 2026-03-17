@@ -146,6 +146,7 @@ type DatabaseConfig struct {
 type GitHubOrganization struct {
 	Name           string `yaml:"name" validate:"required"`
 	AppId          int64  `yaml:"appId" validate:"required"`
+	AppClientId    string `yaml:"appClientId" validate:"required"`
 	InstallationId int64  `yaml:"installationId" validate:"required"`
 	WebhookSecret  string `yaml:"webhookSecret"`
 	PrivateKeyPath string `yaml:"privateKeyPath"`
