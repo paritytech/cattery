@@ -17,7 +17,7 @@ import (
 )
 
 // AgentRegister is a handler for agent registration requests
-func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
+func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
@@ -40,7 +40,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debug("Agent registration request")
 
-	var tray, err = TrayManager.Registering(agentId)
+	var tray, err = h.TrayManager.Registering(agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
 		logger.Error(errMsg)
@@ -59,7 +59,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
 
-	poller := ScaleSetManager.GetPoller(trayType.Name)
+	poller := h.ScaleSetManager.GetPoller(trayType.Name)
 	if poller == nil {
 		var errMsg = fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
 		logger.Error(errMsg)
@@ -94,7 +94,7 @@ func AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = TrayManager.Registered(agentId, int64(jitRunnerConfig.Runner.ID))
+	_, err = h.TrayManager.Registered(agentId, int64(jitRunnerConfig.Runner.ID))
 	if err != nil {
 		logger.Errorf("%v", err)
 	}
@@ -110,7 +110,7 @@ func validateAgentId(agentId string) string {
 }
 
 // AgentUnregister is a handler for agent unregister requests
-func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
+func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentUnregister",
@@ -125,7 +125,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	var trayId = r.PathValue("id")
 
-	var tray, err = TrayManager.GetTrayById(trayId)
+	var tray, err = h.TrayManager.GetTrayById(trayId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
 		logger.Error(errMsg)
@@ -152,7 +152,7 @@ func AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Tracef("Agent unregister request")
 
-	_, err = TrayManager.DeleteTray(tray.Id)
+	_, err = h.TrayManager.DeleteTray(tray.Id)
 
 	if err != nil {
 		logger.Errorf("Failed to delete tray: %v", err)
@@ -215,7 +215,7 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 	logger.Infof("Binary file served: %s (%d bytes)", execPath, fileInfo.Size())
 }
 
-func AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
+func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
 	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentPing",
@@ -231,7 +231,7 @@ func AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
 		Message:   "",
 	}
 
-	tray, err := TrayManager.GetTrayById(agentId)
+	tray, err := h.TrayManager.GetTrayById(agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
@@ -282,7 +282,7 @@ func writeResponse(responseWriter http.ResponseWriter, pingResponse any, logger 
 	}
 }
 
-func AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
+func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
 	var logger = log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRestart",
@@ -304,7 +304,7 @@ func AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
 
 	logger.Debug("Agent restart request with id " + agentId)
 
-	tray, err := TrayManager.GetTrayById(agentId)
+	tray, err := h.TrayManager.GetTrayById(agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
@@ -318,5 +318,5 @@ func AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workflowRunId := tray.WorkflowRunId
-	RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository)
+	h.RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository)
 }

@@ -29,23 +29,7 @@ func Start() {
 	defer cancel()
 
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT)
-	signal.Notify(sigs, syscall.SIGTERM)
-	signal.Notify(sigs, syscall.SIGKILL)
-
-	var mux = http.NewServeMux()
-	mux.HandleFunc("/{$}", handlers.Index)
-	mux.HandleFunc("GET /agent/register/{id}", handlers.AgentRegister)
-	mux.HandleFunc("POST /agent/unregister/{id}", handlers.AgentUnregister)
-	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
-	mux.HandleFunc("POST /agent/interrupt/{id}", handlers.AgentInterrupt)
-	mux.HandleFunc("POST /agent/ping/{id}", handlers.AgentPing)
-	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
-
-	var httpServer = &http.Server{
-		Addr:    config.AppConfig.Server.ListenAddress,
-		Handler: mux,
-	}
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	// Db connection
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
@@ -69,15 +53,15 @@ func Start() {
 	// Initialize tray manager and repository
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
-	handlers.TrayManager = trayManager.NewTrayManager(trayRepository)
+	tm := trayManager.NewTrayManager(trayRepository)
 
 	// Initialize restarter
 	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
 	restartManagerRepository.Connect(database.Collection("restarters"))
-	handlers.RestartManager = restarter.NewWorkflowRestarter(restartManagerRepository)
+	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
 
 	// Initialize scale set pollers — one per TrayType
-	handlers.ScaleSetManager = scaleSetPoller.NewManager()
+	ssm := scaleSetPoller.NewManager()
 	for _, trayType := range config.AppConfig.TrayTypes {
 		org := config.AppConfig.GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
@@ -89,8 +73,8 @@ func Start() {
 			logger.Fatalf("Failed to create scale set client for tray type '%s': %v", trayType.Name, err)
 		}
 
-		poller := scaleSetPoller.NewPoller(ssClient, trayType, handlers.TrayManager)
-		handlers.ScaleSetManager.Register(trayType.Name, poller)
+		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
+		ssm.Register(trayType.Name, poller)
 
 		go func(p *scaleSetPoller.Poller, name string) {
 			if err := p.Run(ctx); err != nil {
@@ -100,10 +84,30 @@ func Start() {
 	}
 
 	// Start restart poller (replaces workflow_run webhook)
-	handlers.RestartManager.StartPoller(ctx)
+	rm.StartPoller(ctx)
 
 	// Start stale tray cleanup
-	handlers.TrayManager.HandleStale(ctx)
+	tm.HandleStale(ctx)
+
+	h := &handlers.Handlers{
+		TrayManager:     tm,
+		RestartManager:  rm,
+		ScaleSetManager: ssm,
+	}
+
+	var mux = http.NewServeMux()
+	mux.HandleFunc("/{$}", h.Index)
+	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
+	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
+	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
+	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
+	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
+	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
+
+	var httpServer = &http.Server{
+		Addr:    config.AppConfig.Server.ListenAddress,
+		Handler: mux,
+	}
 
 	// Start HTTP server
 	go func() {

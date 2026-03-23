@@ -7,10 +7,12 @@ import (
 	"net/http"
 )
 
-var TrayManager *trayManager.TrayManager
-var RestartManager *restarter.WorkflowRestarter
-var ScaleSetManager *scaleSetPoller.Manager
+type Handlers struct {
+	TrayManager    *trayManager.TrayManager
+	RestartManager *restarter.WorkflowRestarter
+	ScaleSetManager *scaleSetPoller.Manager
+}
 
-func Index(responseWriter http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Index(responseWriter http.ResponseWriter, r *http.Request) {
 	return
 }

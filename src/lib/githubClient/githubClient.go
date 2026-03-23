@@ -5,13 +5,17 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
 )
 
-var githubClients = make(map[string]*github.Client)
+var (
+	githubClientsMu sync.Mutex
+	githubClients   = make(map[string]*github.Client)
+)
 
 type GithubClient struct {
 	client *github.Client
@@ -94,6 +98,8 @@ func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, e
 
 // createClient creates a new GitHub client
 func createClient(org *config.GitHubOrganization) *github.Client {
+	githubClientsMu.Lock()
+	defer githubClientsMu.Unlock()
 
 	if githubClient, ok := githubClients[org.Name]; ok {
 		return githubClient

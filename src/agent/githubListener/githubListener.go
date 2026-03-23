@@ -1,7 +1,6 @@
 package githubListener
 
 import (
-	"cattery/agent/shutdownEvents"
 	"cattery/lib/messages"
 	"os"
 	"os/exec"
@@ -9,6 +8,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
+
+type ShutdownEvent struct {
+	Reason  messages.UnregisterReason
+	Message string
+}
 
 type GithubListener struct {
 	listenerPath string
@@ -23,32 +27,34 @@ func NewGithubListener(listenerPath string) *GithubListener {
 	}
 }
 
-func (l *GithubListener) Start(jitConfig *string) {
+func (l *GithubListener) Start(jitConfig *string, shutdownCh chan<- ShutdownEvent) {
 	var commandRun = exec.Command(l.listenerPath, "run", "--jitconfig", *jitConfig)
 	commandRun.Stdout = os.Stdout
 	commandRun.Stderr = os.Stderr
 
 	go func() {
 		var msg = "Listener finished"
+		var reason = messages.UnregisterReasonDone
 
 		err := commandRun.Start()
 		if err != nil {
 			msg = "Listener failed to start: " + err.Error()
 			log.Error(msg)
-			shutdownEvents.Emit(messages.UnregisterReasonUnknown, msg)
+			shutdownCh <- ShutdownEvent{Reason: messages.UnregisterReasonUnknown, Message: msg}
 			return
 		}
 
+		l.mut.Lock()
 		l.process = commandRun.Process
+		l.mut.Unlock()
+
 		err = commandRun.Wait()
 		if err != nil {
 			msg = "Runner failed: " + err.Error()
 			log.Error(msg)
 		}
 
-		//TODO: check startup errors, like deprecated runner
-
-		shutdownEvents.Emit(messages.UnregisterReasonDone, msg)
+		shutdownCh <- ShutdownEvent{Reason: reason, Message: msg}
 	}()
 }
 
