@@ -168,7 +168,7 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 				time.Sleep(interval / 2)
 
-				stale, err := tm.trayRepository.GetStale(interval, interval*2)
+				stale, err := tm.trayRepository.GetStale(interval)
 				if err != nil {
 					log.Errorf("Failed to get stale trays: %v", err)
 					continue
