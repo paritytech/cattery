@@ -63,7 +63,6 @@ func (m *MongodbTrayRepository) GetStale(d time.Duration, rd time.Duration) ([]*
 func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*trays.Tray, error) {
 
 	var resultTrays = make([]*trays.Tray, 0)
-	var ids = make([]string, 0)
 
 	for i := 0; i < limit; i++ {
 		dbResult := m.collection.FindOneAndUpdate(
@@ -82,7 +81,6 @@ func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*tr
 		}
 
 		resultTrays = append(resultTrays, &result)
-		ids = append(ids, result.Id)
 	}
 
 	return resultTrays, nil

@@ -39,7 +39,7 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 	return &CatteryAgent{
 		mutex:            sync.Mutex{},
 		logger:           log.WithFields(log.Fields{"name": "agent", "agentId": agentId}),
-		catteryClient:    createClient(catteryServerUrl, agentId),
+		catteryClient:    catteryClient.NewCatteryClient(catteryServerUrl, agentId),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
 		interrupted:      false,
@@ -91,9 +91,4 @@ func (a *CatteryAgent) stop(event shutdownEvents.ShutdownEvent) {
 		a.logger.Debugf("Shutdown now")
 		tools.Shutdown()
 	}
-}
-
-// createClient creates a new http client
-func createClient(baseUrl string, agentId string) *catteryClient.CatteryClient {
-	return catteryClient.NewCatteryClient(baseUrl, agentId)
 }
