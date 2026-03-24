@@ -47,16 +47,6 @@ func (g *GceProvider) GetProviderName() string {
 	return g.Name
 }
 
-func (g *GceProvider) GetTray(id string) (*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (g *GceProvider) ListTrays() ([]*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
 

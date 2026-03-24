@@ -36,16 +36,6 @@ func (d *DockerProvider) GetProviderName() string {
 	return d.name
 }
 
-func (d *DockerProvider) GetTray(id string) (*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (d *DockerProvider) ListTrays() ([]*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
 	var containerName = tray.GetId()

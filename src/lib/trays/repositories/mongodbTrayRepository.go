@@ -83,21 +83,6 @@ func (m *MongodbTrayRepository) MarkRedundant(trayType string, limit int) ([]*tr
 	return resultTrays, nil
 }
 
-func (m *MongodbTrayRepository) GetByJobRunId(jobRunId int64) (*trays.Tray, error) {
-	dbResult := m.collection.FindOne(context.Background(), bson.M{"jobRunId": jobRunId})
-
-	var result trays.Tray
-	err := dbResult.Decode(&result)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return &result, nil
-}
-
 func (m *MongodbTrayRepository) Save(tray *trays.Tray) error {
 	tray.StatusChanged = time.Now().UTC()
 	_, err := m.collection.InsertOne(context.Background(), tray)

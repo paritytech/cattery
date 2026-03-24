@@ -12,6 +12,5 @@ type RestartRequest struct {
 type IRestarterRepository interface {
 	SaveRestartRequest(workflowRunId int64, orgName string, repoName string) error
 	DeleteRestartRequest(workflowRunId int64) error
-	CheckRestartRequest(workflowRunId int64) (bool, error)
 	GetAllPendingRestartRequests() ([]RestartRequest, error)
 }

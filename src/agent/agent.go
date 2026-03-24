@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"sync"
 	"syscall"
 	"time"
 
@@ -27,24 +26,20 @@ func Start() {
 }
 
 type CatteryAgent struct {
-	mutex         sync.Mutex
 	logger        *log.Entry
 	catteryClient *catteryClient.CatteryClient
 	agent         *agents.Agent
 	agentId       string
 
-	interrupted      bool
 	listenerExecPath string
 }
 
 func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId string) *CatteryAgent {
 	return &CatteryAgent{
-		mutex:            sync.Mutex{},
 		logger:           log.WithFields(log.Fields{"name": "agent", "agentId": agentId}),
 		catteryClient:    catteryClient.NewCatteryClient(catteryServerUrl, agentId),
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
-		interrupted:      false,
 	}
 }
 

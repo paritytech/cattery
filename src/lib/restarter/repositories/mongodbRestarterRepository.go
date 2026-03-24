@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -49,25 +48,6 @@ func (m *MongodbRestarterRepository) DeleteRestartRequest(workflowRunId int64) e
 		},
 	)
 	return err
-}
-
-func (m *MongodbRestarterRepository) CheckRestartRequest(workflowRunId int64) (bool, error) {
-	dbResult := m.collection.FindOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
-	)
-	var result bson.M
-	err := dbResult.Decode(&result)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	return true, nil
 }
 
 func (m *MongodbRestarterRepository) GetAllPendingRestartRequests() ([]RestartRequest, error) {
