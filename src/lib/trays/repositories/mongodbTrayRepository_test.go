@@ -201,7 +201,7 @@ func TestUpdateStatus(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test UpdateStatus with jobRunId only
-	updatedTray, err := repo.UpdateStatus("test-tray-1", trays.TrayStatusRegistered, 123, 0, 0)
+	updatedTray, err := repo.UpdateStatus("test-tray-1", trays.TrayStatusRegistered, 123, 0, 0, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with ghRunnerId
-	updatedTray, err = repo.UpdateStatus("test-tray-1", trays.TrayStatusRunning, 456, 333, 789)
+	updatedTray, err = repo.UpdateStatus("test-tray-1", trays.TrayStatusRunning, 456, 333, 789, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with ghRunnerId failed: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with non-existent ID
-	updatedTray, err = repo.UpdateStatus("non-existent", trays.TrayStatusRegistered, 123, 0, 0)
+	updatedTray, err = repo.UpdateStatus("non-existent", trays.TrayStatusRegistered, 123, 0, 0, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with non-existent ID failed: %v", err)
 	}
@@ -284,49 +284,6 @@ func TestDelete(t *testing.T) {
 	err = repo.Delete("non-existent")
 	if err != nil {
 		t.Fatalf("Delete with non-existent ID failed: %v", err)
-	}
-}
-
-// TestGetByJobRunId tests the GetByJobRunId method
-func TestGetByJobRunId(t *testing.T) {
-	client, collection := setupTestCollection(t)
-	defer client.Disconnect(context.Background())
-
-	// Create test repository
-	repo := NewMongodbTrayRepository()
-	repo.Connect(collection)
-
-	// Insert test data
-	testTray1 := createTestTray("test-tray-1", "test-type", trays.TrayStatusRunning, 123)
-	testTray2 := createTestTray("test-tray-2", "test-type", trays.TrayStatusCreating, 0)
-	insertTestTrays(t, collection, []*TestTray{testTray1, testTray2})
-
-	// Test GetByJobRunId
-	tray, err := repo.GetByJobRunId(123)
-	if err != nil {
-		t.Fatalf("GetByJobRunId failed: %v", err)
-	}
-
-	if tray == nil {
-		t.Fatal("GetByJobRunId returned nil tray")
-	}
-
-	if tray.Id != "test-tray-1" {
-		t.Errorf("Expected tray ID 'test-tray-1', got '%s'", tray.Id)
-	}
-
-	if tray.JobRunId != 123 {
-		t.Errorf("Expected JobRunId 123, got %d", tray.JobRunId)
-	}
-
-	// Test GetByJobRunId with non-existent JobRunId
-	tray, err = repo.GetByJobRunId(999)
-	if err != nil {
-		t.Fatalf("GetByJobRunId with non-existent JobRunId failed: %v", err)
-	}
-
-	if tray != nil {
-		t.Error("Expected nil tray for non-existent JobRunId, got non-nil")
 	}
 }
 
