@@ -6,6 +6,8 @@ import (
 	"cattery/agent/tools"
 	"cattery/lib/agents"
 	"cattery/lib/messages"
+	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"path"
@@ -19,6 +21,14 @@ import (
 var RunnerFolder string
 var CatteryServerUrl string
 var Id string
+
+// shutdownCause is used as context.Cause to carry the termination reason.
+type shutdownCause struct {
+	reason  messages.UnregisterReason
+	message string
+}
+
+func (s *shutdownCause) Error() string { return s.message }
 
 func Start() {
 	var catteryAgent = NewCatteryAgent(RunnerFolder, CatteryServerUrl, Id)
@@ -55,40 +65,83 @@ func (a *CatteryAgent) Start() {
 
 	a.logger.Info("Agent registered, starting Listener")
 
-	shutdownCh := make(chan githubListener.ShutdownEvent, 1)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
 
-	a.watchSignal(shutdownCh)
-	a.watchFile(shutdownCh)
-	a.watchPing(shutdownCh)
+	a.watchSignal(ctx, cancel)
+	a.watchFile(ctx, cancel)
+	a.watchPing(ctx, cancel)
 
 	var ghListener = githubListener.NewGithubListener(a.listenerExecPath)
-	ghListener.Start(jitConfig, shutdownCh)
+	ghListener.Start(ctx, cancel, jitConfig)
 
-	// Block until first shutdown event
-	event := <-shutdownCh
+	// Block until any source triggers cancellation
+	<-ctx.Done()
 
-	a.logger.Infof("Received shutdown event: %s, reason: %d", event.Message, event.Reason)
+	// Determine what happened
+	reason, msg := a.resolveShutdownCause(ctx)
+	a.logger.Infof("Shutdown: reason=%d, message=%s", reason, msg)
 
-	ghListener.Stop()
-	a.stop(event)
+	// Kill listener if it wasn't the one that finished
+	if reason != messages.UnregisterReasonDone {
+		ghListener.Stop()
+	}
+
+	a.unregisterAndShutdown(reason, msg)
 }
 
-func (a *CatteryAgent) watchSignal(ch chan<- githubListener.ShutdownEvent) {
+// resolveShutdownCause extracts the termination reason from the context cause.
+// - shutdownCause: a watcher triggered shutdown (signal, file, ping)
+// - nil cause: listener exited cleanly
+// - other error: listener exited with error
+func (a *CatteryAgent) resolveShutdownCause(ctx context.Context) (messages.UnregisterReason, string) {
+	cause := context.Cause(ctx)
+
+	var sc *shutdownCause
+	if errors.As(cause, &sc) {
+		return sc.reason, sc.message
+	}
+
+	// Listener finished (cancel was called with nil or a process error)
+	if cause == nil {
+		return messages.UnregisterReasonDone, "Listener finished"
+	}
+	return messages.UnregisterReasonDone, "Listener exited: " + cause.Error()
+}
+
+func (a *CatteryAgent) unregisterAndShutdown(reason messages.UnregisterReason, msg string) {
+	log.Infof("Stopping Cattery Agent with reason: %d, message: `%s`", reason, msg)
+
+	err := a.catteryClient.UnregisterAgent(a.agent, reason, msg)
+	if err != nil {
+		a.logger.Errorf("Failed to unregister agent: %v", err)
+	}
+
+	if a.agent.Shutdown {
+		a.logger.Debugf("Shutdown now")
+		tools.Shutdown()
+	}
+}
+
+func (a *CatteryAgent) watchSignal(ctx context.Context, cancel context.CancelCauseFunc) {
 	go func() {
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-		sig := <-sigs
-		a.logger.Info("Got signal ", sig)
-
-		ch <- githubListener.ShutdownEvent{
-			Reason:  messages.UnregisterReasonSigTerm,
-			Message: "Got signal " + sig.String(),
+		select {
+		case <-ctx.Done():
+			return
+		case sig := <-sigs:
+			a.logger.Info("Got signal ", sig)
+			cancel(&shutdownCause{
+				reason:  messages.UnregisterReasonSigTerm,
+				message: "Got signal " + sig.String(),
+			})
 		}
 	}()
 }
 
-func (a *CatteryAgent) watchFile(ch chan<- githubListener.ShutdownEvent) {
+func (a *CatteryAgent) watchFile(ctx context.Context, cancel context.CancelCauseFunc) {
 	const shutdownFile = "./shutdown_file"
 
 	go func() {
@@ -110,27 +163,35 @@ func (a *CatteryAgent) watchFile(ch chan<- githubListener.ShutdownEvent) {
 		}
 
 		select {
+		case <-ctx.Done():
+			return
 		case event := <-watcher.Events:
 			msg := "Shutdown file changed: " + event.Name
 			a.logger.Info(msg)
-			ch <- githubListener.ShutdownEvent{
-				Reason:  messages.UnregisterReasonPreempted,
-				Message: msg,
-			}
-		case err := <-watcher.Errors:
-			msg := "File watcher error: " + err.Error()
+			cancel(&shutdownCause{
+				reason:  messages.UnregisterReasonPreempted,
+				message: msg,
+			})
+		case watchErr := <-watcher.Errors:
+			msg := "File watcher error: " + watchErr.Error()
 			a.logger.Error(msg)
-			ch <- githubListener.ShutdownEvent{
-				Reason:  messages.UnregisterReasonPreempted,
-				Message: msg,
-			}
+			cancel(&shutdownCause{
+				reason:  messages.UnregisterReasonPreempted,
+				message: msg,
+			})
 		}
 	}()
 }
 
-func (a *CatteryAgent) watchPing(ch chan<- githubListener.ShutdownEvent) {
+func (a *CatteryAgent) watchPing(ctx context.Context, cancel context.CancelCauseFunc) {
 	go func() {
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			pingResponse, err := a.catteryClient.Ping()
 			if err != nil {
 				a.logger.Errorf("Error pinging controller: %v", err)
@@ -141,29 +202,14 @@ func (a *CatteryAgent) watchPing(ch chan<- githubListener.ShutdownEvent) {
 			if pingResponse.Terminate {
 				msg := "Controller requested termination: " + pingResponse.Message
 				a.logger.Info(msg)
-				ch <- githubListener.ShutdownEvent{
-					Reason:  messages.UnregisterReasonControllerKill,
-					Message: msg,
-				}
+				cancel(&shutdownCause{
+					reason:  messages.UnregisterReasonControllerKill,
+					message: msg,
+				})
 				return
 			}
 
 			time.Sleep(60 * time.Second)
 		}
 	}()
-}
-
-// stop stops the runner process
-func (a *CatteryAgent) stop(event githubListener.ShutdownEvent) {
-	log.Infof("Stopping Cattery Agent with reason: %d, message: `%s`", event.Reason, event.Message)
-
-	err := a.catteryClient.UnregisterAgent(a.agent, event.Reason, event.Message)
-	if err != nil {
-		a.logger.Errorf("Failed to unregister agent: %v", err)
-	}
-
-	if a.agent.Shutdown {
-		a.logger.Debugf("Shutdown now")
-		tools.Shutdown()
-	}
 }
