@@ -2,7 +2,6 @@ package trayManager
 
 import (
 	"cattery/lib/config"
-	"cattery/lib/githubClient"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
@@ -123,16 +122,6 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 	}
 	if tray == nil {
 		return nil, nil // Tray not found, nothing to delete
-	}
-
-	ghClient, err := githubClient.NewGithubClientWithOrgName(tray.GetGitHubOrgName())
-	if err != nil {
-		return nil, err
-	}
-
-	err = ghClient.RemoveRunner(tray.GitHubRunnerId)
-	if err != nil {
-		return nil, err
 	}
 
 	provider, err := providers.GetProviderForTray(tray)

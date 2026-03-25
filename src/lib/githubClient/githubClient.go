@@ -57,11 +57,6 @@ func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels
 	return jitConfig, err
 }
 
-func (gc *GithubClient) RemoveRunner(runnerId int64) error {
-	_, err := gc.client.Actions.RemoveOrganizationRunner(context.Background(), gc.Org.Name, runnerId)
-	return err
-}
-
 func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
 	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowId)
 	if err != nil {
