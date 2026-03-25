@@ -185,21 +185,22 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 	}()
 }
 
-// ScaleForDemand scales trays for a given tray type based on pending job count.
-// Called by the scale set poller with statistics from GitHub.
-func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, pendingJobs int) error {
+// ScaleForDemand scales trays for a given tray type based on the desired runner count.
+// The desiredCount is TotalAssignedJobs from GitHub scale set statistics — the total
+// number of runners that should exist (running + idle) to serve all assigned jobs.
+func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, desiredCount int) error {
 	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayType.Name)
 	if err != nil {
 		log.Errorf("Failed to count trays for type %s: %v", trayType.Name, err)
 		return err
 	}
 
-	traysWithNoJob := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
+	idleTrays := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
 	activeTotal := total - countByStatus[trays.TrayStatusDeleting]
 
-	if pendingJobs > traysWithNoJob {
+	if desiredCount > activeTotal {
 		remainingCapacity := trayType.MaxTrays - activeTotal
-		traysToCreate := pendingJobs - traysWithNoJob
+		traysToCreate := desiredCount - activeTotal
 		if traysToCreate > remainingCapacity {
 			traysToCreate = remainingCapacity
 		}
@@ -211,8 +212,12 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, pendingJobs int
 		}
 	}
 
-	if pendingJobs < traysWithNoJob {
-		traysToDelete := traysWithNoJob - pendingJobs
+	if desiredCount < activeTotal && idleTrays > 0 {
+		excess := activeTotal - desiredCount
+		traysToDelete := excess
+		if traysToDelete > idleTrays {
+			traysToDelete = idleTrays
+		}
 		redundant, err := tm.trayRepository.MarkRedundant(trayType.Name, traysToDelete)
 		if err != nil {
 			return err
@@ -227,8 +232,11 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, pendingJobs int
 	return nil
 }
 
-// CountTrays returns the total number of trays for a given tray type.
+// CountTrays returns the number of active (non-deleting) trays for a given tray type.
 func (tm *TrayManager) CountTrays(trayTypeName string) (int, error) {
-	_, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
-	return total, err
+	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
+	if err != nil {
+		return 0, err
+	}
+	return total - countByStatus[trays.TrayStatusDeleting], nil
 }

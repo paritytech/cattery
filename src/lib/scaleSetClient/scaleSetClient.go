@@ -51,7 +51,10 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 
 func (sc *ScaleSetClient) EnsureScaleSet(ctx context.Context) error {
 	existing, err := sc.client.GetRunnerScaleSet(ctx, int(sc.trayType.RunnerGroupId), sc.trayType.Name)
-	if err == nil && existing != nil {
+	if err != nil {
+		return fmt.Errorf("failed to get scale set: %w", err)
+	}
+	if existing != nil {
 		sc.scaleSet = existing
 		sc.logger.Infof("Found existing scale set: %s (ID: %d)", existing.Name, existing.ID)
 		return nil
@@ -112,4 +115,11 @@ func (sc *ScaleSetClient) GetScaleSetID() int {
 		return sc.scaleSet.ID
 	}
 	return 0
+}
+
+func (sc *ScaleSetClient) Session() scaleset.RunnerScaleSetSession {
+	if sc.session != nil {
+		return sc.session.Session()
+	}
+	return scaleset.RunnerScaleSetSession{}
 }

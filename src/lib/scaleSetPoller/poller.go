@@ -88,8 +88,7 @@ func (s *sessionAdapter) DeleteMessage(ctx context.Context, messageID int) error
 }
 
 func (s *sessionAdapter) Session() scaleset.RunnerScaleSetSession {
-	// The listener needs this for logging/metadata only.
-	return scaleset.RunnerScaleSetSession{}
+	return s.client.Session()
 }
 
 // catteryScaler implements the listener.Scaler interface.

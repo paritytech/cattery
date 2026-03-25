@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -77,8 +78,21 @@ func Start() {
 		ssm.Register(trayType.Name, poller)
 
 		go func(p *scaleSetPoller.Poller, name string) {
-			if err := p.Run(ctx); err != nil {
-				logger.Errorf("Scale set poller for '%s' exited with error: %v", name, err)
+			for {
+				if err := p.Run(ctx); err != nil {
+					if ctx.Err() != nil {
+						logger.Infof("Scale set poller for '%s' stopped: %v", name, err)
+						return
+					}
+					logger.Errorf("Scale set poller for '%s' exited with error: %v — restarting in 30s", name, err)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(30 * time.Second):
+					}
+					continue
+				}
+				return
 			}
 		}(poller, trayType.Name)
 	}
