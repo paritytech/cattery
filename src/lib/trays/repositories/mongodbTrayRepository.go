@@ -143,12 +143,12 @@ func (m *MongodbTrayRepository) Delete(trayId string) error {
 func (m *MongodbTrayRepository) CountByTrayType(trayType string) (map[trays.TrayStatus]int, int, error) {
 
 	var matchStage = bson.D{
-		{"$match", bson.D{{"trayTypeName", trayType}}},
+		{Key: "$match", Value: bson.D{{Key: "trayTypeName", Value: trayType}}},
 	}
 	var groupStage = bson.D{
-		{"$group", bson.D{
-			{"_id", "$status"},
-			{"count", bson.D{{"$sum", 1}}},
+		{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$status"},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
 		}}}
 
 	cursor, err := m.collection.Aggregate(context.Background(), mongo.Pipeline{matchStage, groupStage})
