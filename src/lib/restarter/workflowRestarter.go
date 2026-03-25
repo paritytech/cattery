@@ -21,12 +21,11 @@ func NewWorkflowRestarter(repository repositories.IRestarterRepository) *Workflo
 
 func (wr *WorkflowRestarter) RequestRestart(workflowRunId int64, orgName string, repoName string) error {
 	log.Debugf("Requesting restart for workflow run id %d (%s/%s)", workflowRunId, orgName, repoName)
-	return wr.repository.SaveRestartRequest(workflowRunId, orgName, repoName)
+	return wr.repository.SaveRestartRequest(context.Background(), workflowRunId, orgName, repoName)
 }
 
 // StartPoller starts a background goroutine that periodically checks pending restart
 // requests and triggers restarts when workflows have completed with failure.
-// This replaces the webhook-based workflow_run event handling.
 func (wr *WorkflowRestarter) StartPoller(ctx context.Context) {
 	const pollInterval = 30 * time.Second
 	const requestTTL = 1 * time.Hour
@@ -41,7 +40,7 @@ func (wr *WorkflowRestarter) StartPoller(ctx context.Context) {
 				return
 			default:
 				time.Sleep(pollInterval)
-				wr.pollPendingRestarts(logger, requestTTL)
+				wr.pollPendingRestarts(ctx, logger, requestTTL)
 			}
 		}
 	}()
@@ -49,26 +48,25 @@ func (wr *WorkflowRestarter) StartPoller(ctx context.Context) {
 	logger.Info("Restart poller started")
 }
 
-func (wr *WorkflowRestarter) pollPendingRestarts(logger *log.Entry, ttl time.Duration) {
-	requests, err := wr.repository.GetAllPendingRestartRequests()
+func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *log.Entry, ttl time.Duration) {
+	requests, err := wr.repository.GetAllPendingRestartRequests(ctx)
 	if err != nil {
 		logger.Errorf("Failed to get pending restart requests: %v", err)
 		return
 	}
 
 	for _, req := range requests {
-		// TTL safety net: delete stale requests
 		if time.Since(req.CreatedAt) > ttl {
 			logger.Warnf("Restart request for workflow %d expired (age: %v), deleting", req.WorkflowRunId, time.Since(req.CreatedAt))
-			_ = wr.repository.DeleteRestartRequest(req.WorkflowRunId)
+			_ = wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId)
 			continue
 		}
 
-		wr.handleRestartRequest(logger, req)
+		wr.handleRestartRequest(ctx, logger, req)
 	}
 }
 
-func (wr *WorkflowRestarter) handleRestartRequest(logger *log.Entry, req repositories.RestartRequest) {
+func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *log.Entry, req repositories.RestartRequest) {
 	ghClient, err := githubClient.NewGithubClientWithOrgName(req.OrgName)
 	if err != nil {
 		logger.Errorf("Failed to get GitHub client for org %s: %v", req.OrgName, err)
@@ -82,7 +80,6 @@ func (wr *WorkflowRestarter) handleRestartRequest(logger *log.Entry, req reposit
 	}
 
 	if status != "completed" {
-		// Workflow still running, skip for now
 		return
 	}
 
@@ -96,12 +93,10 @@ func (wr *WorkflowRestarter) handleRestartRequest(logger *log.Entry, req reposit
 		}
 		logger.Infof("Successfully restarted failed jobs for workflow run %d", req.WorkflowRunId)
 	default:
-		// success, cancelled, or other — just clean up
 		logger.Debugf("Workflow run %d completed with conclusion '%s', cleaning up restart request", req.WorkflowRunId, conclusion)
 	}
 
-	err = wr.repository.DeleteRestartRequest(req.WorkflowRunId)
-	if err != nil {
+	if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
 		logger.Errorf("Failed to delete restart request for workflow %d: %v", req.WorkflowRunId, err)
 	}
 }

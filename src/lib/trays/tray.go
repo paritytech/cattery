@@ -11,7 +11,6 @@ import (
 type Tray struct {
 	Id           string `bson:"id"`
 	TrayTypeName string `bson:"trayTypeName"`
-	trayType     config.TrayType
 
 	ProviderName   string     `bson:"providerName"`
 	GitHubOrgName  string     `bson:"gitHubOrgName"`
@@ -26,7 +25,6 @@ type Tray struct {
 }
 
 func NewTray(trayType config.TrayType) *Tray {
-
 	b := make([]byte, 8)
 	_, err := rand.Read(b)
 	if err != nil {
@@ -34,41 +32,27 @@ func NewTray(trayType config.TrayType) *Tray {
 	}
 
 	id := hex.EncodeToString(b)
-	var trayId = fmt.Sprintf("%s-%s", trayType.Name, id)
 
-	var tray = &Tray{
-		Id:            trayId,
+	return &Tray{
+		Id:            fmt.Sprintf("%s-%s", trayType.Name, id),
 		TrayTypeName:  trayType.Name,
-		trayType:      trayType,
 		ProviderName:  trayType.Provider,
 		Status:        TrayStatusCreating,
 		GitHubOrgName: trayType.GitHubOrg,
-		JobRunId:      0,
-		WorkflowRunId: 0,
 		ProviderData:  make(map[string]string),
 	}
-
-	return tray
 }
 
-func (tray *Tray) GetId() string {
-	return tray.Id
+// TrayType returns the configuration for this tray's type from the current config.
+// Returns nil if the tray type no longer exists in config.
+func (tray *Tray) TrayType() *config.TrayType {
+	return config.AppConfig.GetTrayType(tray.TrayTypeName)
 }
 
-func (tray *Tray) GetGitHubOrgName() string {
-	return tray.GitHubOrgName
-}
-
-func (tray *Tray) GetTrayTypeName() string {
-	return tray.TrayTypeName
-}
-
-func (tray *Tray) GetTrayType() config.TrayType {
-	return tray.trayType
-}
-
-func (tray *Tray) GetTrayConfig() config.TrayConfig {
-	tt := config.AppConfig.GetTrayType(tray.TrayTypeName)
+// TrayConfig returns the provider-specific config (DockerTrayConfig, GoogleTrayConfig, etc.).
+// Returns nil if the tray type no longer exists in config.
+func (tray *Tray) TrayConfig() config.TrayConfig {
+	tt := tray.TrayType()
 	if tt == nil {
 		return nil
 	}
@@ -76,6 +60,6 @@ func (tray *Tray) GetTrayConfig() config.TrayConfig {
 }
 
 func (tray *Tray) String() string {
-	return fmt.Sprintf("id: %s, trayTypeName: %s, status: %s, gitHubOrgName: %s,  statusChanged: %s",
+	return fmt.Sprintf("id: %s, trayTypeName: %s, status: %s, gitHubOrgName: %s, statusChanged: %s",
 		tray.Id, tray.TrayTypeName, tray.Status, tray.GitHubOrgName, tray.StatusChanged.Format(time.RFC3339))
 }

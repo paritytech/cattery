@@ -92,7 +92,7 @@ func TestGetById(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test GetById
-	tray, err := repo.GetById("test-tray-1")
+	tray, err := repo.GetById(context.Background(),"test-tray-1")
 	if err != nil {
 		t.Fatalf("GetById failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestGetById(t *testing.T) {
 	}
 
 	// Test GetById with non-existent ID
-	tray, err = repo.GetById("non-existent")
+	tray, err = repo.GetById(context.Background(),"non-existent")
 	if err != nil {
 		t.Error("Expected no error for non-existent tray, got: ", err)
 	}
@@ -148,13 +148,13 @@ func TestSave(t *testing.T) {
 	tray.ProviderData["something"] = "worker-1"
 
 	// Test Save
-	err := repo.Save(tray)
+	err := repo.Save(context.Background(),tray)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
 	// Verify the tray was saved
-	savedTray, err := repo.GetById(tray.Id)
+	savedTray, err := repo.GetById(context.Background(),tray.Id)
 	if err != nil {
 		t.Fatalf("Failed to get saved tray: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestUpdateStatus(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test UpdateStatus with jobRunId only
-	updatedTray, err := repo.UpdateStatus("test-tray-1", trays.TrayStatusRegistered, 123, 0, 0, "")
+	updatedTray, err := repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRegistered, 123, 0, 0, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with ghRunnerId
-	updatedTray, err = repo.UpdateStatus("test-tray-1", trays.TrayStatusRunning, 456, 333, 789, "")
+	updatedTray, err = repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRunning, 456, 333, 789, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with ghRunnerId failed: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with non-existent ID
-	updatedTray, err = repo.UpdateStatus("non-existent", trays.TrayStatusRegistered, 123, 0, 0, "")
+	updatedTray, err = repo.UpdateStatus(context.Background(),"non-existent", trays.TrayStatusRegistered, 123, 0, 0, "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with non-existent ID failed: %v", err)
 	}
@@ -265,13 +265,13 @@ func TestDelete(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test Delete
-	err := repo.Delete("test-tray-1")
+	err := repo.Delete(context.Background(),"test-tray-1")
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
 	// Verify the tray was deleted
-	deletedTray, err := repo.GetById("test-tray-1")
+	deletedTray, err := repo.GetById(context.Background(),"test-tray-1")
 	if err != nil {
 		t.Error("Expected no error for deleted tray, got: ", err)
 	}
@@ -281,7 +281,7 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Test Delete with non-existent ID
-	err = repo.Delete("non-existent")
+	err = repo.Delete(context.Background(),"non-existent")
 	if err != nil {
 		t.Fatalf("Delete with non-existent ID failed: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestMarkRedundant(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray1, testTray2, testTray3, testTray4})
 
 	// Test MarkRedundant
-	redundantTrays, err := repo.MarkRedundant("test-type", 2)
+	redundantTrays, err := repo.MarkRedundant(context.Background(),"test-type", 2)
 	if err != nil {
 		t.Fatalf("MarkRedundant failed: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestMarkRedundant(t *testing.T) {
 	}
 
 	// Verify that trays with different status or type were not affected
-	unchangedTray, err := repo.GetById("test-tray-3")
+	unchangedTray, err := repo.GetById(context.Background(),"test-tray-3")
 	if err != nil {
 		t.Fatalf("Failed to get test-tray-3: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestMarkRedundant(t *testing.T) {
 		t.Errorf("Expected test-tray-3 status to remain %v, got %v", trays.TrayStatusRegistered, unchangedTray.Status)
 	}
 
-	unchangedTray, err = repo.GetById("test-tray-4")
+	unchangedTray, err = repo.GetById(context.Background(),"test-tray-4")
 	if err != nil {
 		t.Fatalf("Failed to get test-tray-4: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestMarkRedundant(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray5, testTray6})
 
 	// Mark only 1 tray as redundant
-	redundantTrays, err = repo.MarkRedundant("test-type", 1)
+	redundantTrays, err = repo.MarkRedundant(context.Background(),"test-type", 1)
 	if err != nil {
 		t.Fatalf("MarkRedundant with limit failed: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestMarkRedundant(t *testing.T) {
 	}
 
 	// Test MarkRedundant with non-existent tray type
-	redundantTrays, err = repo.MarkRedundant("non-existent", 2)
+	redundantTrays, err = repo.MarkRedundant(context.Background(),"non-existent", 2)
 	if err != nil {
 		t.Fatalf("MarkRedundant with non-existent tray type failed: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestMarkRedundant(t *testing.T) {
 	}
 
 	// Try to mark redundant trays in an empty collection
-	redundantTrays, err = repo.MarkRedundant("test-type", 2)
+	redundantTrays, err = repo.MarkRedundant(context.Background(),"test-type", 2)
 	if err != nil {
 		t.Fatalf("MarkRedundant with empty collection failed: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestGetStale(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{staleTray1, staleTray2, freshTray1, freshTray2})
 
 	// Test GetStale with 5 minute duration
-	staleTrays, err := repo.GetStale(5*time.Minute)
+	staleTrays, err := repo.GetStale(context.Background(),5*time.Minute)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestGetStale(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{freshTray1, freshTray2})
 
 	// Test GetStale again with 5 minute duration
-	staleTrays, err = repo.GetStale(5*time.Minute)
+	staleTrays, err = repo.GetStale(context.Background(),5*time.Minute)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestConnect(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Try to get the tray using the repository
-	tray, err := repo.GetById("test-connect")
+	tray, err := repo.GetById(context.Background(),"test-connect")
 	if err != nil {
 		t.Fatalf("GetById failed after Connect: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestCountByTrayType(t *testing.T) {
 	insertTestTrays(t, collection, testTrays)
 
 	// Test CountByTrayType for test-type
-	counts, total, err := repo.CountByTrayType("test-type")
+	counts, total, err := repo.CountByTrayType(context.Background(),"test-type")
 	if err != nil {
 		t.Fatalf("CountByTrayType failed: %v", err)
 	}
@@ -630,7 +630,7 @@ func TestCountByTrayType(t *testing.T) {
 	}
 
 	// Test CountByTrayType for other-type
-	counts, total, err = repo.CountByTrayType("other-type")
+	counts, total, err = repo.CountByTrayType(context.Background(),"other-type")
 	if err != nil {
 		t.Fatalf("CountByTrayType for other-type failed: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestCountByTrayType(t *testing.T) {
 	}
 
 	// Test CountByTrayType with non-existent tray type
-	counts, total, err = repo.CountByTrayType("non-existent")
+	counts, total, err = repo.CountByTrayType(context.Background(),"non-existent")
 	if err != nil {
 		t.Fatalf("CountByTrayType with non-existent tray type failed: %v", err)
 	}

@@ -35,7 +35,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Debug("Agent registration request")
 
-	var tray, err = h.TrayManager.Registering(agentId)
+	var tray, err = h.TrayManager.Registering(r.Context(), agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
 		logger.Error(errMsg)
@@ -43,16 +43,16 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var trayType = config.AppConfig.GetTrayType(tray.GetTrayTypeName())
+	var trayType = config.AppConfig.GetTrayType(tray.TrayTypeName)
 	if trayType == nil {
-		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.GetTrayTypeName())
+		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 	logger = logger.WithFields(log.Fields{"trayType": trayType.Name})
 
-	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.GetId(), agentId, tray.GetGitHubOrgName())
+	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id, agentId, tray.GitHubOrgName)
 
 	poller := h.ScaleSetManager.GetPoller(trayType.Name)
 	if poller == nil {
@@ -62,7 +62,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	jitRunnerConfig, err := poller.Client().GenerateJitRunnerConfig(r.Context(), tray.GetId())
+	jitRunnerConfig, err := poller.Client().GenerateJitRunnerConfig(r.Context(), tray.Id)
 	if err != nil {
 		logger.Errorf("Failed to generate jitRunnerConfig: %v", err)
 		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)
@@ -90,7 +90,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, err = h.TrayManager.Registered(agentId, int64(jitRunnerConfig.Runner.ID))
+	_, err = h.TrayManager.Registered(r.Context(), agentId, int64(jitRunnerConfig.Runner.ID))
 	if err != nil {
 		logger.Errorf("%v", err)
 	}
@@ -116,7 +116,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	var trayId = r.PathValue("id")
 
-	var tray, err = h.TrayManager.GetTrayById(trayId)
+	var tray, err = h.TrayManager.GetTrayById(r.Context(), trayId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
 		logger.Error(errMsg)
@@ -143,7 +143,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("Agent unregister request")
 
-	_, err = h.TrayManager.DeleteTray(tray.Id)
+	_, err = h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
 	if err != nil {
 		logger.Errorf("Failed to delete tray: %v", err)
@@ -161,46 +161,14 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
-		"handler": "agent",
-		"call":    "AgentDownloadBinary",
-	})
-	logger.Tracef("AgentDownloadBinary: %v", r)
-
-	// Get the current executable path
 	execPath, err := os.Executable()
 	if err != nil {
-		logger.Errorf("Failed to get executable path: %v", err)
 		http.Error(responseWriter, "Failed to get binary path", http.StatusInternalServerError)
 		return
 	}
 
-	// Open the binary file
-	file, err := os.Open(execPath)
-	if err != nil {
-		logger.Errorf("Failed to open binary file: %v", err)
-		http.Error(responseWriter, "Failed to open binary file", http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
-
-	// Get file info for size and name
-	fileInfo, err := file.Stat()
-	if err != nil {
-		logger.Errorf("Failed to get file info: %v", err)
-		http.Error(responseWriter, "Failed to get file info", http.StatusInternalServerError)
-		return
-	}
-
-	// Set appropriate headers
-	responseWriter.Header().Set("Content-Type", "application/octet-stream")
 	responseWriter.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(execPath)))
-	responseWriter.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
-
-	// Serve the file
-	http.ServeContent(responseWriter, r, filepath.Base(execPath), fileInfo.ModTime(), file)
-
-	logger.Infof("Binary file served: %s (%d bytes)", execPath, fileInfo.Size())
+	http.ServeFile(responseWriter, r, execPath)
 }
 
 func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
@@ -219,7 +187,7 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		Message:   "",
 	}
 
-	tray, err := h.TrayManager.GetTrayById(agentId)
+	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
@@ -285,7 +253,7 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 
 	logger.Debug("Agent restart request with id " + agentId)
 
-	tray, err := h.TrayManager.GetTrayById(agentId)
+	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)

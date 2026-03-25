@@ -1,13 +1,14 @@
 package scaleSetPoller
 
 import (
-	"cattery/lib/config"
 	"cattery/lib/metrics"
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/trayManager"
 	"context"
 	"fmt"
 	"strconv"
+
+	"cattery/lib/config"
 
 	"github.com/actions/scaleset"
 	"github.com/actions/scaleset/listener"
@@ -66,9 +67,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	scaler := &catteryScaler{
-		poller: p,
-	}
+	scaler := &catteryScaler{poller: p}
 
 	p.logger.Info("Entering listener loop")
 	return l.Run(ctx, scaler)
@@ -97,13 +96,13 @@ type catteryScaler struct {
 }
 
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
-	err := cs.poller.trayManager.ScaleForDemand(cs.poller.trayType, count)
+	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to scale for demand (%d): %v", count, err)
 		return 0, err
 	}
 
-	total, err := cs.poller.trayManager.CountTrays(cs.poller.trayType.Name)
+	total, err := cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
 	if err != nil {
 		return 0, err
 	}
@@ -115,9 +114,8 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.WorkflowRunID)
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
-	repository := jobInfo.RepositoryName
 
-	_, err := cs.poller.trayManager.SetJob(jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, repository)
+	_, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
 		return err
@@ -130,7 +128,7 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 	cs.poller.logger.Infof("Job completed: %s on runner %s (result: %s)",
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.Result)
 
-	_, err := cs.poller.trayManager.DeleteTray(jobInfo.RunnerName)
+	_, err := cs.poller.trayManager.DeleteTray(ctx, jobInfo.RunnerName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to delete tray %s: %v", jobInfo.RunnerName, err)
 		return err

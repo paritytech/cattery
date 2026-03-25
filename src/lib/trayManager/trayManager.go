@@ -23,19 +23,17 @@ func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
 	}
 }
 
-func (tm *TrayManager) createTrays(trayType *config.TrayType, n int) error {
+func (tm *TrayManager) createTrays(ctx context.Context, trayType *config.TrayType, n int) error {
 	for i := 0; i < n; i++ {
 		log.Infof("Creating tray %d for type: %s", i+1, trayType.Name)
-		err := tm.CreateTray(trayType)
-		if err != nil {
+		if err := tm.CreateTray(ctx, trayType); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
-
+func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType) error {
 	provider, err := providers.GetProvider(trayType.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to get provider for type %s: %w", trayType.Name, err)
@@ -45,16 +43,16 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 
 	err = provider.RunTray(tray)
 	if err != nil {
-		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.GetId(), err)
+		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
 		return err
 	}
 
-	err = tm.trayRepository.Save(tray)
+	err = tm.trayRepository.Save(ctx, tray)
 	if err != nil {
 		log.Errorf("Failed to save tray %s: %v — cleaning up provider resource", trayType.Name, err)
 		if cleanErr := provider.CleanTray(tray); cleanErr != nil {
-			log.Errorf("Failed to clean up tray %s after save failure: %v", tray.GetId(), cleanErr)
+			log.Errorf("Failed to clean up tray %s after save failure: %v", tray.Id, cleanErr)
 			metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
 		}
 		return fmt.Errorf("failed to save tray %s: %w", trayType.Name, err)
@@ -63,8 +61,8 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 	return nil
 }
 
-func (tm *TrayManager) GetTrayById(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.GetById(trayId)
+func (tm *TrayManager) GetTrayById(ctx context.Context, trayId string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.GetById(ctx, trayId)
 	if err != nil {
 		return nil, err
 	}
@@ -75,50 +73,46 @@ func (tm *TrayManager) GetTrayById(trayId string) (*trays.Tray, error) {
 	return tray, nil
 }
 
-func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistering, 0, 0, 0, "")
+func (tm *TrayManager) Registering(ctx context.Context, trayId string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistering, 0, 0, 0, "")
 	if err != nil {
 		return nil, err
 	}
 	if tray == nil {
 		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
-
 	return tray, nil
 }
 
-func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId, "")
+func (tm *TrayManager) Registered(ctx context.Context, trayId string, ghRunnerId int64) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId, "")
 	if err != nil {
 		return nil, err
 	}
 	if tray == nil {
 		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
-
 	return tray, nil
 }
 
-func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64, repository string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0, repository)
+func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64, workflowRunId int64, repository string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0, repository)
 	if err != nil {
 		return nil, err
 	}
 	if tray == nil {
 		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
-
 	return tray, nil
 }
 
-func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
-
-	var tray, err = tm.trayRepository.UpdateStatus(trayId, trays.TrayStatusDeleting, 0, 0, 0, "")
+func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "")
 	if err != nil {
 		return nil, err
 	}
 	if tray == nil {
-		return nil, nil // Tray not found, nothing to delete
+		return nil, nil
 	}
 
 	provider, err := providers.GetProviderForTray(tray)
@@ -128,12 +122,12 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 
 	err = provider.CleanTray(tray)
 	if err != nil {
-		log.Errorf("Failed to delete tray for provider %s, tray %s: %v", provider.GetProviderName(), tray.GetId(), err)
+		log.Errorf("Failed to delete tray for provider %s, tray %s: %v", provider.GetProviderName(), tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
 		return nil, err
 	}
 
-	err = tm.trayRepository.Delete(trayId)
+	err = tm.trayRepository.Delete(ctx, trayId)
 	if err != nil {
 		return nil, err
 	}
@@ -142,8 +136,7 @@ func (tm *TrayManager) DeleteTray(trayId string) (*trays.Tray, error) {
 }
 
 func (tm *TrayManager) HandleStale(ctx context.Context) {
-
-	var interval = time.Minute * 2
+	interval := time.Minute * 2
 
 	go func() {
 		for {
@@ -151,10 +144,9 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			default:
-
 				time.Sleep(interval / 2)
 
-				stale, err := tm.trayRepository.GetStale(interval)
+				stale, err := tm.trayRepository.GetStale(ctx, interval)
 				if err != nil {
 					log.Errorf("Failed to get stale trays: %v", err)
 					continue
@@ -165,13 +157,10 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 				}
 
 				for _, tray := range stale {
-					log.Debugf("Deleting stale tray: %s", tray.GetId())
-
-					_, err := tm.DeleteTray(tray.GetId())
-					if err != nil {
-						log.Errorf("Failed to delete tray %s: %v", tray.GetId(), err)
+					log.Debugf("Deleting stale tray: %s", tray.Id)
+					if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
+						log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
 					}
-
 					metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 				}
 			}
@@ -182,8 +171,8 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 // ScaleForDemand scales trays for a given tray type based on the desired runner count.
 // The desiredCount is TotalAssignedJobs from GitHub scale set statistics — the total
 // number of runners that should exist (running + idle) to serve all assigned jobs.
-func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, desiredCount int) error {
-	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayType.Name)
+func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.TrayType, desiredCount int) error {
+	countByStatus, total, err := tm.trayRepository.CountByTrayType(ctx, trayType.Name)
 	if err != nil {
 		log.Errorf("Failed to count trays for type %s: %v", trayType.Name, err)
 		return err
@@ -199,8 +188,7 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, desiredCount in
 			traysToCreate = remainingCapacity
 		}
 		if traysToCreate > 0 {
-			err := tm.createTrays(trayType, traysToCreate)
-			if err != nil {
+			if err := tm.createTrays(ctx, trayType, traysToCreate); err != nil {
 				return err
 			}
 		}
@@ -212,12 +200,12 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, desiredCount in
 		if traysToDelete > idleTrays {
 			traysToDelete = idleTrays
 		}
-		redundant, err := tm.trayRepository.MarkRedundant(trayType.Name, traysToDelete)
+		redundant, err := tm.trayRepository.MarkRedundant(ctx, trayType.Name, traysToDelete)
 		if err != nil {
 			return err
 		}
 		for _, tray := range redundant {
-			if _, delErr := tm.DeleteTray(tray.Id); delErr != nil {
+			if _, delErr := tm.DeleteTray(ctx, tray.Id); delErr != nil {
 				log.Errorf("Failed to delete redundant tray %s: %v", tray.Id, delErr)
 			}
 		}
@@ -227,8 +215,8 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, desiredCount in
 }
 
 // CountTrays returns the number of active (non-deleting) trays for a given tray type.
-func (tm *TrayManager) CountTrays(trayTypeName string) (int, error) {
-	countByStatus, total, err := tm.trayRepository.CountByTrayType(trayTypeName)
+func (tm *TrayManager) CountTrays(ctx context.Context, trayTypeName string) (int, error) {
+	countByStatus, total, err := tm.trayRepository.CountByTrayType(ctx, trayTypeName)
 	if err != nil {
 		return 0, err
 	}

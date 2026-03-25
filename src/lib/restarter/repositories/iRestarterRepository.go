@@ -1,6 +1,9 @@
 package repositories
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type RestartRequest struct {
 	WorkflowRunId int64     `bson:"workflowRunId"`
@@ -10,7 +13,7 @@ type RestartRequest struct {
 }
 
 type IRestarterRepository interface {
-	SaveRestartRequest(workflowRunId int64, orgName string, repoName string) error
-	DeleteRestartRequest(workflowRunId int64) error
-	GetAllPendingRestartRequests() ([]RestartRequest, error)
+	SaveRestartRequest(ctx context.Context, workflowRunId int64, orgName string, repoName string) error
+	DeleteRestartRequest(ctx context.Context, workflowRunId int64) error
+	GetAllPendingRestartRequests(ctx context.Context) ([]RestartRequest, error)
 }

@@ -127,35 +127,3 @@ func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 
 	return pingResponse, nil
 }
-
-func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
-
-	var client = c.httpClient
-
-	requestJson, err := json.Marshal(messages.UnregisterRequest{
-		Agent: *agent,
-	})
-	if err != nil {
-		return err
-	}
-
-	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "interrupt/", agent.AgentId)
-	if err != nil {
-		return err
-	}
-
-	var request, _ = http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
-	}
-
-	return nil
-}

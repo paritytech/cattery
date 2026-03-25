@@ -21,12 +21,10 @@ func (m *MongodbRestarterRepository) Connect(collection *mongo.Collection) {
 	m.collection = collection
 }
 
-func (m *MongodbRestarterRepository) SaveRestartRequest(workflowRunId int64, orgName string, repoName string) error {
+func (m *MongodbRestarterRepository) SaveRestartRequest(ctx context.Context, workflowRunId int64, orgName string, repoName string) error {
 	_, err := m.collection.UpdateOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
+		ctx,
+		bson.M{"workflowRunId": workflowRunId},
 		bson.M{
 			"$set": bson.M{
 				"workflowRunId": workflowRunId,
@@ -40,24 +38,19 @@ func (m *MongodbRestarterRepository) SaveRestartRequest(workflowRunId int64, org
 	return err
 }
 
-func (m *MongodbRestarterRepository) DeleteRestartRequest(workflowRunId int64) error {
-	_, err := m.collection.DeleteOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
-	)
+func (m *MongodbRestarterRepository) DeleteRestartRequest(ctx context.Context, workflowRunId int64) error {
+	_, err := m.collection.DeleteOne(ctx, bson.M{"workflowRunId": workflowRunId})
 	return err
 }
 
-func (m *MongodbRestarterRepository) GetAllPendingRestartRequests() ([]RestartRequest, error) {
-	cursor, err := m.collection.Find(context.Background(), bson.M{})
+func (m *MongodbRestarterRepository) GetAllPendingRestartRequests(ctx context.Context) ([]RestartRequest, error) {
+	cursor, err := m.collection.Find(ctx, bson.M{})
 	if err != nil {
 		return nil, err
 	}
 
 	var requests []RestartRequest
-	if err := cursor.All(context.Background(), &requests); err != nil {
+	if err := cursor.All(ctx, &requests); err != nil {
 		return nil, err
 	}
 	return requests, nil
