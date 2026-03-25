@@ -124,7 +124,6 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		return err
 	}
 
-	metrics.RegisteredTraysAdd(cs.poller.trayType.GitHubOrg, cs.poller.trayType.Name, 0)
 	return nil
 }
 

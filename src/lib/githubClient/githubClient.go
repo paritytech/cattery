@@ -22,13 +22,6 @@ type GithubClient struct {
 	Org    *config.GitHubOrganization
 }
 
-func NewGithubClientWithOrgConfig(org *config.GitHubOrganization) *GithubClient {
-	return &GithubClient{
-		client: createClient(org),
-		Org:    org,
-	}
-}
-
 func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 
 	var orgConfig = config.AppConfig.GetGitHubOrg(orgName)
@@ -40,21 +33,6 @@ func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 		client: createClient(orgConfig),
 		Org:    orgConfig,
 	}, nil
-}
-
-// CreateJITConfig creates a new JIT config
-func (gc *GithubClient) CreateJITConfig(name string, runnerGroupId int64, labels []string) (*github.JITRunnerConfig, error) {
-	jitConfig, _, err := gc.client.Actions.GenerateOrgJITConfig(
-		context.Background(),
-		gc.Org.Name,
-		&github.GenerateJITConfigRequest{
-			Name:          name,
-			RunnerGroupID: runnerGroupId,
-			Labels:        labels,
-		},
-	)
-
-	return jitConfig, err
 }
 
 func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
@@ -74,21 +52,6 @@ func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int6
 		return "", "", err
 	}
 	return wr.GetStatus(), wr.GetConclusion(), nil
-}
-
-func (gc *GithubClient) CheckJobCompleted(repoName string, jobId int64) (bool, error) {
-	wfJob, resp, err := gc.client.Actions.GetWorkflowJobByID(context.Background(), gc.Org.Name, repoName, jobId)
-	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			log.Tracef("Workflow job not found: %s/%s %d", gc.Org.Name, repoName, jobId)
-			return true, nil
-		}
-		return false, err
-	}
-
-	var status = wfJob.GetStatus()
-
-	return status == "completed", nil
 }
 
 // createClient creates a new GitHub client

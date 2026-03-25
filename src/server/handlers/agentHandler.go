@@ -26,11 +26,6 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Tracef("AgentRegister: %v", r)
 
-	if r.Method != http.MethodGet {
-		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var id = r.PathValue("id")
 	var agentId = validateAgentId(id)
 
@@ -118,11 +113,6 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("AgentUnregister: %v", r)
 
-	if r.Method != http.MethodPost {
-		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var trayId = r.PathValue("id")
 
 	var tray, err = h.TrayManager.GetTrayById(trayId)
@@ -173,11 +163,6 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 		"call":    "AgentDownloadBinary",
 	})
 	logger.Tracef("AgentDownloadBinary: %v", r)
-
-	if r.Method != http.MethodGet {
-		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	// Get the current executable path
 	execPath, err := os.Executable()
@@ -287,11 +272,6 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 	})
 
 	logger.Tracef("AgentRestart: %v", r)
-
-	if r.Method != http.MethodPost {
-		http.Error(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	var id = r.PathValue("id")
 	var agentId = validateAgentId(id)

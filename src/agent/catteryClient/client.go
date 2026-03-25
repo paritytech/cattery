@@ -6,11 +6,9 @@ import (
 	"cattery/lib/messages"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -160,20 +158,4 @@ func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
 	}
 
 	return nil
-}
-
-// get
-func (c *CatteryClient) get(path ...string) (*http.Response, error) {
-	client := c.httpClient
-	requestUrl, err := url.JoinPath(c.baseURL, path...)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed to join path %s, %s", strings.Join(path, " "), err.Error()))
-	}
-
-	response, err := client.Get(requestUrl)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed to do request %s, %s", requestUrl, err.Error()))
-	}
-
-	return response, nil
 }
