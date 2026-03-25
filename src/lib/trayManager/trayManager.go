@@ -55,9 +55,12 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 
 	err = tm.trayRepository.Save(tray)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to save tray %s: %v", trayType.Name, err)
-		log.Error(errMsg)
-		return errors.New(errMsg)
+		log.Errorf("Failed to save tray %s: %v — cleaning up provider resource", trayType.Name, err)
+		if cleanErr := provider.CleanTray(tray); cleanErr != nil {
+			log.Errorf("Failed to clean up tray %s after save failure: %v", tray.GetId(), cleanErr)
+			metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
+		}
+		return fmt.Errorf("failed to save tray %s: %w", trayType.Name, err)
 	}
 
 	return nil
@@ -192,9 +195,10 @@ func (tm *TrayManager) ScaleForDemand(trayType *config.TrayType, pendingJobs int
 	}
 
 	traysWithNoJob := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
+	activeTotal := total - countByStatus[trays.TrayStatusDeleting]
 
 	if pendingJobs > traysWithNoJob {
-		remainingCapacity := trayType.MaxTrays - total
+		remainingCapacity := trayType.MaxTrays - activeTotal
 		traysToCreate := pendingJobs - traysWithNoJob
 		if traysToCreate > remainingCapacity {
 			traysToCreate = remainingCapacity

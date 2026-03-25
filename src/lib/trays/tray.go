@@ -68,7 +68,11 @@ func (tray *Tray) GetTrayType() config.TrayType {
 }
 
 func (tray *Tray) GetTrayConfig() config.TrayConfig {
-	return config.AppConfig.GetTrayType(tray.TrayTypeName).Config
+	tt := config.AppConfig.GetTrayType(tray.TrayTypeName)
+	if tt == nil {
+		return nil
+	}
+	return tt.Config
 }
 
 func (tray *Tray) String() string {

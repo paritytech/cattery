@@ -42,7 +42,7 @@ func (m *MongodbTrayRepository) GetById(trayId string) (*trays.Tray, error) {
 func (m *MongodbTrayRepository) GetStale(d time.Duration) ([]*trays.Tray, error) {
 	dbResult, err := m.collection.Find(context.Background(),
 		bson.M{
-			"status":        bson.M{"$ne": trays.TrayStatusRunning},
+			"status":        bson.M{"$nin": bson.A{trays.TrayStatusRunning, trays.TrayStatusDeleting}},
 			"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
 		})
 	if err != nil {

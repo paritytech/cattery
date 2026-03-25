@@ -44,11 +44,13 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
 	var image = trayConfig.Image
 
+	var serverUrl = config.AppConfig.Server.AdvertiseUrl
+
 	var dockerCommand = exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
 		"--name", containerName,
 		image,
-		"/action-runner/cattery/cattery", "agent", "-i", tray.GetId(), "-s", "http://host.docker.internal:5137", "--runner-folder", "/action-runner")
+		"/action-runner/cattery/cattery", "agent", "-i", tray.GetId(), "-s", serverUrl, "--runner-folder", "/action-runner")
 
 	d.logger.Info("Running docker command: ", dockerCommand.String())
 	err := dockerCommand.Run()
