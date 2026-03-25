@@ -66,7 +66,7 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowId)
 	if err != nil {
 		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
-		// return err
+		return err
 	}
 	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
 	_, err = gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)

@@ -56,6 +56,10 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 		return nil, errors.New(errMsg)
 	}
 
+	if result == nil {
+		return nil, errors.New("failed to initialize provider: " + providerName)
+	}
+
 	providers[providerName] = result
 
 	return result, nil

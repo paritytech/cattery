@@ -116,7 +116,7 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.WorkflowRunID)
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
-	repository := fmt.Sprintf("%s/%s", jobInfo.OwnerName, jobInfo.RepositoryName)
+	repository := jobInfo.RepositoryName
 
 	_, err := cs.poller.trayManager.SetJob(jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, repository)
 	if err != nil {

@@ -235,9 +235,8 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	if err != nil {
 		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 
-		pingResponse.Message = "Failed to get tray by id: " + errMsg
+		pingResponse.Message = errMsg
 		pingResponse.Terminate = true
 		writeResponse(responseWriter, pingResponse, logger)
 
@@ -246,9 +245,8 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	if tray == nil {
 		var errMsg = fmt.Sprintf("Tray with id '%s' not found", agentId)
 		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusGone)
 
-		pingResponse.Message = "Failed to get tray by id: " + errMsg
+		pingResponse.Message = errMsg
 		pingResponse.Terminate = true
 		writeResponse(responseWriter, pingResponse, logger)
 

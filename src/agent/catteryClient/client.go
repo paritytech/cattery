@@ -103,9 +103,15 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 
 func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 
-	var response, err = c.get("/agent", "ping", c.agentId)
+	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "ping", c.agentId)
 	if err != nil {
-		return nil, errors.New("get error: " + err.Error())
+		return nil, errors.New("failed to join path: " + err.Error())
+	}
+
+	request, _ := http.NewRequest("POST", requestUrl, nil)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return nil, errors.New("post error: " + err.Error())
 	}
 
 	defer response.Body.Close()
