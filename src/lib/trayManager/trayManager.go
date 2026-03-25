@@ -7,7 +7,6 @@ import (
 	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -39,9 +38,7 @@ func (tm *TrayManager) CreateTray(trayType *config.TrayType) error {
 
 	provider, err := providers.GetProvider(trayType.Provider)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get provider for type %s: %v", trayType.Name, err)
-		log.Error(errMsg)
-		return errors.New(errMsg)
+		return fmt.Errorf("failed to get provider for type %s: %w", trayType.Name, err)
 	}
 
 	tray := trays.NewTray(*trayType)
@@ -84,8 +81,7 @@ func (tm *TrayManager) Registering(trayId string) (*trays.Tray, error) {
 		return nil, err
 	}
 	if tray == nil {
-		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
-		return nil, errors.New(errorMsg)
+		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
 
 	return tray, nil
@@ -97,8 +93,7 @@ func (tm *TrayManager) Registered(trayId string, ghRunnerId int64) (*trays.Tray,
 		return nil, err
 	}
 	if tray == nil {
-		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
-		return nil, errors.New(errorMsg)
+		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
 
 	return tray, nil
@@ -110,8 +105,7 @@ func (tm *TrayManager) SetJob(trayId string, jobRunId int64, workflowRunId int64
 		return nil, err
 	}
 	if tray == nil {
-		var errorMsg = fmt.Sprintf("Failed to update tray status for tray '%s'", trayId)
-		return nil, errors.New(errorMsg)
+		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
 	}
 
 	return tray, nil

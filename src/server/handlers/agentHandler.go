@@ -82,6 +82,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		JitConfig: jitConfig,
 	}
 
+	responseWriter.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(responseWriter).Encode(registerResponse)
 	if err != nil {
 		logger.Errorf("Failed to encode response: %v", err)
@@ -146,6 +147,8 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	if err != nil {
 		logger.Errorf("Failed to delete tray: %v", err)
+		http.Error(responseWriter, "Failed to delete tray", http.StatusInternalServerError)
+		return
 	}
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
@@ -296,5 +299,9 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 		return
 	}
 	workflowRunId := tray.WorkflowRunId
-	h.RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository)
+	if err := h.RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
+		logger.Errorf("Failed to request restart for workflow %d: %v", workflowRunId, err)
+		http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
+		return
+	}
 }

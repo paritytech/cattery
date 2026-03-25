@@ -92,16 +92,16 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 		}
 	}
 
-	AppConfig = appConfig
-
 	validate := validator.New()
-	err = validate.Struct(AppConfig)
+	err = validate.Struct(appConfig)
 	if err != nil {
 		// err is of type validator.ValidationErrors
 		for _, fieldErr := range err.(validator.ValidationErrors) {
 			return nil, fmt.Errorf("Validation failed on field '%s' for tag '%s'\n", fieldErr.Namespace(), fieldErr.Tag())
 		}
 	}
+
+	AppConfig = appConfig
 
 	return appConfig, nil
 }
