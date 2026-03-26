@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/actions/scaleset"
 	log "github.com/sirupsen/logrus"
@@ -79,13 +81,31 @@ func (sc *ScaleSetClient) EnsureScaleSet(ctx context.Context) error {
 
 func (sc *ScaleSetClient) CreateSession(ctx context.Context) error {
 	hostname, _ := os.Hostname()
-	session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname)
-	if err != nil {
-		return fmt.Errorf("failed to create message session: %w", err)
+
+	const maxRetries = 5
+	const retryDelay = 30 * time.Second
+
+	for attempt := range maxRetries {
+		session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname)
+		if err == nil {
+			sc.session = session
+			sc.logger.Info("Message session created")
+			return nil
+		}
+
+		if !strings.Contains(err.Error(), "409 Conflict") || attempt == maxRetries-1 {
+			return fmt.Errorf("failed to create message session: %w", err)
+		}
+
+		sc.logger.Warnf("Session conflict (attempt %d/%d), stale session likely exists — retrying in %v", attempt+1, maxRetries, retryDelay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryDelay):
+		}
 	}
-	sc.session = session
-	sc.logger.Info("Message session created")
-	return nil
+
+	return fmt.Errorf("unreachable")
 }
 
 func (sc *ScaleSetClient) Poll(ctx context.Context, lastMessageID int, maxCapacity int) (*scaleset.RunnerScaleSetMessage, error) {

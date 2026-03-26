@@ -5,6 +5,7 @@ import "sync"
 type Manager struct {
 	mu      sync.RWMutex
 	pollers map[string]*Poller
+	Wg      sync.WaitGroup
 }
 
 func NewManager() *Manager {

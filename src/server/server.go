@@ -43,10 +43,15 @@ func Start() {
 		logger.Fatal(err)
 	}
 
-	err = client.Ping(context.Background(), nil)
-	if err != nil {
-		logger.Errorf("Failed to connect to MongoDB: %v", err)
-		os.Exit(1)
+	{
+		timeoutCtx, cf := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cf()
+
+		err = client.Ping(timeoutCtx, nil)
+		if err != nil {
+			logger.Errorf("Failed to connect to MongoDB: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	var database = client.Database(config.AppConfig.Database.Database)
@@ -77,7 +82,9 @@ func Start() {
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
 
+		ssm.Wg.Add(1)
 		go func(p *scaleSetPoller.Poller, name string) {
+			defer ssm.Wg.Done()
 			for {
 				if err := p.Run(ctx); err != nil {
 					if ctx.Err() != nil {
@@ -136,4 +143,8 @@ func Start() {
 	sig := <-sigs
 	logger.Info("Got signal ", sig)
 	cancel()
+
+	logger.Info("Waiting for pollers to shut down...")
+	ssm.Wg.Wait()
+	logger.Info("All pollers stopped")
 }

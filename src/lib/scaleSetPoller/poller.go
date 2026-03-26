@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"cattery/lib/config"
 
@@ -52,7 +53,13 @@ func (p *Poller) Run(ctx context.Context) error {
 	if err := p.client.CreateSession(ctx); err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
-	defer p.client.Close(ctx)
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer closeCancel()
+		if err := p.client.Close(closeCtx); err != nil {
+			p.logger.Errorf("Failed to close session: %v", err)
+		}
+	}()
 
 	scaleSetID := p.client.GetScaleSetID()
 
