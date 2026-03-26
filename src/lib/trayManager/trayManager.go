@@ -8,6 +8,7 @@ import (
 	"cattery/lib/trays/repositories"
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -23,13 +24,58 @@ func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
 	}
 }
 
-func (tm *TrayManager) createTrays(ctx context.Context, trayType *config.TrayType, n int) error {
-	for i := 0; i < n; i++ {
-		log.Infof("Creating tray %d for type: %s", i+1, trayType.Name)
-		if err := tm.CreateTray(ctx, trayType); err != nil {
-			return err
+func (tm *TrayManager) createTrays(ctx context.Context, trayType *config.TrayType, count int) error {
+	maxParallel := trayType.MaxParallelCreation
+	if maxParallel <= 0 {
+		maxParallel = config.DefaultMaxParallelCreation
+	}
+
+	results := tm.createTraysParallel(ctx, trayType, count, maxParallel)
+	return tm.logCreationResults(trayType.Name, results)
+}
+
+// createTraysParallel creates trays concurrently, limited to maxParallel at a time.
+// Returns a slice of errors, one per tray (nil means success).
+func (tm *TrayManager) createTraysParallel(ctx context.Context, trayType *config.TrayType, count int, maxParallel int) []error {
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxParallel)
+	errors := make([]error, count)
+
+	for i := 0; i < count; i++ {
+		semaphore <- struct{}{} // block if maxParallel goroutines are already running
+		wg.Add(1)
+
+		go func(index int) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			log.Infof("Creating tray %d/%d for type: %s", index+1, count, trayType.Name)
+			errors[index] = tm.CreateTray(ctx, trayType)
+		}(i)
+	}
+
+	wg.Wait()
+	return errors
+}
+
+func (tm *TrayManager) logCreationResults(trayTypeName string, results []error) error {
+	total := len(results)
+	failed := 0
+
+	for _, err := range results {
+		if err != nil {
+			log.Errorf("Failed to create tray for type %s: %v", trayTypeName, err)
+			failed++
 		}
 	}
+
+	if failed == total {
+		return fmt.Errorf("all %d tray creations failed for type %s", total, trayTypeName)
+	}
+	if failed > 0 {
+		log.Warnf("%d out of %d tray creations failed for type %s", failed, total, trayTypeName)
+	}
+
 	return nil
 }
 

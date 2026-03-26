@@ -152,15 +152,18 @@ type GitHubOrganization struct {
 	PrivateKeyPath string `yaml:"privateKeyPath"`
 }
 
+const DefaultMaxParallelCreation = 10
+
 type TrayType struct {
-	Name          string     `yaml:"name" validate:"required"`
-	Provider      string     `yaml:"provider" validate:"required"`
-	RunnerGroupId int64      `yaml:"runnerGroupId" validate:"required"`
-	Shutdown      bool       `yaml:"shutdown"`
-	GitHubOrg     string     `yaml:"githubOrg" validate:"required"`
-	MaxTrays      int        `yaml:"limit"`
-	Config        TrayConfig `yaml:"config"`
-	ExtraMetadata TrayExtraMetadata
+	Name                string     `yaml:"name" validate:"required"`
+	Provider            string     `yaml:"provider" validate:"required"`
+	RunnerGroupId       int64      `yaml:"runnerGroupId" validate:"required"`
+	Shutdown            bool       `yaml:"shutdown"`
+	GitHubOrg           string     `yaml:"githubOrg" validate:"required"`
+	MaxTrays            int        `yaml:"limit"`
+	MaxParallelCreation int        `yaml:"maxParallelCreation"`
+	Config              TrayConfig `yaml:"config"`
+	ExtraMetadata       TrayExtraMetadata
 }
 
 type TrayExtraMetadata map[string]string
