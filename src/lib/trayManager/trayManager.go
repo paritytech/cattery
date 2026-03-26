@@ -215,17 +215,25 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 }
 
 // ScaleForDemand scales trays for a given tray type based on the desired runner count.
-// The desiredCount is TotalAssignedJobs from GitHub scale set statistics — the total
-// number of runners that should exist (running + idle) to serve all assigned jobs.
-func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.TrayType, desiredCount int) error {
-	countByStatus, total, err := tm.trayRepository.CountByTrayType(ctx, trayType.Name)
+// The desiredCount is TotalAssignedJobs from GitHub scale set statistics.
+// githubIdleRunners is GitHub's reported idle runner count, used as source of truth
+// for how many of our Registered trays are actually confirmed by GitHub.
+func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.TrayType, desiredCount int, githubIdleRunners int) error {
+	countByStatus, _, err := tm.trayRepository.CountByTrayType(ctx, trayType.Name)
 	if err != nil {
 		log.Errorf("Failed to count trays for type %s: %v", trayType.Name, err)
 		return err
 	}
 
-	idleTrays := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering] + countByStatus[trays.TrayStatusRegistered]
-	activeTotal := total - countByStatus[trays.TrayStatusDeleting]
+	// Trust GitHub's idle count over our local Registered count.
+	// If we have 4 Registered trays but GitHub says 0 idle, those 4 are ghosts
+	// from cancelled workflows — the stale handler will clean them up.
+	provisioningTrays := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering]
+	confirmedIdle := min(countByStatus[trays.TrayStatusRegistered], githubIdleRunners)
+	runningTrays := countByStatus[trays.TrayStatusRunning]
+
+	activeTotal := provisioningTrays + confirmedIdle + runningTrays
+	idleTrays := provisioningTrays + confirmedIdle
 
 	if desiredCount > activeTotal {
 		remainingCapacity := trayType.MaxTrays - activeTotal

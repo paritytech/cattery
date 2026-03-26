@@ -63,18 +63,19 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	scaleSetID := p.client.GetScaleSetID()
 
+	scaler := &catteryScaler{poller: p}
+
 	l, err := listener.New(
 		&sessionAdapter{client: p.client},
 		listener.Config{
 			ScaleSetID: scaleSetID,
 			MaxRunners: p.trayType.MaxTrays,
 		},
+		listener.WithMetricsRecorder(scaler),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
-
-	scaler := &catteryScaler{poller: p}
 
 	p.logger.Info("Entering listener loop")
 	return l.Run(ctx, scaler)
@@ -97,13 +98,29 @@ func (s *sessionAdapter) Session() scaleset.RunnerScaleSetSession {
 	return s.client.Session()
 }
 
-// catteryScaler implements the listener.Scaler interface.
+// catteryScaler implements the listener.Scaler and listener.MetricsRecorder interfaces.
 type catteryScaler struct {
-	poller *Poller
+	poller      *Poller
+	latestStats *scaleset.RunnerScaleSetStatistic
 }
 
+// MetricsRecorder implementation — captures GitHub statistics for ghost tray detection.
+
+func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {
+	cs.latestStats = statistics
+}
+
+func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)     {}
+func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted) {}
+func (cs *catteryScaler) RecordDesiredRunners(count int)                {}
+
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
-	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
+	githubIdleRunners := 0
+	if cs.latestStats != nil {
+		githubIdleRunners = cs.latestStats.TotalIdleRunners
+	}
+
+	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count, githubIdleRunners)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to scale for demand (%d): %v", count, err)
 		return 0, err
@@ -134,6 +151,12 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scaleset.JobCompleted) error {
 	cs.poller.logger.Infof("Job completed: %s on runner %s (result: %s)",
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.Result)
+
+	if jobInfo.RunnerName == "" {
+		cs.poller.logger.Warnf("Job completed with empty runner name (result: %s, job: %s) — skipping tray deletion",
+			jobInfo.Result, jobInfo.JobDisplayName)
+		return nil
+	}
 
 	_, err := cs.poller.trayManager.DeleteTray(ctx, jobInfo.RunnerName)
 	if err != nil {
