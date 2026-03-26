@@ -74,7 +74,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 
 	var zone = zones[rand.Intn(len(zones))]
 
-	_, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
+	op, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project:                project,
 		Zone:                   zone,
 		SourceInstanceTemplate: &instanceTemplate,
@@ -86,6 +86,11 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	})
 	if err != nil {
 		g.logger.Errorf("Failed to create tray: %v", err)
+		return err
+	}
+
+	if err := op.Wait(ctx); err != nil {
+		g.logger.Errorf("Failed waiting for tray creation to complete: %v", err)
 		return err
 	}
 
