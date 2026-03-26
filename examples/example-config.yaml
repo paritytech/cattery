@@ -10,12 +10,14 @@ github:
   - name: paritytech-stg
     appId: 123456
     installationId: 654321
+    appClientId: Iv123abC
     privateKeyPath: path/to/github-private-key.pem
     webhookSecret: my-webhook-secret
 
   - name: paritytech
     appId: 123456
     installationId: 654321
+    appClientId: Iv123abC
     privateKeyPath: path/to/github-private-key.pem
     webhookSecret: my-webhook-secret
 

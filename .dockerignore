@@ -4,3 +4,8 @@ examples/
 README.MD
 LICENCE
 .github/
+.git/
+docs
+tests
+.dockerignore
+.gitignore

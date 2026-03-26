@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  mongo1:
+    image: mongo:latest
+    container_name: mongo1
+    command: mongod --replSet rs0 --bind_ip_all
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1-data:/data/db
+    networks:
+      - mongo-cluster
+
+  mongo-config:
+    image: mongo:latest
+    container_name: mongo-config
+    depends_on:
+      - mongo1
+    networks:
+      - mongo-cluster
+    # This command runs a script to initiate the replica set
+    command: >
+      bash -c "sleep 10 && mongosh --host mongo1:27017 <<EOF
+        var config = {
+          _id : 'rs0',
+          members : [
+            { _id: 0, host: '127.0.0.1:27017' }
+          ]
+        };
+        rs.initiate(config);
+      EOF"
+
+networks:
+  mongo-cluster:
+    driver: bridge
+
+volumes:
+  mongo1-data:
