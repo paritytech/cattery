@@ -41,7 +41,7 @@ func (m *MongodbTrayRepository) GetById(ctx context.Context, trayId string) (*tr
 func (m *MongodbTrayRepository) GetStale(ctx context.Context, d time.Duration) ([]*trays.Tray, error) {
 	dbResult, err := m.collection.Find(ctx,
 		bson.M{
-			"status":        bson.M{"$nin": bson.A{trays.TrayStatusRunning, trays.TrayStatusDeleting}},
+			"status":        bson.M{"$ne": trays.TrayStatusRunning},
 			"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
 		})
 	if err != nil {
