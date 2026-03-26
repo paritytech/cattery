@@ -146,9 +146,6 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 	if err != nil {
 		return nil, err
 	}
-	if tray == nil {
-		return nil, fmt.Errorf("failed to update tray status for tray '%s'", trayId)
-	}
 	return tray, nil
 }
 
@@ -215,64 +212,26 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 }
 
 // ScaleForDemand scales trays for a given tray type based on the desired runner count.
-// The desiredCount is TotalAssignedJobs from GitHub scale set statistics.
-// githubIdleRunners is GitHub's reported idle runner count, used as source of truth
-// for how many of our Registered trays are actually confirmed by GitHub.
-func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.TrayType, desiredCount int, githubIdleRunners int) error {
-	countByStatus, _, err := tm.trayRepository.CountByTrayType(ctx, trayType.Name)
+// Follows ARC's pattern: scale up when needed, let HandleJobCompleted and the stale
+// handler take care of scale-down. No ghost detection — trust local tray state.
+func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.TrayType, desiredCount int) error {
+	activeCount, err := tm.CountTrays(ctx, trayType.Name)
 	if err != nil {
-		log.Errorf("Failed to count trays for type %s: %v", trayType.Name, err)
 		return err
 	}
 
-	// Trust GitHub's idle count over our local Registered count.
-	// If we have 4 Registered trays but GitHub says 0 idle, those 4 are ghosts
-	// from cancelled workflows — the stale handler will clean them up.
-	provisioningTrays := countByStatus[trays.TrayStatusCreating] + countByStatus[trays.TrayStatusRegistering]
-	confirmedIdle := min(countByStatus[trays.TrayStatusRegistered], githubIdleRunners)
-	runningTrays := countByStatus[trays.TrayStatusRunning]
-
-	activeTotal := provisioningTrays + confirmedIdle + runningTrays
-	idleTrays := provisioningTrays + confirmedIdle
-
-	if desiredCount > activeTotal {
-		remainingCapacity := trayType.MaxTrays - activeTotal
-		traysToCreate := desiredCount - activeTotal
-		if traysToCreate > remainingCapacity {
-			traysToCreate = remainingCapacity
-		}
-		if traysToCreate > 0 {
-			if err := tm.createTrays(ctx, trayType, traysToCreate); err != nil {
-				return err
-			}
-		}
+	if desiredCount <= activeCount {
+		return nil
 	}
 
-	if desiredCount < activeTotal && idleTrays > 0 {
-		excess := activeTotal - desiredCount
-		traysToDelete := excess
-		if traysToDelete > idleTrays {
-			traysToDelete = idleTrays
-		}
-		redundant, err := tm.trayRepository.MarkRedundant(ctx, trayType.Name, traysToDelete)
-		if err != nil {
-			return err
-		}
-		for _, tray := range redundant {
-			if _, delErr := tm.DeleteTray(ctx, tray.Id); delErr != nil {
-				log.Errorf("Failed to delete redundant tray %s: %v", tray.Id, delErr)
-			}
-		}
+	traysToCreate := min(desiredCount-activeCount, trayType.MaxTrays-activeCount)
+	if traysToCreate > 0 {
+		return tm.createTrays(ctx, trayType, traysToCreate)
 	}
-
 	return nil
 }
 
 // CountTrays returns the number of active (non-deleting) trays for a given tray type.
 func (tm *TrayManager) CountTrays(ctx context.Context, trayTypeName string) (int, error) {
-	countByStatus, total, err := tm.trayRepository.CountByTrayType(ctx, trayTypeName)
-	if err != nil {
-		return 0, err
-	}
-	return total - countByStatus[trays.TrayStatusDeleting], nil
+	return tm.trayRepository.CountActive(ctx, trayTypeName)
 }

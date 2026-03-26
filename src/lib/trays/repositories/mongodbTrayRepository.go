@@ -55,29 +55,15 @@ func (m *MongodbTrayRepository) GetStale(ctx context.Context, d time.Duration) (
 	return traysArr, nil
 }
 
-func (m *MongodbTrayRepository) MarkRedundant(ctx context.Context, trayType string, limit int) ([]*trays.Tray, error) {
-	resultTrays := make([]*trays.Tray, 0, limit)
-
-	for i := 0; i < limit; i++ {
-		dbResult := m.collection.FindOneAndUpdate(
-			ctx,
-			bson.M{"status": trays.TrayStatusCreating, "trayTypeName": trayType},
-			bson.M{"$set": bson.M{"status": trays.TrayStatusDeleting, "statusChanged": time.Now().UTC(), "jobRunId": 0}},
-			options.FindOneAndUpdate().SetReturnDocument(options.After))
-
-		var result trays.Tray
-		err := dbResult.Decode(&result)
-		if err != nil {
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				break
-			}
-			return nil, err
-		}
-
-		resultTrays = append(resultTrays, &result)
+func (m *MongodbTrayRepository) CountActive(ctx context.Context, trayType string) (int, error) {
+	count, err := m.collection.CountDocuments(ctx, bson.M{
+		"trayTypeName": trayType,
+		"status":       bson.M{"$ne": trays.TrayStatusDeleting},
+	})
+	if err != nil {
+		return 0, err
 	}
-
-	return resultTrays, nil
+	return int(count), nil
 }
 
 func (m *MongodbTrayRepository) Save(ctx context.Context, tray *trays.Tray) error {
@@ -125,40 +111,3 @@ func (m *MongodbTrayRepository) Delete(ctx context.Context, trayId string) error
 	return err
 }
 
-func (m *MongodbTrayRepository) CountByTrayType(ctx context.Context, trayType string) (map[trays.TrayStatus]int, int, error) {
-	matchStage := bson.D{
-		{Key: "$match", Value: bson.D{{Key: "trayTypeName", Value: trayType}}},
-	}
-	groupStage := bson.D{
-		{Key: "$group", Value: bson.D{
-			{Key: "_id", Value: "$status"},
-			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
-		}}}
-
-	cursor, err := m.collection.Aggregate(ctx, mongo.Pipeline{matchStage, groupStage})
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var dbResults []bson.M
-	if err = cursor.All(ctx, &dbResults); err != nil {
-		return nil, 0, err
-	}
-
-	result := map[trays.TrayStatus]int{
-		trays.TrayStatusCreating:    0,
-		trays.TrayStatusRegistering: 0,
-		trays.TrayStatusDeleting:    0,
-		trays.TrayStatusRegistered:  0,
-		trays.TrayStatusRunning:     0,
-	}
-
-	total := 0
-	for _, res := range dbResults {
-		status := res["_id"].(int32)
-		cnt, _ := res["count"].(int32)
-		result[trays.TrayStatus(status)] = int(cnt)
-		total += int(cnt)
-	}
-	return result, total, nil
-}

@@ -100,37 +100,24 @@ func (s *sessionAdapter) Session() scaleset.RunnerScaleSetSession {
 
 // catteryScaler implements the listener.Scaler and listener.MetricsRecorder interfaces.
 type catteryScaler struct {
-	poller      *Poller
-	latestStats *scaleset.RunnerScaleSetStatistic
+	poller *Poller
 }
 
-// MetricsRecorder implementation — captures GitHub statistics for ghost tray detection.
+// MetricsRecorder implementation.
 
-func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {
-	cs.latestStats = statistics
-}
-
-func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)     {}
-func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted) {}
-func (cs *catteryScaler) RecordDesiredRunners(count int)                {}
+func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {}
+func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)                     {}
+func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted)                  {}
+func (cs *catteryScaler) RecordDesiredRunners(count int)                                 {}
 
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
-	githubIdleRunners := 0
-	if cs.latestStats != nil {
-		githubIdleRunners = cs.latestStats.TotalIdleRunners
-	}
-
-	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count, githubIdleRunners)
+	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to scale for demand (%d): %v", count, err)
 		return 0, err
 	}
 
-	total, err := cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
-	if err != nil {
-		return 0, err
-	}
-	return total, nil
+	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
 }
 
 func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.JobStarted) error {
@@ -139,10 +126,15 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
 
-	_, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName)
+	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
 		return err
+	}
+
+	if tray == nil {
+		cs.poller.logger.Warnf("Tray %s not found for job %s (workflow run %d) — tray already removed",
+			jobInfo.RunnerName, jobInfo.JobDisplayName, jobInfo.WorkflowRunID)
 	}
 
 	return nil

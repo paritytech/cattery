@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -287,145 +286,51 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-// TestMarkRedundant tests the MarkRedundant method
-func TestMarkRedundant(t *testing.T) {
+// TestCountActive tests the CountActive method
+func TestCountActive(t *testing.T) {
 	client, collection := setupTestCollection(t)
 	defer client.Disconnect(context.Background())
 
-	// Create test repository
 	repo := NewMongodbTrayRepository()
 	repo.Connect(collection)
 
-	// Insert test data
-	testTray1 := createTestTray("test-tray-1", "test-type", trays.TrayStatusCreating, 0)
-	testTray2 := createTestTray("test-tray-2", "test-type", trays.TrayStatusCreating, 0)
-	testTray3 := createTestTray("test-tray-3", "test-type", trays.TrayStatusRegistered, 0)
-	testTray4 := createTestTray("test-tray-4", "other-type", trays.TrayStatusCreating, 0)
-	insertTestTrays(t, collection, []*TestTray{testTray1, testTray2, testTray3, testTray4})
+	// Insert test data: 2 Creating, 1 Registered, 1 Running, 2 Deleting for test-type
+	testTrays := []*TestTray{
+		createTestTray("test-tray-1", "test-type", trays.TrayStatusCreating, 0),
+		createTestTray("test-tray-2", "test-type", trays.TrayStatusCreating, 0),
+		createTestTray("test-tray-3", "test-type", trays.TrayStatusRegistered, 0),
+		createTestTray("test-tray-4", "test-type", trays.TrayStatusRunning, 0),
+		createTestTray("test-tray-5", "test-type", trays.TrayStatusDeleting, 0),
+		createTestTray("test-tray-6", "test-type", trays.TrayStatusDeleting, 0),
+		createTestTray("other-tray-1", "other-type", trays.TrayStatusCreating, 0),
+	}
+	insertTestTrays(t, collection, testTrays)
 
-	// Test MarkRedundant
-	redundantTrays, err := repo.MarkRedundant(context.Background(),"test-type", 2)
+	// Active = all non-deleting = 2 + 1 + 1 = 4
+	count, err := repo.CountActive(context.Background(), "test-type")
 	if err != nil {
-		t.Fatalf("MarkRedundant failed: %v", err)
+		t.Fatalf("CountActive failed: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("Expected 4 active trays, got %d", count)
 	}
 
-	// Verify that the correct number of trays were marked as redundant
-	if len(redundantTrays) != 2 {
-		t.Errorf("Expected 2 redundant trays, got %d", len(redundantTrays))
-	}
-
-	// Verify that the trays were actually marked as deleting in the database
-	// by querying the database directly
-	cursor, err := collection.Find(context.Background(), bson.M{"trayTypeName": "test-type", "status": trays.TrayStatusDeleting})
+	// other-type: 1 active
+	count, err = repo.CountActive(context.Background(), "other-type")
 	if err != nil {
-		t.Fatalf("Failed to query database: %v", err)
+		t.Fatalf("CountActive for other-type failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 active tray for other-type, got %d", count)
 	}
 
-	var deletingTrays []TestTray
-	err = cursor.All(context.Background(), &deletingTrays)
+	// non-existent type: 0
+	count, err = repo.CountActive(context.Background(), "non-existent")
 	if err != nil {
-		t.Fatalf("Failed to decode cursor: %v", err)
+		t.Fatalf("CountActive for non-existent type failed: %v", err)
 	}
-
-	if len(deletingTrays) != 2 {
-		t.Errorf("Expected 2 trays marked as deleting in the database, got %d", len(deletingTrays))
-	}
-
-	// Verify that the correct trays were marked as deleting
-	deletingTrayIds := make(map[string]bool)
-	for _, tray := range deletingTrays {
-		deletingTrayIds[tray.Id] = true
-
-		// Verify the status and jobRunId were updated correctly
-		if tray.Status != trays.TrayStatusDeleting {
-			t.Errorf("Expected tray status %v, got %v", trays.TrayStatusDeleting, tray.Status)
-		}
-
-		if tray.JobRunId != 0 {
-			t.Errorf("Expected JobRunId 0, got %d", tray.JobRunId)
-		}
-	}
-
-	// Check that the correct trays were marked as deleting
-	if !deletingTrayIds["test-tray-1"] {
-		t.Error("Expected test-tray-1 to be marked as deleting")
-	}
-
-	if !deletingTrayIds["test-tray-2"] {
-		t.Error("Expected test-tray-2 to be marked as deleting")
-	}
-
-	// Verify that trays with different status or type were not affected
-	unchangedTray, err := repo.GetById(context.Background(),"test-tray-3")
-	if err != nil {
-		t.Fatalf("Failed to get test-tray-3: %v", err)
-	}
-
-	if unchangedTray.Status != trays.TrayStatusRegistered {
-		t.Errorf("Expected test-tray-3 status to remain %v, got %v", trays.TrayStatusRegistered, unchangedTray.Status)
-	}
-
-	unchangedTray, err = repo.GetById(context.Background(),"test-tray-4")
-	if err != nil {
-		t.Fatalf("Failed to get test-tray-4: %v", err)
-	}
-
-	if unchangedTray.Status != trays.TrayStatusCreating {
-		t.Errorf("Expected test-tray-4 status to remain %v, got %v", trays.TrayStatusCreating, unchangedTray.Status)
-	}
-
-	// Test MarkRedundant with limit
-	// Add more test trays
-	testTray5 := createTestTray("test-tray-5", "test-type", trays.TrayStatusCreating, 0)
-	testTray6 := createTestTray("test-tray-6", "test-type", trays.TrayStatusCreating, 0)
-	insertTestTrays(t, collection, []*TestTray{testTray5, testTray6})
-
-	// Mark only 1 tray as redundant
-	redundantTrays, err = repo.MarkRedundant(context.Background(),"test-type", 1)
-	if err != nil {
-		t.Fatalf("MarkRedundant with limit failed: %v", err)
-	}
-
-	// Verify that only 1 more tray was marked as deleting
-	cursor, err = collection.Find(context.Background(), bson.M{"trayTypeName": "test-type", "status": trays.TrayStatusDeleting})
-	if err != nil {
-		t.Fatalf("Failed to query database: %v", err)
-	}
-
-	err = cursor.All(context.Background(), &deletingTrays)
-	if err != nil {
-		t.Fatalf("Failed to decode cursor: %v", err)
-	}
-
-	if len(deletingTrays) != 3 {
-		t.Errorf("Expected 3 trays marked as deleting in the database, got %d", len(deletingTrays))
-	}
-
-	// Test MarkRedundant with non-existent tray type
-	redundantTrays, err = repo.MarkRedundant(context.Background(),"non-existent", 2)
-	if err != nil {
-		t.Fatalf("MarkRedundant with non-existent tray type failed: %v", err)
-	}
-
-	if len(redundantTrays) != 0 {
-		t.Errorf("Expected 0 redundant trays for non-existent type, got %d", len(redundantTrays))
-	}
-
-	// Test MarkRedundant with empty collection
-	// Clear the collection
-	err = collection.Drop(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to drop collection: %v", err)
-	}
-
-	// Try to mark redundant trays in an empty collection
-	redundantTrays, err = repo.MarkRedundant(context.Background(),"test-type", 2)
-	if err != nil {
-		t.Fatalf("MarkRedundant with empty collection failed: %v", err)
-	}
-
-	if len(redundantTrays) != 0 {
-		t.Errorf("Expected 0 redundant trays for empty collection, got %d", len(redundantTrays))
+	if count != 0 {
+		t.Errorf("Expected 0 active trays for non-existent type, got %d", count)
 	}
 }
 
@@ -576,101 +481,3 @@ func TestConnect(t *testing.T) {
 	}
 }
 
-// TestCountByTrayType tests the CountByTrayType method
-func TestCountByTrayType(t *testing.T) {
-	client, collection := setupTestCollection(t)
-	defer client.Disconnect(context.Background())
-
-	// Create test repository
-	repo := NewMongodbTrayRepository()
-	repo.Connect(collection)
-
-	// Insert test data with specific counts for each status
-	// 2 Creating, 3 Registered, 1 Running, 2 Deleting for test-type
-	testTrays := []*TestTray{
-		createTestTray("test-tray-1", "test-type", trays.TrayStatusCreating, 0),
-		createTestTray("test-tray-2", "test-type", trays.TrayStatusCreating, 0),
-		createTestTray("test-tray-3", "test-type", trays.TrayStatusRegistered, 0),
-		createTestTray("test-tray-4", "test-type", trays.TrayStatusRegistered, 0),
-		createTestTray("test-tray-5", "test-type", trays.TrayStatusRegistered, 0),
-		createTestTray("test-tray-6", "test-type", trays.TrayStatusRunning, 0),
-		createTestTray("test-tray-7", "test-type", trays.TrayStatusDeleting, 0),
-		createTestTray("test-tray-8", "test-type", trays.TrayStatusDeleting, 0),
-		// Different tray type
-		createTestTray("other-tray-1", "other-type", trays.TrayStatusCreating, 0),
-		createTestTray("other-tray-2", "other-type", trays.TrayStatusRegistered, 0),
-	}
-	insertTestTrays(t, collection, testTrays)
-
-	// Test CountByTrayType for test-type
-	counts, total, err := repo.CountByTrayType(context.Background(),"test-type")
-	if err != nil {
-		t.Fatalf("CountByTrayType failed: %v", err)
-	}
-
-	// Verify the total count
-	expectedTotal := 8 // Total number of test-type trays
-	if total != expectedTotal {
-		t.Errorf("Expected total count %d, got %d", expectedTotal, total)
-	}
-
-	// Verify counts for each status
-	expectedCounts := map[trays.TrayStatus]int{
-		trays.TrayStatusCreating:    2,
-		trays.TrayStatusRegistered:  3,
-		trays.TrayStatusRunning:     1,
-		trays.TrayStatusDeleting:    2,
-		trays.TrayStatusRegistering: 0, // No trays with this status
-	}
-
-	for status, expectedCount := range expectedCounts {
-		if counts[status] != expectedCount {
-			t.Errorf("Expected count %d for status %v, got %d", expectedCount, status, counts[status])
-		}
-	}
-
-	// Test CountByTrayType for other-type
-	counts, total, err = repo.CountByTrayType(context.Background(),"other-type")
-	if err != nil {
-		t.Fatalf("CountByTrayType for other-type failed: %v", err)
-	}
-
-	// Verify the total count for other-type
-	expectedTotal = 2 // Total number of other-type trays
-	if total != expectedTotal {
-		t.Errorf("Expected total count %d for other-type, got %d", expectedTotal, total)
-	}
-
-	// Verify counts for each status for other-type
-	expectedCounts = map[trays.TrayStatus]int{
-		trays.TrayStatusCreating:    1,
-		trays.TrayStatusRegistered:  1,
-		trays.TrayStatusRunning:     0,
-		trays.TrayStatusDeleting:    0,
-		trays.TrayStatusRegistering: 0,
-	}
-
-	for status, expectedCount := range expectedCounts {
-		if counts[status] != expectedCount {
-			t.Errorf("Expected count %d for status %v in other-type, got %d", expectedCount, status, counts[status])
-		}
-	}
-
-	// Test CountByTrayType with non-existent tray type
-	counts, total, err = repo.CountByTrayType(context.Background(),"non-existent")
-	if err != nil {
-		t.Fatalf("CountByTrayType with non-existent tray type failed: %v", err)
-	}
-
-	// Verify the total count for non-existent type
-	if total != 0 {
-		t.Errorf("Expected total count 0 for non-existent type, got %d", total)
-	}
-
-	// Verify that all status counts are 0 for non-existent type
-	for status, count := range counts {
-		if count != 0 {
-			t.Errorf("Expected count 0 for status %v in non-existent type, got %d", status, count)
-		}
-	}
-}
