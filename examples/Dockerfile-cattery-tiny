@@ -5,14 +5,20 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /action-runner
 
-RUN curl -sL -o actions-runner-linux-x64-2.323.0.tar.gz https://github.com/actions/runner/releases/download/v2.323.0/actions-runner-linux-x64-2.323.0.tar.gz
+ARG RUNNER_VERISON='2.333'
+ENV RUNNER_VERISON=$RUNNER_VERISON
+
+RUN curl -sL -o actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERISON}.0/actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz
 RUN ls -al
-RUN tar xzf ./actions-runner-linux-x64-2.323.0.tar.gz
+RUN tar xzf ./actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz
 
 WORKDIR /cattery-agent
 
 COPY . .
 
-RUN go build -o /action-runner/cattery/cattery
+RUN ls -al /action-runner
+RUN ls -al /cattery-agent
+RUN ls -al .
 
-#ENTRYPOINT ["/action-runner/cattery/cattery", "agent", "-r","/action-runner", "-s", "http://10.10.10.116:5137"]
+
+RUN cd src && go build -o /action-runner/cattery/cattery
