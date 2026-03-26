@@ -52,9 +52,13 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 
 	switch provider["type"] {
 	case "docker":
-		result = NewDockerProvider(providerName, provider)
+		if p := NewDockerProvider(providerName, provider); p != nil {
+			result = p
+		}
 	case "google":
-		result = NewGceProvider(providerName, provider)
+		if p := NewGceProvider(providerName, provider); p != nil {
+			result = p
+		}
 	default:
 		return nil, errors.New("unknown provider type: " + provider["type"])
 	}
