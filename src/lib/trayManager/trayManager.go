@@ -85,7 +85,10 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 		return fmt.Errorf("failed to get provider for type %s: %w", trayType.Name, err)
 	}
 
-	tray := trays.NewTray(*trayType)
+	tray, err := trays.NewTray(*trayType)
+	if err != nil {
+		return err
+	}
 
 	err = provider.RunTray(tray)
 	if err != nil {

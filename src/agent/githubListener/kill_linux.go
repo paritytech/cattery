@@ -1,7 +1,7 @@
 package githubListener
 
 import (
-	"errors"
+	"fmt"
 	"os/exec"
 )
 
@@ -9,8 +9,7 @@ func kill(l *GithubListener) error {
 	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
 	err := commandInterruptRun.Run()
 	if err != nil {
-		var errMsg = "Failed to interrupt runner: " + err.Error()
-		return errors.New(errMsg)
+		return fmt.Errorf("failed to interrupt runner: %w", err)
 	}
 
 	return nil

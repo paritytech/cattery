@@ -24,11 +24,11 @@ type Tray struct {
 	ProviderData map[string]string `bson:"providerData"`
 }
 
-func NewTray(trayType config.TrayType) *Tray {
+func NewTray(trayType config.TrayType) (*Tray, error) {
 	b := make([]byte, 8)
 	_, err := rand.Read(b)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to generate tray ID: %w", err)
 	}
 
 	id := hex.EncodeToString(b)
@@ -40,7 +40,7 @@ func NewTray(trayType config.TrayType) *Tray {
 		Status:        TrayStatusCreating,
 		GitHubOrgName: trayType.GitHubOrg,
 		ProviderData:  make(map[string]string),
-	}
+	}, nil
 }
 
 // TrayType returns the configuration for this tray's type from the current config.

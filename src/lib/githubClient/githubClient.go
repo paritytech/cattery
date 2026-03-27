@@ -4,6 +4,7 @@ import (
 	"cattery/lib/config"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -29,8 +30,13 @@ func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 		return nil, errors.New("GitHub organization not found")
 	}
 
+	client, err := createClient(orgConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &GithubClient{
-		client: createClient(orgConfig),
+		client: client,
 		Org:    orgConfig,
 	}, nil
 }
@@ -55,12 +61,12 @@ func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int6
 }
 
 // createClient creates a new GitHub client
-func createClient(org *config.GitHubOrganization) *github.Client {
+func createClient(org *config.GitHubOrganization) (*github.Client, error) {
 	githubClientsMu.Lock()
 	defer githubClientsMu.Unlock()
 
 	if githubClient, ok := githubClients[org.Name]; ok {
-		return githubClient
+		return githubClient, nil
 	}
 
 	tr := http.DefaultTransport
@@ -73,7 +79,7 @@ func createClient(org *config.GitHubOrganization) *github.Client {
 	)
 
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to load GitHub App private key for org %s: %w", org.Name, err)
 	}
 
 	// Use installation transport with github.com/google/go-github
@@ -81,5 +87,5 @@ func createClient(org *config.GitHubOrganization) *github.Client {
 
 	githubClients[org.Name] = client
 
-	return client
+	return client, nil
 }

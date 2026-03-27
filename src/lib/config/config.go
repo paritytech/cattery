@@ -160,7 +160,7 @@ type TrayType struct {
 	RunnerGroupId       int64      `yaml:"runnerGroupId" validate:"required"`
 	Shutdown            bool       `yaml:"shutdown"`
 	GitHubOrg           string     `yaml:"githubOrg" validate:"required"`
-	MaxTrays            int        `yaml:"limit"`
+	MaxTrays            int        `yaml:"maxTrays"`
 	MaxParallelCreation int        `yaml:"maxParallelCreation"`
 	Config              TrayConfig `yaml:"config"`
 	ExtraMetadata       TrayExtraMetadata

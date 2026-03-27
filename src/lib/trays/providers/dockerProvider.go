@@ -3,6 +3,7 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -40,7 +41,10 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
 	var containerName = tray.Id
 
-	var trayConfig = tray.TrayConfig().(config.DockerTrayConfig)
+	trayConfig, ok := tray.TrayConfig().(config.DockerTrayConfig)
+	if !ok {
+		return fmt.Errorf("unexpected tray config type for docker provider, tray %s", tray.Id)
+	}
 
 	var image = trayConfig.Image
 

@@ -12,6 +12,7 @@ import (
 type GithubListener struct {
 	listenerPath string
 	process      *os.Process
+	started      chan struct{} // closed once process has started (or failed)
 
 	mut sync.Mutex
 }
@@ -19,6 +20,7 @@ type GithubListener struct {
 func NewGithubListener(listenerPath string) *GithubListener {
 	return &GithubListener{
 		listenerPath: listenerPath,
+		started:      make(chan struct{}),
 	}
 }
 
@@ -33,6 +35,7 @@ func (l *GithubListener) Start(ctx context.Context, cancel context.CancelCauseFu
 		err := commandRun.Start()
 		if err != nil {
 			log.Errorf("Listener failed to start: %v", err)
+			close(l.started)
 			cancel(err)
 			return
 		}
@@ -40,6 +43,7 @@ func (l *GithubListener) Start(ctx context.Context, cancel context.CancelCauseFu
 		l.mut.Lock()
 		l.process = commandRun.Process
 		l.mut.Unlock()
+		close(l.started)
 
 		err = commandRun.Wait()
 		cancel(err) // nil means clean exit
@@ -47,6 +51,8 @@ func (l *GithubListener) Start(ctx context.Context, cancel context.CancelCauseFu
 }
 
 func (l *GithubListener) Stop() {
+	<-l.started // wait for process to be set before attempting kill
+
 	l.mut.Lock()
 	defer l.mut.Unlock()
 

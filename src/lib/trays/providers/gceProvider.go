@@ -50,7 +50,10 @@ func (g *GceProvider) GetProviderName() string {
 func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
 
-	var trayConfig = tray.TrayConfig().(config.GoogleTrayConfig)
+	trayConfig, ok := tray.TrayConfig().(config.GoogleTrayConfig)
+	if !ok {
+		return fmt.Errorf("unexpected tray config type for gce provider, tray %s", tray.Id)
+	}
 
 	var (
 		project          = g.providerConfig.Get("project")

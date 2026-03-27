@@ -5,7 +5,7 @@ import (
 	"cattery/lib/agents"
 	"cattery/lib/messages"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,7 +52,7 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, nil, errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return nil, nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	var registerResponse = &messages.RegisterResponse{}
@@ -93,7 +93,7 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	return nil
@@ -103,26 +103,26 @@ func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "ping", c.agentId)
 	if err != nil {
-		return nil, errors.New("failed to join path: " + err.Error())
+		return nil, fmt.Errorf("failed to join path: %w", err)
 	}
 
 	request, _ := http.NewRequest("POST", requestUrl, nil)
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return nil, errors.New("post error: " + err.Error())
+		return nil, fmt.Errorf("post error: %w", err)
 	}
 
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	var pingResponse = &messages.PingResponse{}
 	err = json.NewDecoder(response.Body).Decode(pingResponse)
 	if err != nil {
-		return nil, errors.New("error decoding ping response: " + err.Error())
+		return nil, fmt.Errorf("error decoding ping response: %w", err)
 	}
 
 	return pingResponse, nil

@@ -141,13 +141,16 @@ func TestSave(t *testing.T) {
 		Config:        &config.DockerTrayConfig{Image: "alpine", NamePrefix: "test"},
 	}
 
-	tray := trays.NewTray(trayType)
+	tray, err := trays.NewTray(trayType)
+	if err != nil {
+		t.Fatalf("NewTray failed: %v", err)
+	}
 	// Set ProviderData and verify it round-trips
 	tray.ProviderData["zone"] = "abc123"
 	tray.ProviderData["something"] = "worker-1"
 
 	// Test Save
-	err := repo.Save(context.Background(),tray)
+	err = repo.Save(context.Background(),tray)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
