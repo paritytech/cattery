@@ -92,16 +92,16 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 		}
 	}
 
-	AppConfig = appConfig
-
 	validate := validator.New()
-	err = validate.Struct(AppConfig)
+	err = validate.Struct(appConfig)
 	if err != nil {
 		// err is of type validator.ValidationErrors
 		for _, fieldErr := range err.(validator.ValidationErrors) {
 			return nil, fmt.Errorf("Validation failed on field '%s' for tag '%s'\n", fieldErr.Namespace(), fieldErr.Tag())
 		}
 	}
+
+	AppConfig = appConfig
 
 	return appConfig, nil
 }
@@ -146,20 +146,24 @@ type DatabaseConfig struct {
 type GitHubOrganization struct {
 	Name           string `yaml:"name" validate:"required"`
 	AppId          int64  `yaml:"appId" validate:"required"`
+	AppClientId    string `yaml:"appClientId" validate:"required"`
 	InstallationId int64  `yaml:"installationId" validate:"required"`
 	WebhookSecret  string `yaml:"webhookSecret"`
 	PrivateKeyPath string `yaml:"privateKeyPath"`
 }
 
+const DefaultMaxParallelCreation = 10
+
 type TrayType struct {
-	Name          string     `yaml:"name" validate:"required"`
-	Provider      string     `yaml:"provider" validate:"required"`
-	RunnerGroupId int64      `yaml:"runnerGroupId" validate:"required"`
-	Shutdown      bool       `yaml:"shutdown"`
-	GitHubOrg     string     `yaml:"githubOrg" validate:"required"`
-	MaxTrays      int        `yaml:"limit"`
-	Config        TrayConfig `yaml:"config"`
-	ExtraMetadata TrayExtraMetadata
+	Name                string     `yaml:"name" validate:"required"`
+	Provider            string     `yaml:"provider" validate:"required"`
+	RunnerGroupId       int64      `yaml:"runnerGroupId" validate:"required"`
+	Shutdown            bool       `yaml:"shutdown"`
+	GitHubOrg           string     `yaml:"githubOrg" validate:"required"`
+	MaxTrays            int        `yaml:"maxTrays"`
+	MaxParallelCreation int        `yaml:"maxParallelCreation"`
+	Config              TrayConfig `yaml:"config"`
+	ExtraMetadata       TrayExtraMetadata
 }
 
 type TrayExtraMetadata map[string]string

@@ -4,10 +4,15 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
 	"errors"
+	"sync"
+
 	log "github.com/sirupsen/logrus"
 )
 
-var providers = make(map[string]ITrayProvider)
+var (
+	providersMu sync.RWMutex
+	providers   = make(map[string]ITrayProvider)
+)
 
 var logger = log.WithFields(log.Fields{
 	"name": "trayProviderFactory",
@@ -28,35 +33,43 @@ func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
 }
 
 func GetProvider(providerName string) (ITrayProvider, error) {
-
+	providersMu.RLock()
 	if existingProvider, ok := providers[providerName]; ok {
+		providersMu.RUnlock()
 		return existingProvider, nil
 	}
+	providersMu.RUnlock()
 
 	var result ITrayProvider
 
 	var p = config.AppConfig.GetProvider(providerName)
 
 	if p == nil {
-		var err = errors.New("No provider found for " + providerName)
-		logger.Error(err.Error())
-		return nil, err
+		return nil, errors.New("no provider found for " + providerName)
 	}
 
 	var provider = *p
 
 	switch provider["type"] {
 	case "docker":
-		result = NewDockerProvider(providerName, provider)
+		if p := NewDockerProvider(providerName, provider); p != nil {
+			result = p
+		}
 	case "google":
-		result = NewGceProvider(providerName, provider)
+		if p := NewGceProvider(providerName, provider); p != nil {
+			result = p
+		}
 	default:
-		var errMsg = "Unknown provider: " + providerName
-		logger.Error(errMsg)
-		return nil, errors.New(errMsg)
+		return nil, errors.New("unknown provider type: " + provider["type"])
 	}
 
+	if result == nil {
+		return nil, errors.New("failed to initialize provider: " + providerName)
+	}
+
+	providersMu.Lock()
 	providers[providerName] = result
+	providersMu.Unlock()
 
 	return result, nil
 }

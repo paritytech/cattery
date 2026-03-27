@@ -3,14 +3,14 @@
 package githubListener
 
 import (
-	"errors"
+	"fmt"
 	"os"
 )
 
 func kill(l *GithubListener) error {
 	err := l.process.Signal(os.Kill)
 	if err != nil {
-		return errors.New("Failed to kill process: " + err.Error())
+		return fmt.Errorf("failed to kill process: %w", err)
 	}
 
 	return nil

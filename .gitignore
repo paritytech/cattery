@@ -2,3 +2,4 @@
 bin
 /stuff/
 .DS_Store
+.claude

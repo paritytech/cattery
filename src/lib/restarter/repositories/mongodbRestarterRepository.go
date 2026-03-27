@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -22,15 +21,15 @@ func (m *MongodbRestarterRepository) Connect(collection *mongo.Collection) {
 	m.collection = collection
 }
 
-func (m *MongodbRestarterRepository) SaveRestartRequest(workflowRunId int64) error {
+func (m *MongodbRestarterRepository) SaveRestartRequest(ctx context.Context, workflowRunId int64, orgName string, repoName string) error {
 	_, err := m.collection.UpdateOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
+		ctx,
+		bson.M{"workflowRunId": workflowRunId},
 		bson.M{
 			"$set": bson.M{
 				"workflowRunId": workflowRunId,
+				"orgName":       orgName,
+				"repoName":      repoName,
 				"createdAt":     time.Now().UTC(),
 			},
 		},
@@ -39,32 +38,20 @@ func (m *MongodbRestarterRepository) SaveRestartRequest(workflowRunId int64) err
 	return err
 }
 
-func (m *MongodbRestarterRepository) DeleteRestartRequest(workflowRunId int64) error {
-	_, err := m.collection.DeleteOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
-	)
+func (m *MongodbRestarterRepository) DeleteRestartRequest(ctx context.Context, workflowRunId int64) error {
+	_, err := m.collection.DeleteOne(ctx, bson.M{"workflowRunId": workflowRunId})
 	return err
 }
 
-func (m *MongodbRestarterRepository) CheckRestartRequest(workflowRunId int64) (bool, error) {
-	// log.Debugf("Checking restart request for workflow run id %d in MongoDB", workflowRunId)
-	dbResult := m.collection.FindOne(
-		context.Background(),
-		bson.M{
-			"workflowRunId": workflowRunId,
-		},
-	)
-	var result bson.M
-	err := dbResult.Decode(&result)
+func (m *MongodbRestarterRepository) GetAllPendingRestartRequests(ctx context.Context) ([]RestartRequest, error) {
+	cursor, err := m.collection.Find(ctx, bson.M{})
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return false, nil
-		}
-		return false, err
+		return nil, err
 	}
 
-	return true, nil
+	var requests []RestartRequest
+	if err := cursor.All(ctx, &requests); err != nil {
+		return nil, err
+	}
+	return requests, nil
 }

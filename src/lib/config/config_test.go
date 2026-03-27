@@ -28,6 +28,7 @@ database:
 github:
   - name: "test-org"
     appId: 12345
+    appClientId: "Iv1.test123"
     installationId: 67890
     webhookSecret: "secret"
     privateKeyPath: "path/to/key.pem"

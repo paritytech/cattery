@@ -5,12 +5,10 @@ import (
 	"cattery/lib/agents"
 	"cattery/lib/messages"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -54,7 +52,7 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, nil, errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return nil, nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	var registerResponse = &messages.RegisterResponse{}
@@ -95,7 +93,7 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	return nil
@@ -103,71 +101,29 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 
 func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 
-	var response, err = c.get("/agent", "ping", c.agentId)
+	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "ping", c.agentId)
 	if err != nil {
-		return nil, errors.New("get error: " + err.Error())
+		return nil, fmt.Errorf("failed to join path: %w", err)
+	}
+
+	request, _ := http.NewRequest("POST", requestUrl, nil)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("post error: %w", err)
 	}
 
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
+		return nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	var pingResponse = &messages.PingResponse{}
 	err = json.NewDecoder(response.Body).Decode(pingResponse)
 	if err != nil {
-		return nil, errors.New("error decoding ping response: " + err.Error())
+		return nil, fmt.Errorf("error decoding ping response: %w", err)
 	}
 
 	return pingResponse, nil
-}
-
-func (c *CatteryClient) InterruptAgent(agent *agents.Agent) error {
-
-	var client = c.httpClient
-
-	requestJson, err := json.Marshal(messages.UnregisterRequest{
-		Agent: *agent,
-	})
-	if err != nil {
-		return err
-	}
-
-	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "interrupt/", agent.AgentId)
-	if err != nil {
-		return err
-	}
-
-	var request, _ = http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return errors.New("response status code: " + response.Status + " body: " + string(bodyBytes))
-	}
-
-	return nil
-}
-
-// get
-func (c *CatteryClient) get(path ...string) (*http.Response, error) {
-	client := c.httpClient
-	requestUrl, err := url.JoinPath(c.baseURL, path...)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed to join path %s, %s", strings.Join(path, " "), err.Error()))
-	}
-
-	response, err := client.Get(requestUrl)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed to do request %s, %s", requestUrl, err.Error()))
-	}
-
-	return response, nil
 }

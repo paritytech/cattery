@@ -3,6 +3,7 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -36,29 +37,24 @@ func (d *DockerProvider) GetProviderName() string {
 	return d.name
 }
 
-func (d *DockerProvider) GetTray(id string) (*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (d *DockerProvider) ListTrays() ([]*trays.Tray, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
 func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
-	var containerName = tray.GetId()
+	var containerName = tray.Id
 
-	var trayConfig = tray.GetTrayConfig().(config.DockerTrayConfig)
+	trayConfig, ok := tray.TrayConfig().(config.DockerTrayConfig)
+	if !ok {
+		return fmt.Errorf("unexpected tray config type for docker provider, tray %s", tray.Id)
+	}
 
 	var image = trayConfig.Image
+
+	var serverUrl = config.AppConfig.Server.AdvertiseUrl
 
 	var dockerCommand = exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
 		"--name", containerName,
 		image,
-		"/action-runner/cattery/cattery", "agent", "-i", tray.GetId(), "-s", "http://host.docker.internal:5137", "--runner-folder", "/action-runner")
+		"/action-runner/cattery/cattery", "agent", "-i", tray.Id, "-s", serverUrl, "--runner-folder", "/action-runner")
 
 	d.logger.Info("Running docker command: ", dockerCommand.String())
 	err := dockerCommand.Run()
@@ -72,14 +68,14 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 }
 
 func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
-	var dockerCommand = exec.Command("docker", "container", "stop", tray.GetId())
+	var dockerCommand = exec.Command("docker", "container", "stop", tray.Id)
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {
 		output := string(dockerCommandOutput)
 		d.logger.Trace(output)
 
 		if strings.Contains(strings.ToLower(output), "no such container") {
-			d.logger.Trace("No such container: ", tray.GetId())
+			d.logger.Trace("No such container: ", tray.Id)
 			return nil
 		}
 		return err
