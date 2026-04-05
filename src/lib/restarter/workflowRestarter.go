@@ -58,7 +58,9 @@ func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *lo
 	for _, req := range requests {
 		if time.Since(req.CreatedAt) > ttl {
 			logger.Warnf("Restart request for workflow %d expired (age: %v), deleting", req.WorkflowRunId, time.Since(req.CreatedAt))
-			_ = wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId)
+			if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
+				logger.Errorf("Failed to delete expired restart request for workflow %d: %v", req.WorkflowRunId, err)
+			}
 			continue
 		}
 

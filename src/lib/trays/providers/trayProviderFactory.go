@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	providersMu sync.RWMutex
+	providersMu sync.Mutex
 	providers   = make(map[string]TrayProvider)
 )
 
@@ -34,7 +34,7 @@ func GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
 }
 
 func GetProviderByTrayTypeName(trayTypeName string) (TrayProvider, error) {
-	var trayType = config.Get().GetTrayType(trayTypeName)
+	trayType := config.Get().GetTrayType(trayTypeName)
 
 	if trayType == nil {
 		return nil, errors.New("tray type not found: " + trayTypeName)
@@ -44,23 +44,21 @@ func GetProviderByTrayTypeName(trayTypeName string) (TrayProvider, error) {
 }
 
 func GetProvider(providerName string) (TrayProvider, error) {
-	providersMu.RLock()
+	providersMu.Lock()
+	defer providersMu.Unlock()
+
 	if existingProvider, ok := providers[providerName]; ok {
-		providersMu.RUnlock()
 		return existingProvider, nil
 	}
-	providersMu.RUnlock()
 
-	var result TrayProvider
-
-	var p = config.Get().GetProvider(providerName)
-
+	p := config.Get().GetProvider(providerName)
 	if p == nil {
 		return nil, errors.New("no provider found for " + providerName)
 	}
 
-	var provider = *p
+	provider := *p
 
+	var result TrayProvider
 	switch provider["type"] {
 	case "docker":
 		if p := NewDockerProvider(providerName, provider); p != nil {
@@ -78,9 +76,6 @@ func GetProvider(providerName string) (TrayProvider, error) {
 		return nil, errors.New("failed to initialize provider: " + providerName)
 	}
 
-	providersMu.Lock()
 	providers[providerName] = result
-	providersMu.Unlock()
-
 	return result, nil
 }

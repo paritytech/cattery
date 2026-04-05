@@ -88,10 +88,9 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 	}
 
 	responseWriter.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(responseWriter).Encode(registerResponse)
-	if err != nil {
+	if err = json.NewEncoder(responseWriter).Encode(registerResponse); err != nil {
+		// Response headers already sent; can only log, not send http.Error
 		logger.Errorf("Failed to encode response: %v", err)
-		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -163,6 +162,10 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
+	if tray == nil {
+		http.Error(responseWriter, "tray not found", http.StatusNotFound)
+		return
+	}
 
 	unregisterRequest := messages.UnregisterRequest{}
 	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
@@ -194,6 +197,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 		metrics.PreemptedTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 	}
 
+	responseWriter.WriteHeader(http.StatusOK)
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
@@ -237,6 +241,12 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		pingResponse.Terminate = true
 		writeResponse(responseWriter, pingResponse, logger)
 
+		return
+	}
+	if tray == nil {
+		pingResponse.Message = fmt.Sprintf("Tray '%s' not found", agentId)
+		pingResponse.Terminate = true
+		writeResponse(responseWriter, pingResponse, logger)
 		return
 	}
 
@@ -294,6 +304,10 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 		errMsg := fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
+		return
+	}
+	if tray == nil {
+		http.Error(responseWriter, "tray not found", http.StatusNotFound)
 		return
 	}
 	workflowRunId := tray.WorkflowRunId
