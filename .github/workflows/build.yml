@@ -35,8 +35,9 @@ jobs:
           mongodb-port: 27017
 
       - name: run tests
+        working-directory: src
         run: |
-          go test -C src -tags=integration -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
+          go test -tags=integration -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
           # go 1.25 covdata bug causes exit code 1 for packages without tests
           # fail only if actual test failures exist
           if grep -q "^FAIL" test-output.txt; then
@@ -44,7 +45,8 @@ jobs:
           fi
 
       - name: show coverage
-        run: go tool cover -func=src/coverage.out
+        working-directory: src
+        run: go tool cover -func=coverage.out
 
   release:
     needs: [tests]
