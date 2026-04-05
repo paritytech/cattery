@@ -3,6 +3,7 @@ package trayManager
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
+	"cattery/lib/trays/providers"
 	"context"
 	"errors"
 	"testing"
@@ -11,7 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// mockTrayRepository implements repositories.ITrayRepository for testing
+// --- Mock tray repository ---
+
 type mockTrayRepository struct {
 	trays       map[string]*trays.Tray
 	countResult int
@@ -92,10 +94,58 @@ func (m *mockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*tr
 	return m.staleTrays, nil
 }
 
+// --- Mock provider ---
+
+type mockProvider struct {
+	name     string
+	runErr   error
+	cleanErr error
+	runCalls int
+	cleaned  []string
+}
+
+func (m *mockProvider) GetProviderName() string { return m.name }
+func (m *mockProvider) RunTray(_ *trays.Tray) error {
+	m.runCalls++
+	return m.runErr
+}
+func (m *mockProvider) CleanTray(tray *trays.Tray) error {
+	m.cleaned = append(m.cleaned, tray.Id)
+	return m.cleanErr
+}
+
+// --- Mock provider factory ---
+
+type mockProviderFactory struct {
+	provider   *mockProvider
+	getErr     error
+	forTrayErr error
+}
+
+func (m *mockProviderFactory) GetProvider(_ string) (providers.ITrayProvider, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	return m.provider, nil
+}
+
+func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.ITrayProvider, error) {
+	if m.forTrayErr != nil {
+		return nil, m.forTrayErr
+	}
+	return m.provider, nil
+}
+
+// --- Helper ---
+
+func newTestManager(repo *mockTrayRepository, pf *mockProviderFactory) *TrayManager {
+	return NewTrayManager(repo, pf)
+}
+
 // --- Tests ---
 
 func TestLogCreationResults_AllSuccess(t *testing.T) {
-	tm := NewTrayManager(newMockRepo())
+	tm := newTestManager(newMockRepo(), &mockProviderFactory{})
 	results := []error{nil, nil, nil}
 
 	err := tm.logCreationResults("test-type", results)
@@ -103,7 +153,7 @@ func TestLogCreationResults_AllSuccess(t *testing.T) {
 }
 
 func TestLogCreationResults_AllFailed(t *testing.T) {
-	tm := NewTrayManager(newMockRepo())
+	tm := newTestManager(newMockRepo(), &mockProviderFactory{})
 	results := []error{
 		errors.New("fail1"),
 		errors.New("fail2"),
@@ -115,18 +165,17 @@ func TestLogCreationResults_AllFailed(t *testing.T) {
 }
 
 func TestLogCreationResults_PartialFailure(t *testing.T) {
-	tm := NewTrayManager(newMockRepo())
+	tm := newTestManager(newMockRepo(), &mockProviderFactory{})
 	results := []error{nil, errors.New("fail"), nil}
 
 	err := tm.logCreationResults("test-type", results)
-	// Partial failure logs a warning but does not return an error
 	assert.NoError(t, err)
 }
 
 func TestScaleForDemand_NoScaleNeeded(t *testing.T) {
 	repo := newMockRepo()
 	repo.countResult = 5
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	trayType := &config.TrayType{
 		Name:     "test-type",
@@ -140,7 +189,7 @@ func TestScaleForDemand_NoScaleNeeded(t *testing.T) {
 func TestScaleForDemand_CountError(t *testing.T) {
 	repo := newMockRepo()
 	repo.countErr = errors.New("db error")
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	trayType := &config.TrayType{
 		Name:     "test-type",
@@ -151,29 +200,160 @@ func TestScaleForDemand_CountError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestScaleForDemand_CappedByMaxTrays(t *testing.T) {
+func TestScaleForDemand_ScalesUp(t *testing.T) {
 	repo := newMockRepo()
-	repo.countResult = 8
-	tm := NewTrayManager(repo)
+	repo.countResult = 2
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
 	trayType := &config.TrayType{
 		Name:     "test-type",
+		Provider: "docker",
 		MaxTrays: 10,
 	}
 
-	// desired=20, active=8, max=10 → would create min(20-8, 10-8)=2
-	// But CreateTray needs a provider, so this will error.
-	// We're testing that ScaleForDemand attempts creation (doesn't short-circuit).
+	err := tm.ScaleForDemand(context.Background(), trayType, 5)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, prov.runCalls)
+}
+
+func TestScaleForDemand_CappedByMaxTrays(t *testing.T) {
+	repo := newMockRepo()
+	repo.countResult = 8
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{
+		Name:     "test-type",
+		Provider: "docker",
+		MaxTrays: 10,
+	}
+
+	// desired=20, active=8, max=10 → creates min(20-8, 10-8)=2
 	err := tm.ScaleForDemand(context.Background(), trayType, 20)
-	// Will error because no provider is configured, but that's expected —
-	// the important thing is it didn't return nil (i.e., it tried to scale)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, prov.runCalls)
+}
+
+func TestCreateTray_Success(t *testing.T) {
+	repo := newMockRepo()
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{
+		Name:      "test-type",
+		Provider:  "docker",
+		GitHubOrg: "test-org",
+	}
+
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, prov.runCalls)
+	assert.Equal(t, 1, len(repo.trays))
+}
+
+func TestCreateTray_ProviderError(t *testing.T) {
+	repo := newMockRepo()
+	prov := &mockProvider{name: "docker", runErr: errors.New("docker failed")}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{
+		Name:      "test-type",
+		Provider:  "docker",
+		GitHubOrg: "test-org",
+	}
+
+	err := tm.CreateTray(context.Background(), trayType)
 	assert.Error(t, err)
+	assert.Equal(t, 0, len(repo.trays))
+}
+
+func TestCreateTray_SaveError_CleansUp(t *testing.T) {
+	repo := newMockRepo()
+	repo.saveErr = errors.New("db error")
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{
+		Name:      "test-type",
+		Provider:  "docker",
+		GitHubOrg: "test-org",
+	}
+
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.Error(t, err)
+	// Provider should have been called to clean up after save failure
+	assert.Equal(t, 1, len(prov.cleaned))
+}
+
+func TestCreateTray_FactoryError(t *testing.T) {
+	repo := newMockRepo()
+	factory := &mockProviderFactory{getErr: errors.New("no provider")}
+	tm := newTestManager(repo, factory)
+
+	trayType := &config.TrayType{
+		Name:      "test-type",
+		Provider:  "docker",
+		GitHubOrg: "test-org",
+	}
+
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get provider")
+}
+
+func TestDeleteTray_Success(t *testing.T) {
+	repo := newMockRepo()
+	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type", ProviderName: "docker"}
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.NoError(t, err)
+	assert.NotNil(t, tray)
+	assert.Equal(t, 1, len(prov.cleaned))
+	assert.Equal(t, 0, len(repo.trays))
+}
+
+func TestDeleteTray_NotFound(t *testing.T) {
+	repo := newMockRepo()
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	tray, err := tm.DeleteTray(context.Background(), "nonexistent")
+	assert.NoError(t, err)
+	assert.Nil(t, tray)
+	assert.Equal(t, 0, len(prov.cleaned))
+}
+
+func TestDeleteTray_ProviderCleanError(t *testing.T) {
+	repo := newMockRepo()
+	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
+	prov := &mockProvider{name: "docker", cleanErr: errors.New("clean failed")}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.Error(t, err)
+	assert.Nil(t, tray)
+	// Tray should still be in repo (not deleted) since provider clean failed
+	assert.Equal(t, 1, len(repo.trays))
+}
+
+func TestDeleteTray_FactoryError(t *testing.T) {
+	repo := newMockRepo()
+	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
+	factory := &mockProviderFactory{forTrayErr: errors.New("no provider")}
+	tm := newTestManager(repo, factory)
+
+	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.Error(t, err)
+	assert.Nil(t, tray)
 }
 
 func TestGetTrayById_Found(t *testing.T) {
 	repo := newMockRepo()
 	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test"}
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.GetTrayById(context.Background(), "tray-1")
 	assert.NoError(t, err)
@@ -183,7 +363,7 @@ func TestGetTrayById_Found(t *testing.T) {
 
 func TestGetTrayById_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.GetTrayById(context.Background(), "nonexistent")
 	assert.NoError(t, err)
@@ -193,7 +373,7 @@ func TestGetTrayById_NotFound(t *testing.T) {
 func TestGetTrayById_Error(t *testing.T) {
 	repo := newMockRepo()
 	repo.getErr = errors.New("db error")
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.GetTrayById(context.Background(), "tray-1")
 	assert.Error(t, err)
@@ -203,7 +383,7 @@ func TestGetTrayById_Error(t *testing.T) {
 func TestRegistering(t *testing.T) {
 	repo := newMockRepo()
 	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusCreating}
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.Registering(context.Background(), "tray-1")
 	assert.NoError(t, err)
@@ -212,7 +392,7 @@ func TestRegistering(t *testing.T) {
 
 func TestRegistering_NotFound(t *testing.T) {
 	repo := newMockRepo()
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.Registering(context.Background(), "nonexistent")
 	assert.Error(t, err)
@@ -222,7 +402,7 @@ func TestRegistering_NotFound(t *testing.T) {
 func TestRegistered(t *testing.T) {
 	repo := newMockRepo()
 	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRegistering}
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.Registered(context.Background(), "tray-1", 42)
 	assert.NoError(t, err)
@@ -233,7 +413,7 @@ func TestRegistered(t *testing.T) {
 func TestSetJob(t *testing.T) {
 	repo := newMockRepo()
 	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRegistered}
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	tray, err := tm.SetJob(context.Background(), "tray-1", 100, 200, "org/repo")
 	assert.NoError(t, err)
@@ -246,7 +426,7 @@ func TestSetJob(t *testing.T) {
 func TestCountTrays(t *testing.T) {
 	repo := newMockRepo()
 	repo.countResult = 7
-	tm := NewTrayManager(repo)
+	tm := newTestManager(repo, &mockProviderFactory{})
 
 	count, err := tm.CountTrays(context.Background(), "test-type")
 	assert.NoError(t, err)

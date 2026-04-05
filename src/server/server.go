@@ -7,6 +7,7 @@ import (
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trayManager"
+	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
@@ -59,7 +60,7 @@ func Start() {
 	// Initialize tray manager and repository
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
-	tm := trayManager.NewTrayManager(trayRepository)
+	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
 
 	// Initialize restarter
 	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()

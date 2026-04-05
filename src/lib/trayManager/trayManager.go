@@ -15,12 +15,14 @@ import (
 )
 
 type TrayManager struct {
-	trayRepository repositories.ITrayRepository
+	trayRepository  repositories.ITrayRepository
+	providerFactory providers.ITrayProviderFactory
 }
 
-func NewTrayManager(trayRepository repositories.ITrayRepository) *TrayManager {
+func NewTrayManager(trayRepository repositories.ITrayRepository, providerFactory providers.ITrayProviderFactory) *TrayManager {
 	return &TrayManager{
-		trayRepository: trayRepository,
+		trayRepository:  trayRepository,
+		providerFactory: providerFactory,
 	}
 }
 
@@ -80,7 +82,7 @@ func (tm *TrayManager) logCreationResults(trayTypeName string, results []error) 
 }
 
 func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType) error {
-	provider, err := providers.GetProvider(trayType.Provider)
+	provider, err := tm.providerFactory.GetProvider(trayType.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to get provider for type %s: %w", trayType.Name, err)
 	}
@@ -161,7 +163,7 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 		return nil, nil
 	}
 
-	provider, err := providers.GetProviderForTray(tray)
+	provider, err := tm.providerFactory.GetProviderForTray(tray)
 	if err != nil {
 		return nil, err
 	}

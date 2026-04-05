@@ -18,6 +18,17 @@ var logger = log.WithFields(log.Fields{
 	"name": "trayProviderFactory",
 })
 
+// DefaultFactory is the standard provider factory backed by config.
+type DefaultFactory struct{}
+
+func (DefaultFactory) GetProvider(providerName string) (ITrayProvider, error) {
+	return GetProvider(providerName)
+}
+
+func (DefaultFactory) GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
+	return GetProviderForTray(tray)
+}
+
 func GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
 	return GetProviderByTrayTypeName(tray.TrayTypeName)
 }

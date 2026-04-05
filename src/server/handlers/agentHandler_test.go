@@ -7,6 +7,7 @@ import (
 	restarterRepo "cattery/lib/restarter/repositories"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trays"
+	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"cattery/lib/trayManager"
 	"context"
@@ -83,6 +84,23 @@ func (m *mockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*tr
 // Verify interface compliance
 var _ repositories.ITrayRepository = (*mockTrayRepository)(nil)
 
+// --- Mock provider factory ---
+
+type mockProvider struct{}
+
+func (m *mockProvider) GetProviderName() string           { return "mock" }
+func (m *mockProvider) RunTray(_ *trays.Tray) error       { return nil }
+func (m *mockProvider) CleanTray(_ *trays.Tray) error     { return nil }
+
+type mockProviderFactory struct{}
+
+func (m *mockProviderFactory) GetProvider(_ string) (providers.ITrayProvider, error) {
+	return &mockProvider{}, nil
+}
+func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.ITrayProvider, error) {
+	return &mockProvider{}, nil
+}
+
 // --- Mock restarter repository ---
 
 type mockRestarterRepository struct {
@@ -117,7 +135,7 @@ var _ restarterRepo.IRestarterRepository = (*mockRestarterRepository)(nil)
 
 func setupHandlers(repo *mockTrayRepository) *Handlers {
 	return &Handlers{
-		TrayManager:     trayManager.NewTrayManager(repo),
+		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
 		ScaleSetManager: scaleSetPoller.NewManager(),
 	}
@@ -125,7 +143,7 @@ func setupHandlers(repo *mockTrayRepository) *Handlers {
 
 func setupHandlersWithRestarter(repo *mockTrayRepository, restarterRepo *mockRestarterRepository) *Handlers {
 	return &Handlers{
-		TrayManager:     trayManager.NewTrayManager(repo),
+		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(restarterRepo),
 		ScaleSetManager: scaleSetPoller.NewManager(),
 	}
