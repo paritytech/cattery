@@ -7,9 +7,9 @@ import (
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
 	"cattery/lib/scaleSetPoller"
+	"cattery/lib/testutil"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
-	"cattery/lib/trays/repositories"
 	"cattery/lib/trayManager"
 	"context"
 	"encoding/json"
@@ -22,76 +22,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// --- Mock tray repository ---
-
-type mockTrayRepository struct {
-	trays     map[string]*trays.Tray
-	saveErr   error
-	getErr    error
-	updateErr error
-	deleteErr error
-}
-
-func newMockTrayRepo() *mockTrayRepository {
-	return &mockTrayRepository{
-		trays: make(map[string]*trays.Tray),
-	}
-}
-
-func (m *mockTrayRepository) GetById(_ context.Context, trayId string) (*trays.Tray, error) {
-	if m.getErr != nil {
-		return nil, m.getErr
-	}
-	return m.trays[trayId], nil
-}
-
-func (m *mockTrayRepository) Save(_ context.Context, tray *trays.Tray) error {
-	if m.saveErr != nil {
-		return m.saveErr
-	}
-	m.trays[tray.Id] = tray
-	return nil
-}
-
-func (m *mockTrayRepository) Delete(_ context.Context, trayId string) error {
-	if m.deleteErr != nil {
-		return m.deleteErr
-	}
-	delete(m.trays, trayId)
-	return nil
-}
-
-func (m *mockTrayRepository) UpdateStatus(_ context.Context, trayId string, status trays.TrayStatus, _ int64, _ int64, _ int64, _ string) (*trays.Tray, error) {
-	if m.updateErr != nil {
-		return nil, m.updateErr
-	}
-	tray, ok := m.trays[trayId]
-	if !ok {
-		return nil, nil
-	}
-	tray.Status = status
-	tray.StatusChanged = time.Now()
-	return tray, nil
-}
-
-func (m *mockTrayRepository) CountActive(_ context.Context, _ string) (int, error) {
-	return len(m.trays), nil
-}
-
-func (m *mockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*trays.Tray, error) {
-	return nil, nil
-}
-
-// Verify interface compliance
-var _ repositories.TrayRepository = (*mockTrayRepository)(nil)
-
 // --- Mock provider factory ---
 
 type mockProvider struct{}
 
-func (m *mockProvider) GetProviderName() string           { return "mock" }
-func (m *mockProvider) RunTray(_ *trays.Tray) error       { return nil }
-func (m *mockProvider) CleanTray(_ *trays.Tray) error     { return nil }
+func (m *mockProvider) GetProviderName() string       { return "mock" }
+func (m *mockProvider) RunTray(_ *trays.Tray) error   { return nil }
+func (m *mockProvider) CleanTray(_ *trays.Tray) error { return nil }
 
 type mockProviderFactory struct{}
 
@@ -134,7 +71,7 @@ var _ restarterRepo.RestarterRepository = (*mockRestarterRepository)(nil)
 
 // --- Helper to create test handlers ---
 
-func setupHandlers(repo *mockTrayRepository) *Handlers {
+func setupHandlers(repo *testutil.MockTrayRepository) *Handlers {
 	return &Handlers{
 		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
@@ -142,7 +79,7 @@ func setupHandlers(repo *mockTrayRepository) *Handlers {
 	}
 }
 
-func setupHandlersWithRestarter(repo *mockTrayRepository, restarterRepo *mockRestarterRepository) *Handlers {
+func setupHandlersWithRestarter(repo *testutil.MockTrayRepository, restarterRepo *mockRestarterRepository) *Handlers {
 	return &Handlers{
 		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(restarterRepo),
@@ -153,7 +90,7 @@ func setupHandlersWithRestarter(repo *mockTrayRepository, restarterRepo *mockRes
 // --- AgentPing tests ---
 
 func TestAgentPing_TrayNotFound(t *testing.T) {
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -168,8 +105,8 @@ func TestAgentPing_TrayNotFound(t *testing.T) {
 }
 
 func TestAgentPing_TrayRunning(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
 		Id:            "tray-1",
 		Status:        trays.TrayStatusRunning,
 		StatusChanged: time.Now(),
@@ -192,11 +129,11 @@ func TestAgentPing_TrayRunning(t *testing.T) {
 }
 
 func TestAgentPing_StaleNonRunningTray(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
 		Id:            "tray-1",
 		Status:        trays.TrayStatusRegistered,
-		StatusChanged: time.Now().Add(-5 * time.Minute), // stale
+		StatusChanged: time.Now().Add(-5 * time.Minute),
 	}
 	h := setupHandlers(repo)
 
@@ -217,11 +154,11 @@ func TestAgentPing_StaleNonRunningTray(t *testing.T) {
 }
 
 func TestAgentPing_RecentNonRunningTray(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
 		Id:            "tray-1",
 		Status:        trays.TrayStatusRegistered,
-		StatusChanged: time.Now(), // just changed
+		StatusChanged: time.Now(),
 	}
 	h := setupHandlers(repo)
 
@@ -243,7 +180,7 @@ func TestAgentPing_RecentNonRunningTray(t *testing.T) {
 // --- AgentUnregister tests ---
 
 func TestAgentUnregister_TrayNotFound(t *testing.T) {
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -257,8 +194,8 @@ func TestAgentUnregister_TrayNotFound(t *testing.T) {
 }
 
 func TestAgentUnregister_InvalidBody(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -274,7 +211,7 @@ func TestAgentUnregister_InvalidBody(t *testing.T) {
 // --- AgentInterrupt tests ---
 
 func TestAgentInterrupt_TrayNotFound(t *testing.T) {
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -288,15 +225,15 @@ func TestAgentInterrupt_TrayNotFound(t *testing.T) {
 }
 
 func TestAgentInterrupt_Success(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
 		Id:            "tray-1",
 		WorkflowRunId: 123,
 		GitHubOrgName: "test-org",
 		Repository:    "test-org/repo",
 	}
-	restarterRepo := &mockRestarterRepository{}
-	h := setupHandlersWithRestarter(repo, restarterRepo)
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /agent/{id}/interrupt", h.AgentInterrupt)
@@ -306,8 +243,8 @@ func TestAgentInterrupt_Success(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Len(t, restarterRepo.requests, 1)
-	assert.Equal(t, int64(123), restarterRepo.requests[0].WorkflowRunId)
+	assert.Len(t, restarterRepository.requests, 1)
+	assert.Equal(t, int64(123), restarterRepository.requests[0].WorkflowRunId)
 }
 
 // --- writeResponse tests ---
@@ -331,7 +268,7 @@ func TestWriteResponse(t *testing.T) {
 // --- AgentRegister tests ---
 
 func TestAgentRegister_UnknownTray(t *testing.T) {
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -348,8 +285,8 @@ func TestAgentRegister_UnknownTray(t *testing.T) {
 // --- authenticateAgent tests ---
 
 func TestAuthenticateAgent_NoSecretAndTrayExists(t *testing.T) {
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1"}
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1"}
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -363,7 +300,7 @@ func TestAuthenticateAgent_NoSecretAndTrayExists(t *testing.T) {
 }
 
 func TestAuthenticateAgent_NoSecretAndTrayMissing(t *testing.T) {
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -381,8 +318,8 @@ func TestAuthenticateAgent_ValidTokenAndTrayExists(t *testing.T) {
 		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
 	})
 
-	repo := newMockTrayRepo()
-	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -401,7 +338,7 @@ func TestAuthenticateAgent_MissingHeader(t *testing.T) {
 		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
 	})
 
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
@@ -419,7 +356,7 @@ func TestAuthenticateAgent_WrongSecret(t *testing.T) {
 		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
 	})
 
-	repo := newMockTrayRepo()
+	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()

@@ -26,7 +26,8 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Tracef("AgentRegister: %v", r)
 
-	if code, errMsg := h.authenticateAgent(r); code != 0 {
+	_, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
 		logger.Warn(errMsg)
 		http.Error(responseWriter, errMsg, code)
 		return
@@ -105,22 +106,22 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 }
 
 // authenticateAgent checks the optional Bearer token and verifies the tray exists.
-// Returns (statusCode, errorMessage). statusCode 0 means success.
-func (h *Handlers) authenticateAgent(r *http.Request) (int, string) {
+// Returns the tray on success, or (nil, statusCode, errorMessage) on failure.
+func (h *Handlers) authenticateAgent(r *http.Request) (*trays.Tray, int, string) {
 	secret := config.Get().Server.AgentSecret
 	if secret != "" {
 		header := r.Header.Get("Authorization")
 		if header == "" {
-			return http.StatusUnauthorized, "missing Authorization header"
+			return nil, http.StatusUnauthorized, "missing Authorization header"
 		}
 
 		const prefix = "Bearer "
 		if len(header) < len(prefix) || header[:len(prefix)] != prefix {
-			return http.StatusUnauthorized, "invalid Authorization header format"
+			return nil, http.StatusUnauthorized, "invalid Authorization header format"
 		}
 
 		if header[len(prefix):] != secret {
-			return http.StatusUnauthorized, "invalid agent secret"
+			return nil, http.StatusUnauthorized, "invalid agent secret"
 		}
 	}
 
@@ -128,14 +129,15 @@ func (h *Handlers) authenticateAgent(r *http.Request) (int, string) {
 	if agentId != "" {
 		tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
 		if err != nil {
-			return http.StatusInternalServerError, "failed to look up agent"
+			return nil, http.StatusInternalServerError, "failed to look up agent"
 		}
 		if tray == nil {
-			return http.StatusNotFound, "unknown agent"
+			return nil, http.StatusNotFound, "unknown agent"
 		}
+		return tray, 0, ""
 	}
 
-	return 0, ""
+	return nil, 0, ""
 }
 
 // AgentUnregister is a handler for agent unregister requests
@@ -147,32 +149,18 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("AgentUnregister: %v", r)
 
-	if code, errMsg := h.authenticateAgent(r); code != 0 {
+	tray, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
 		logger.Warn(errMsg)
 		http.Error(responseWriter, errMsg, code)
 		return
 	}
 
-	trayId := r.PathValue("id")
-
-	tray, err := h.TrayManager.GetTrayById(r.Context(), trayId)
-	if err != nil {
-		errMsg := fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-	if tray == nil {
-		http.Error(responseWriter, "tray not found", http.StatusNotFound)
-		return
-	}
-
 	unregisterRequest := messages.UnregisterRequest{}
-	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
-	if err != nil {
-		errMsg := fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&unregisterRequest); err != nil {
+		decodeErr := fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", tray.Id, err)
+		logger.Error(decodeErr)
+		http.Error(responseWriter, decodeErr, http.StatusBadRequest)
 		return
 	}
 
@@ -182,10 +170,10 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("Agent unregister request")
 
-	_, err = h.TrayManager.DeleteTray(r.Context(), tray.Id)
+	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
-	if err != nil {
-		logger.Errorf("Failed to delete tray: %v", err)
+	if deleteErr != nil {
+		logger.Errorf("Failed to delete tray: %v", deleteErr)
 		http.Error(responseWriter, "Failed to delete tray", http.StatusInternalServerError)
 		return
 	}
@@ -219,35 +207,16 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 
 	logger.Tracef("AgentPing: %v", r)
 
-	if code, errMsg := h.authenticateAgent(r); code != 0 {
-		logger.Warn(errMsg)
-		http.Error(responseWriter, errMsg, code)
+	tray, code, authErr := h.authenticateAgent(r)
+	if code != 0 {
+		logger.Warn(authErr)
+		http.Error(responseWriter, authErr, code)
 		return
 	}
-
-	agentId := r.PathValue("id")
 
 	pingResponse := &messages.PingResponse{
 		Terminate: false,
 		Message:   "",
-	}
-
-	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
-	if err != nil {
-		errMsg := fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
-		logger.Error(errMsg)
-
-		pingResponse.Message = errMsg
-		pingResponse.Terminate = true
-		writeResponse(responseWriter, pingResponse, logger)
-
-		return
-	}
-	if tray == nil {
-		pingResponse.Message = fmt.Sprintf("Tray '%s' not found", agentId)
-		pingResponse.Terminate = true
-		writeResponse(responseWriter, pingResponse, logger)
-		return
 	}
 
 	if tray.Status == trays.TrayStatusRunning {
@@ -285,31 +254,19 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 
 	logger.Tracef("AgentRestart: %v", r)
 
-	if code, errMsg := h.authenticateAgent(r); code != 0 {
+	tray, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
 		logger.Warn(errMsg)
 		http.Error(responseWriter, errMsg, code)
 		return
 	}
 
-	agentId := r.PathValue("id")
-
 	logger = logger.WithFields(log.Fields{
-		"agentId": agentId,
+		"agentId": tray.Id,
 	})
 
-	logger.Debug("Agent restart request with id " + agentId)
+	logger.Debug("Agent restart request with id " + tray.Id)
 
-	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
-	if err != nil {
-		errMsg := fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-	if tray == nil {
-		http.Error(responseWriter, "tray not found", http.StatusNotFound)
-		return
-	}
 	workflowRunId := tray.WorkflowRunId
 	if err := h.RestartManager.RequestRestart(r.Context(), workflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
 		logger.Errorf("Failed to request restart for workflow %d: %v", workflowRunId, err)

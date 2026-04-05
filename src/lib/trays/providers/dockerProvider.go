@@ -11,7 +11,6 @@ import (
 )
 
 type DockerProvider struct {
-	TrayProvider
 	name   string
 	config config.ProviderConfig
 

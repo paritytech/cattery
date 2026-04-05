@@ -17,7 +17,6 @@ import (
 )
 
 type GceProvider struct {
-	TrayProvider
 	Name           string
 	providerConfig config.ProviderConfig
 
