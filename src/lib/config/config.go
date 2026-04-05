@@ -30,6 +30,7 @@ func Set(cfg *CatteryConfig) {
 
 // SetForTest sets the config for the duration of a test and restores it on cleanup.
 func SetForTest(t *testing.T, cfg *CatteryConfig) {
+	cfg.InitMaps()
 	old := Get()
 	Set(cfg)
 	t.Cleanup(func() { Set(old) })
@@ -46,6 +47,23 @@ type CatteryConfig struct {
 	githubMap    map[string]*GitHubOrganization
 	providerMap  map[string]*ProviderConfig
 	trayTypesMap map[string]*TrayType
+}
+
+// InitMaps builds the internal lookup maps from the slice fields.
+// Called automatically by LoadConfig; call manually when constructing CatteryConfig in tests.
+func (c *CatteryConfig) InitMaps() {
+	c.githubMap = make(map[string]*GitHubOrganization)
+	for _, org := range c.Github {
+		c.githubMap[org.Name] = org
+	}
+	c.providerMap = make(map[string]*ProviderConfig)
+	for _, p := range c.Providers {
+		c.providerMap[p.Get("name")] = p
+	}
+	c.trayTypesMap = make(map[string]*TrayType)
+	for _, tt := range c.TrayTypes {
+		c.trayTypesMap[tt.Name] = tt
+	}
 }
 
 func LoadConfig(configPath *string) (*CatteryConfig, error) {
