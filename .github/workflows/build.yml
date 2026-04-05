@@ -35,7 +35,10 @@ jobs:
           mongodb-port: 27017
 
       - name: run tests
-        run: go test -C src ./...
+        run: go test -C src -tags=integration -coverprofile=coverage.out ./...
+
+      - name: show coverage
+        run: go tool cover -func=src/coverage.out
 
   release:
     needs: [tests]
