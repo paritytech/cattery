@@ -19,9 +19,9 @@ func NewWorkflowRestarter(repository repositories.IRestarterRepository) *Workflo
 	}
 }
 
-func (wr *WorkflowRestarter) RequestRestart(workflowRunId int64, orgName string, repoName string) error {
+func (wr *WorkflowRestarter) RequestRestart(ctx context.Context, workflowRunId int64, orgName string, repoName string) error {
 	log.Debugf("Requesting restart for workflow run id %d (%s/%s)", workflowRunId, orgName, repoName)
-	return wr.repository.SaveRestartRequest(context.Background(), workflowRunId, orgName, repoName)
+	return wr.repository.SaveRestartRequest(ctx, workflowRunId, orgName, repoName)
 }
 
 // StartPoller starts a background goroutine that periodically checks pending restart

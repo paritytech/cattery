@@ -136,6 +136,7 @@ func (c *CatteryConfig) GetTrayType(name string) *TrayType {
 type ServerConfig struct {
 	ListenAddress string `yaml:"listenAddress" validate:"required"`
 	AdvertiseUrl  string `yaml:"advertiseUrl" validate:"required"`
+	AgentSecret   string `yaml:"agentSecret"`
 }
 
 type DatabaseConfig struct {

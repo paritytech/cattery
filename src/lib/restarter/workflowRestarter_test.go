@@ -57,7 +57,7 @@ func TestRequestRestart(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	wr := NewWorkflowRestarter(repo)
 
-	err := wr.RequestRestart(123, "test-org", "test-org/repo")
+	err := wr.RequestRestart(context.Background(), 123, "test-org", "test-org/repo")
 	assert.NoError(t, err)
 	assert.Len(t, repo.requests, 1)
 	assert.Equal(t, int64(123), repo.requests[0].WorkflowRunId)
@@ -69,7 +69,7 @@ func TestRequestRestart_Error(t *testing.T) {
 	repo := &mockRestarterRepository{saveErr: errors.New("db error")}
 	wr := NewWorkflowRestarter(repo)
 
-	err := wr.RequestRestart(123, "test-org", "test-org/repo")
+	err := wr.RequestRestart(context.Background(), 123, "test-org", "test-org/repo")
 	assert.Error(t, err)
 }
 

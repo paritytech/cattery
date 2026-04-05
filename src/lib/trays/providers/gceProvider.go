@@ -75,6 +75,10 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		extraMetadata,
 	)
 
+	if len(zones) == 0 {
+		return fmt.Errorf("no zones configured for tray %s", tray.Id)
+	}
+
 	var zone = zones[rand.Intn(len(zones))]
 
 	op, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
@@ -153,11 +157,12 @@ func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) 
 		instancesClient, err = compute.NewInstancesRESTClient(ctx)
 	}
 
-	if err == nil {
-		g.instanceClient = instancesClient
+	if err != nil {
+		return nil, err
 	}
 
-	return instancesClient, err
+	g.instanceClient = instancesClient
+	return instancesClient, nil
 }
 
 func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {

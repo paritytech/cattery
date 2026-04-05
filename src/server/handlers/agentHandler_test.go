@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"cattery/lib/config"
 	"cattery/lib/messages"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
@@ -162,13 +163,8 @@ func TestAgentPing_TrayNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp messages.PingResponse
-	err := json.NewDecoder(w.Body).Decode(&resp)
-	assert.NoError(t, err)
-	assert.True(t, resp.Terminate)
-	assert.Contains(t, resp.Message, "not found")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "unknown agent")
 }
 
 func TestAgentPing_TrayRunning(t *testing.T) {
@@ -288,7 +284,7 @@ func TestAgentInterrupt_TrayNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusGone, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestAgentInterrupt_Success(t *testing.T) {
@@ -330,4 +326,109 @@ func TestWriteResponse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, decoded.Terminate)
 	assert.Equal(t, "ok", decoded.Message)
+}
+
+// --- AgentRegister tests ---
+
+func TestAgentRegister_UnknownTray(t *testing.T) {
+	repo := newMockTrayRepo()
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
+
+	req := httptest.NewRequest("GET", "/agent/register/nonexistent", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "unknown agent")
+}
+
+// --- authenticateAgent tests ---
+
+func TestAuthenticateAgent_NoSecretAndTrayExists(t *testing.T) {
+	repo := newMockTrayRepo()
+	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1"}
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAuthenticateAgent_NoSecretAndTrayMissing(t *testing.T) {
+	repo := newMockTrayRepo()
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/nonexistent/ping", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestAuthenticateAgent_ValidTokenAndTrayExists(t *testing.T) {
+	original := config.AppConfig.Server.AgentSecret
+	config.AppConfig.Server.AgentSecret = "test-secret-123"
+	defer func() { config.AppConfig.Server.AgentSecret = original }()
+
+	repo := newMockTrayRepo()
+	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	req.Header.Set("Authorization", "Bearer test-secret-123")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAuthenticateAgent_MissingHeader(t *testing.T) {
+	original := config.AppConfig.Server.AgentSecret
+	config.AppConfig.Server.AgentSecret = "test-secret-123"
+	defer func() { config.AppConfig.Server.AgentSecret = original }()
+
+	repo := newMockTrayRepo()
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestAuthenticateAgent_WrongSecret(t *testing.T) {
+	original := config.AppConfig.Server.AgentSecret
+	config.AppConfig.Server.AgentSecret = "test-secret-123"
+	defer func() { config.AppConfig.Server.AgentSecret = original }()
+
+	repo := newMockTrayRepo()
+	h := setupHandlers(repo)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	req.Header.Set("Authorization", "Bearer wrong-secret")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
