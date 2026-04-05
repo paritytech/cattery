@@ -83,7 +83,7 @@ func (m *mockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*tr
 }
 
 // Verify interface compliance
-var _ repositories.ITrayRepository = (*mockTrayRepository)(nil)
+var _ repositories.TrayRepository = (*mockTrayRepository)(nil)
 
 // --- Mock provider factory ---
 
@@ -95,10 +95,10 @@ func (m *mockProvider) CleanTray(_ *trays.Tray) error     { return nil }
 
 type mockProviderFactory struct{}
 
-func (m *mockProviderFactory) GetProvider(_ string) (providers.ITrayProvider, error) {
+func (m *mockProviderFactory) GetProvider(_ string) (providers.TrayProvider, error) {
 	return &mockProvider{}, nil
 }
-func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.ITrayProvider, error) {
+func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.TrayProvider, error) {
 	return &mockProvider{}, nil
 }
 
@@ -130,7 +130,7 @@ func (m *mockRestarterRepository) GetAllPendingRestartRequests(_ context.Context
 	return m.requests, nil
 }
 
-var _ restarterRepo.IRestarterRepository = (*mockRestarterRepository)(nil)
+var _ restarterRepo.RestarterRepository = (*mockRestarterRepository)(nil)
 
 // --- Helper to create test handlers ---
 

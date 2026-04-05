@@ -10,10 +10,10 @@ import (
 )
 
 type WorkflowRestarter struct {
-	repository repositories.IRestarterRepository
+	repository repositories.RestarterRepository
 }
 
-func NewWorkflowRestarter(repository repositories.IRestarterRepository) *WorkflowRestarter {
+func NewWorkflowRestarter(repository repositories.RestarterRepository) *WorkflowRestarter {
 	return &WorkflowRestarter{
 		repository: repository,
 	}

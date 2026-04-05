@@ -83,9 +83,9 @@ func Start() {
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
 
-		ssm.Wg.Add(1)
+		ssm.Add(1)
 		go func(p *scaleSetPoller.Poller, name string) {
-			defer ssm.Wg.Done()
+			defer ssm.Done()
 			for {
 				if err := p.Run(ctx); err != nil {
 					if ctx.Err() != nil {
@@ -146,6 +146,13 @@ func Start() {
 	cancel()
 
 	logger.Info("Waiting for pollers to shut down...")
-	ssm.Wg.Wait()
+	ssm.Wait()
 	logger.Info("All pollers stopped")
+
+	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer disconnectCancel()
+	if err := client.Disconnect(disconnectCtx); err != nil {
+		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
+	}
+	logger.Info("MongoDB connection closed")
 }

@@ -15,11 +15,11 @@ import (
 )
 
 type TrayManager struct {
-	trayRepository  repositories.ITrayRepository
-	providerFactory providers.ITrayProviderFactory
+	trayRepository  repositories.TrayRepository
+	providerFactory providers.TrayProviderFactory
 }
 
-func NewTrayManager(trayRepository repositories.ITrayRepository, providerFactory providers.ITrayProviderFactory) *TrayManager {
+func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory) *TrayManager {
 	return &TrayManager{
 		trayRepository:  trayRepository,
 		providerFactory: providerFactory,

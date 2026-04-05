@@ -49,7 +49,7 @@ func (m *mockRestarterRepository) GetAllPendingRestartRequests(_ context.Context
 	return m.requests, nil
 }
 
-var _ repositories.IRestarterRepository = (*mockRestarterRepository)(nil)
+var _ repositories.RestarterRepository = (*mockRestarterRepository)(nil)
 
 // --- Tests ---
 

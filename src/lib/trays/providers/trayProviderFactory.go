@@ -11,7 +11,7 @@ import (
 
 var (
 	providersMu sync.RWMutex
-	providers   = make(map[string]ITrayProvider)
+	providers   = make(map[string]TrayProvider)
 )
 
 var logger = log.WithFields(log.Fields{
@@ -21,19 +21,19 @@ var logger = log.WithFields(log.Fields{
 // DefaultFactory is the standard provider factory backed by config.
 type DefaultFactory struct{}
 
-func (DefaultFactory) GetProvider(providerName string) (ITrayProvider, error) {
+func (DefaultFactory) GetProvider(providerName string) (TrayProvider, error) {
 	return GetProvider(providerName)
 }
 
-func (DefaultFactory) GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
+func (DefaultFactory) GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
 	return GetProviderForTray(tray)
 }
 
-func GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
+func GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
 	return GetProviderByTrayTypeName(tray.TrayTypeName)
 }
 
-func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
+func GetProviderByTrayTypeName(trayTypeName string) (TrayProvider, error) {
 	var trayType = config.AppConfig.GetTrayType(trayTypeName)
 
 	if trayType == nil {
@@ -43,7 +43,7 @@ func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
 	return GetProvider(trayType.Provider)
 }
 
-func GetProvider(providerName string) (ITrayProvider, error) {
+func GetProvider(providerName string) (TrayProvider, error) {
 	providersMu.RLock()
 	if existingProvider, ok := providers[providerName]; ok {
 		providersMu.RUnlock()
@@ -51,7 +51,7 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 	}
 	providersMu.RUnlock()
 
-	var result ITrayProvider
+	var result TrayProvider
 
 	var p = config.AppConfig.GetProvider(providerName)
 

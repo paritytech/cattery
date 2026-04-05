@@ -122,14 +122,14 @@ type mockProviderFactory struct {
 	forTrayErr error
 }
 
-func (m *mockProviderFactory) GetProvider(_ string) (providers.ITrayProvider, error) {
+func (m *mockProviderFactory) GetProvider(_ string) (providers.TrayProvider, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
 	return m.provider, nil
 }
 
-func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.ITrayProvider, error) {
+func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.TrayProvider, error) {
 	if m.forTrayErr != nil {
 		return nil, m.forTrayErr
 	}

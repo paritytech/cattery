@@ -11,7 +11,7 @@ import (
 )
 
 type DockerProvider struct {
-	ITrayProvider
+	TrayProvider
 	name   string
 	config config.ProviderConfig
 
@@ -19,18 +19,15 @@ type DockerProvider struct {
 }
 
 func NewDockerProvider(name string, providerConfig config.ProviderConfig) *DockerProvider {
-	var provider = &DockerProvider{}
-
-	provider.name = name
-	provider.config = providerConfig
-
-	provider.logger = log.WithFields(log.Fields{
-		"name":         "DockerProvider",
-		"providerName": name,
-		"providerType": "docker",
-	})
-
-	return provider
+	return &DockerProvider{
+		name:   name,
+		config: providerConfig,
+		logger: log.WithFields(log.Fields{
+			"name":         "DockerProvider",
+			"providerName": name,
+			"providerType": "docker",
+		}),
+	}
 }
 
 func (d *DockerProvider) GetProviderName() string {
@@ -39,18 +36,17 @@ func (d *DockerProvider) GetProviderName() string {
 
 func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 
-	var containerName = tray.Id
+	containerName := tray.Id
 
 	trayConfig, ok := tray.TrayConfig().(config.DockerTrayConfig)
 	if !ok {
 		return fmt.Errorf("unexpected tray config type for docker provider, tray %s", tray.Id)
 	}
 
-	var image = trayConfig.Image
+	image := trayConfig.Image
+	serverUrl := config.AppConfig.Server.AdvertiseUrl
 
-	var serverUrl = config.AppConfig.Server.AdvertiseUrl
-
-	var dockerCommand = exec.Command("docker", "run", "-d", "--rm",
+	dockerCommand := exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
 		"--name", containerName,
 		image,
@@ -68,7 +64,7 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 }
 
 func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
-	var dockerCommand = exec.Command("docker", "container", "stop", tray.Id)
+	dockerCommand := exec.Command("docker", "container", "stop", tray.Id)
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {
 		output := string(dockerCommandOutput)

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type ITrayRepository interface {
+type TrayRepository interface {
 	GetById(ctx context.Context, trayId string) (*trays.Tray, error)
 	Save(ctx context.Context, tray *trays.Tray) error
 	Delete(ctx context.Context, trayId string) error

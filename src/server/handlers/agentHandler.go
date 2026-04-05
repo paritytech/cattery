@@ -19,7 +19,7 @@ import (
 // AgentRegister is a handler for agent registration requests
 func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRegister",
 	})
@@ -32,7 +32,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var agentId = r.PathValue("id")
+	agentId := r.PathValue("id")
 
 	logger = logger.WithFields(log.Fields{
 		"agentId": agentId,
@@ -40,17 +40,17 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Debug("Agent registration request")
 
-	var tray, err = h.TrayManager.Registering(r.Context(), agentId)
+	tray, err := h.TrayManager.Registering(r.Context(), agentId)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
+		errMsg := fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	var trayType = config.AppConfig.GetTrayType(tray.TrayTypeName)
+	trayType := config.AppConfig.GetTrayType(tray.TrayTypeName)
 	if trayType == nil {
-		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
+		errMsg := fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
@@ -61,7 +61,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	poller := h.ScaleSetManager.GetPoller(trayType.Name)
 	if poller == nil {
-		var errMsg = fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
+		errMsg := fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
@@ -74,15 +74,15 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var jitConfig = jitRunnerConfig.EncodedJITConfig
+	jitConfig := jitRunnerConfig.EncodedJITConfig
 
-	var newAgent = agents.Agent{
+	newAgent := agents.Agent{
 		AgentId:  agentId,
 		RunnerId: int64(jitRunnerConfig.Runner.ID),
 		Shutdown: trayType.Shutdown,
 	}
 
-	var registerResponse = messages.RegisterResponse{
+	registerResponse := messages.RegisterResponse{
 		Agent:     newAgent,
 		JitConfig: jitConfig,
 	}
@@ -141,7 +141,7 @@ func (h *Handlers) authenticateAgent(r *http.Request) (int, string) {
 
 // AgentUnregister is a handler for agent unregister requests
 func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentUnregister",
 	})
@@ -154,20 +154,20 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 		return
 	}
 
-	var trayId = r.PathValue("id")
+	trayId := r.PathValue("id")
 
-	var tray, err = h.TrayManager.GetTrayById(r.Context(), trayId)
+	tray, err := h.TrayManager.GetTrayById(r.Context(), trayId)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
+		errMsg := fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	var unregisterRequest messages.UnregisterRequest
+	unregisterRequest := messages.UnregisterRequest{}
 	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
+		errMsg := fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusBadRequest)
 		return
@@ -208,7 +208,7 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentPing",
 	})
@@ -221,16 +221,16 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var agentId = r.PathValue("id")
+	agentId := r.PathValue("id")
 
-	var pingResponse = &messages.PingResponse{
+	pingResponse := &messages.PingResponse{
 		Terminate: false,
 		Message:   "",
 	}
 
 	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
+		errMsg := fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
 
 		pingResponse.Message = errMsg
@@ -246,7 +246,7 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*2 {
-		var errMsg = fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
+		errMsg := fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
 		logger.Error(errMsg)
 
 		pingResponse.Terminate = true
@@ -268,7 +268,7 @@ func writeResponse(responseWriter http.ResponseWriter, pingResponse any, logger 
 }
 
 func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRestart",
 	})
@@ -281,7 +281,7 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var agentId = r.PathValue("id")
+	agentId := r.PathValue("id")
 
 	logger = logger.WithFields(log.Fields{
 		"agentId": agentId,
@@ -291,7 +291,7 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 
 	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
+		errMsg := fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
