@@ -4,13 +4,37 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"testing"
 
 	"github.com/go-playground/validator"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
-var AppConfig = &CatteryConfig{}
+var appConfig atomic.Pointer[CatteryConfig]
+
+func init() {
+	appConfig.Store(&CatteryConfig{})
+}
+
+// Get returns the current config snapshot.
+func Get() *CatteryConfig {
+	return appConfig.Load()
+}
+
+// Set atomically replaces the config. Used by LoadConfig and tests.
+func Set(cfg *CatteryConfig) {
+	appConfig.Store(cfg)
+}
+
+// SetForTest sets the config for the duration of a test and restores it on cleanup.
+func SetForTest(t *testing.T, cfg *CatteryConfig) {
+	old := Get()
+	Set(cfg)
+	t.Cleanup(func() { Set(old) })
+}
+
 
 type CatteryConfig struct {
 	Server    ServerConfig          `yaml:"server" validate:"required"`
@@ -45,28 +69,28 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 		}
 	}
 
-	var appConfig = &CatteryConfig{}
+	cfg := &CatteryConfig{}
 
-	err = viper.Unmarshal(appConfig)
+	err = viper.Unmarshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config file: %w", err)
 	}
 
-	appConfig.githubMap = make(map[string]*GitHubOrganization)
-	for _, organization := range appConfig.Github {
-		appConfig.githubMap[organization.Name] = organization
+	cfg.githubMap = make(map[string]*GitHubOrganization)
+	for _, organization := range cfg.Github {
+		cfg.githubMap[organization.Name] = organization
 	}
 
-	appConfig.providerMap = make(map[string]*ProviderConfig)
-	for _, provider := range appConfig.Providers {
-		appConfig.providerMap[provider.Get("name")] = provider
+	cfg.providerMap = make(map[string]*ProviderConfig)
+	for _, provider := range cfg.Providers {
+		cfg.providerMap[provider.Get("name")] = provider
 	}
 
-	appConfig.trayTypesMap = make(map[string]*TrayType)
-	for _, trayType := range appConfig.TrayTypes {
-		appConfig.trayTypesMap[trayType.Name] = trayType
+	cfg.trayTypesMap = make(map[string]*TrayType)
+	for _, trayType := range cfg.TrayTypes {
+		cfg.trayTypesMap[trayType.Name] = trayType
 
-		var providerConfig, ok = appConfig.providerMap[trayType.Provider]
+		providerConfig, ok := cfg.providerMap[trayType.Provider]
 
 		if !ok {
 			return nil, fmt.Errorf("provider %s for trayType %s not found", trayType.Provider, trayType.Name)
@@ -93,7 +117,7 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	}
 
 	validate := validator.New()
-	err = validate.Struct(appConfig)
+	err = validate.Struct(cfg)
 	if err != nil {
 		// err is of type validator.ValidationErrors
 		for _, fieldErr := range err.(validator.ValidationErrors) {
@@ -101,9 +125,9 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 		}
 	}
 
-	AppConfig = appConfig
+	Set(cfg)
 
-	return appConfig, nil
+	return cfg, nil
 }
 
 // GetGitHubOrg returns the GitHub organization by name

@@ -72,7 +72,7 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 
 	metadata := createGcpMetadata(
 		map[string]string{
-			"cattery-url":      config.AppConfig.Server.AdvertiseUrl,
+			"cattery-url":      config.Get().Server.AdvertiseUrl,
 			"cattery-agent-id": tray.Id,
 		},
 		extraMetadata,

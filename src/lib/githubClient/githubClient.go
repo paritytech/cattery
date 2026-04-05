@@ -25,7 +25,7 @@ type GithubClient struct {
 
 func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 
-	var orgConfig = config.AppConfig.GetGitHubOrg(orgName)
+	var orgConfig = config.Get().GetGitHubOrg(orgName)
 	if orgConfig == nil {
 		return nil, errors.New("GitHub organization not found")
 	}

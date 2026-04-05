@@ -44,7 +44,7 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	}
 
 	image := trayConfig.Image
-	serverUrl := config.AppConfig.Server.AdvertiseUrl
+	serverUrl := config.Get().Server.AdvertiseUrl
 
 	dockerCommand := exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",

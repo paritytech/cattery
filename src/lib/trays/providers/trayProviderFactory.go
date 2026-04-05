@@ -34,7 +34,7 @@ func GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
 }
 
 func GetProviderByTrayTypeName(trayTypeName string) (TrayProvider, error) {
-	var trayType = config.AppConfig.GetTrayType(trayTypeName)
+	var trayType = config.Get().GetTrayType(trayTypeName)
 
 	if trayType == nil {
 		return nil, errors.New("tray type not found: " + trayTypeName)
@@ -53,7 +53,7 @@ func GetProvider(providerName string) (TrayProvider, error) {
 
 	var result TrayProvider
 
-	var p = config.AppConfig.GetProvider(providerName)
+	var p = config.Get().GetProvider(providerName)
 
 	if p == nil {
 		return nil, errors.New("no provider found for " + providerName)

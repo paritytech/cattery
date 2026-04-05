@@ -377,9 +377,9 @@ func TestAuthenticateAgent_NoSecretAndTrayMissing(t *testing.T) {
 }
 
 func TestAuthenticateAgent_ValidTokenAndTrayExists(t *testing.T) {
-	original := config.AppConfig.Server.AgentSecret
-	config.AppConfig.Server.AgentSecret = "test-secret-123"
-	defer func() { config.AppConfig.Server.AgentSecret = original }()
+	config.SetForTest(t, &config.CatteryConfig{
+		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
+	})
 
 	repo := newMockTrayRepo()
 	repo.trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning}
@@ -397,9 +397,9 @@ func TestAuthenticateAgent_ValidTokenAndTrayExists(t *testing.T) {
 }
 
 func TestAuthenticateAgent_MissingHeader(t *testing.T) {
-	original := config.AppConfig.Server.AgentSecret
-	config.AppConfig.Server.AgentSecret = "test-secret-123"
-	defer func() { config.AppConfig.Server.AgentSecret = original }()
+	config.SetForTest(t, &config.CatteryConfig{
+		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
+	})
 
 	repo := newMockTrayRepo()
 	h := setupHandlers(repo)
@@ -415,9 +415,9 @@ func TestAuthenticateAgent_MissingHeader(t *testing.T) {
 }
 
 func TestAuthenticateAgent_WrongSecret(t *testing.T) {
-	original := config.AppConfig.Server.AgentSecret
-	config.AppConfig.Server.AgentSecret = "test-secret-123"
-	defer func() { config.AppConfig.Server.AgentSecret = original }()
+	config.SetForTest(t, &config.CatteryConfig{
+		Server: config.ServerConfig{AgentSecret: "test-secret-123"},
+	})
 
 	repo := newMockTrayRepo()
 	h := setupHandlers(repo)

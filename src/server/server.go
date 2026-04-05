@@ -36,7 +36,7 @@ func Start() {
 	// Db connection
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().
-		ApplyURI(config.AppConfig.Database.Uri).
+		ApplyURI(config.Get().Database.Uri).
 		SetServerAPIOptions(serverAPI)
 
 	client, err := mongo.Connect(opts)
@@ -55,7 +55,7 @@ func Start() {
 		}
 	}
 
-	var database = client.Database(config.AppConfig.Database.Database)
+	var database = client.Database(config.Get().Database.Database)
 
 	// Initialize tray manager and repository
 	var trayRepository = repositories.NewMongodbTrayRepository()
@@ -69,8 +69,8 @@ func Start() {
 
 	// Initialize scale set pollers — one per TrayType
 	ssm := scaleSetPoller.NewManager()
-	for _, trayType := range config.AppConfig.TrayTypes {
-		org := config.AppConfig.GetGitHubOrg(trayType.GitHubOrg)
+	for _, trayType := range config.Get().TrayTypes {
+		org := config.Get().GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
 			logger.Fatalf("GitHub organization '%s' not found for tray type '%s'", trayType.GitHubOrg, trayType.Name)
 		}
@@ -127,13 +127,13 @@ func Start() {
 	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	var httpServer = &http.Server{
-		Addr:    config.AppConfig.Server.ListenAddress,
+		Addr:    config.Get().Server.ListenAddress,
 		Handler: mux,
 	}
 
 	// Start HTTP server
 	go func() {
-		logger.Infof("Starting server on %s", config.AppConfig.Server.ListenAddress)
+		logger.Infof("Starting server on %s", config.Get().Server.ListenAddress)
 		err := httpServer.ListenAndServe()
 		if err != nil {
 			logger.Fatal(err)

@@ -46,7 +46,7 @@ func NewTray(trayType config.TrayType) (*Tray, error) {
 // TrayType returns the configuration for this tray's type from the current config.
 // Returns nil if the tray type no longer exists in config.
 func (tray *Tray) TrayType() *config.TrayType {
-	return config.AppConfig.GetTrayType(tray.TrayTypeName)
+	return config.Get().GetTrayType(tray.TrayTypeName)
 }
 
 // TrayConfig returns the provider-specific config (DockerTrayConfig, GoogleTrayConfig, etc.).

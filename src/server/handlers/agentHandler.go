@@ -48,7 +48,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	trayType := config.AppConfig.GetTrayType(tray.TrayTypeName)
+	trayType := config.Get().GetTrayType(tray.TrayTypeName)
 	if trayType == nil {
 		errMsg := fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
 		logger.Error(errMsg)
@@ -108,7 +108,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 // authenticateAgent checks the optional Bearer token and verifies the tray exists.
 // Returns (statusCode, errorMessage). statusCode 0 means success.
 func (h *Handlers) authenticateAgent(r *http.Request) (int, string) {
-	secret := config.AppConfig.Server.AgentSecret
+	secret := config.Get().Server.AgentSecret
 	if secret != "" {
 		header := r.Header.Get("Authorization")
 		if header == "" {
