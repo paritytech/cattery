@@ -44,9 +44,9 @@ func (h *History) Recent() []*Message {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	result := make([]*Message, h.count)
-	for i := range h.count {
-		idx := ((h.head - 1 - i) % historySize + historySize) % historySize
-		result[i] = h.buf[idx]
+	start := (h.head - h.count + historySize) % historySize
+	for i := 0; i < h.count; i++ {
+		result[h.count-1-i] = h.buf[(start+i)%historySize]
 	}
 	return result
 }

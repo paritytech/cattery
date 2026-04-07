@@ -10,6 +10,7 @@ import (
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -115,11 +116,23 @@ func Start() {
 		ScaleSetManager: ssm,
 	}
 
-	startServers(logger, h)
+	servers := startServers(logger, cancel, h)
 
-	sig := <-sigs
-	logger.Info("Got signal ", sig)
+	select {
+	case sig := <-sigs:
+		logger.Info("Got signal ", sig)
+	case <-ctx.Done():
+		logger.Info("Context cancelled, shutting down")
+	}
 	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	for _, srv := range servers {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Errorf("HTTP server shutdown error: %v", err)
+		}
+	}
 
 	logger.Info("Waiting for pollers to shut down...")
 	ssm.Wg.Wait()
@@ -142,38 +155,36 @@ func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
 	mux.Handle("/metrics", promhttp.Handler())
 }
 
-func statusMux(h *handlers.Handlers) *http.ServeMux {
-	mux := http.NewServeMux()
-	registerStatusRoutes(mux, h)
-	return mux
-}
-
-func listenAndServe(logger *log.Logger, addr string, handler http.Handler) {
+func listenAndServe(logger *log.Logger, cancel context.CancelFunc, addr string, handler http.Handler) *http.Server {
+	srv := &http.Server{Addr: addr, Handler: handler}
 	go func() {
 		logger.Infof("Starting server on %s", addr)
-		srv := &http.Server{Addr: addr, Handler: handler}
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal(err)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Errorf("HTTP server on %s failed: %v", addr, err)
+			cancel()
 		}
 	}()
+	return srv
 }
 
 // startServers starts the agent server and the status+metrics server.
 // If statusListenAddress is unset or matches the agent address, status and
 // metrics are served on the same port as the agent endpoints.
-func startServers(logger *log.Logger, h *handlers.Handlers) {
+func startServers(logger *log.Logger, cancel context.CancelFunc, h *handlers.Handlers) []*http.Server {
 	mainAddr := config.AppConfig.Server.ListenAddress
 	statusAddr := config.AppConfig.Server.StatusListenAddress
 
 	aMux := agentMux(h)
 
 	if statusAddr == "" || statusAddr == mainAddr {
-		// Serve everything on one port.
 		registerStatusRoutes(aMux, h)
-		listenAndServe(logger, mainAddr, aMux)
-		return
+		return []*http.Server{listenAndServe(logger, cancel, mainAddr, aMux)}
 	}
 
-	listenAndServe(logger, mainAddr, aMux)
-	listenAndServe(logger, statusAddr, statusMux(h))
+	sMux := http.NewServeMux()
+	registerStatusRoutes(sMux, h)
+	return []*http.Server{
+		listenAndServe(logger, cancel, mainAddr, aMux),
+		listenAndServe(logger, cancel, statusAddr, sMux),
+	}
 }

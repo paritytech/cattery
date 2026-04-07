@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"cattery/lib/scaleSetPoller"
+	"cattery/lib/trays"
 	"cattery/ui"
 	"html/template"
 	"net/http"
@@ -14,10 +15,10 @@ var statusTmpl = template.Must(
 	template.New("status.html").
 		Funcs(template.FuncMap{
 			"age": func(t time.Time) string {
-				d := time.Since(t).Round(time.Second)
+				d := time.Since(t)
 				switch {
 				case d < time.Minute:
-					return d.String()
+					return d.Round(time.Second).String()
 				case d < time.Hour:
 					return d.Round(time.Minute).String()
 				default:
@@ -38,7 +39,7 @@ func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
 
 	data := struct {
 		Now      time.Time
-		Trays    interface{}
+		Trays    []*trays.Tray
 		Messages []*scaleSetPoller.Message
 	}{
 		Now:      time.Now().UTC(),

@@ -134,7 +134,9 @@ func (c *CatteryConfig) GetTrayType(name string) *TrayType {
 }
 
 type ServerConfig struct {
-	ListenAddress       string `yaml:"listenAddress" validate:"required"`
+	ListenAddress string `yaml:"listenAddress" validate:"required"`
+	// StatusListenAddress is the address for the /status and /metrics endpoints.
+	// If empty or equal to ListenAddress, these routes are served on the agent port.
 	StatusListenAddress string `yaml:"statusListenAddress"`
 	AdvertiseUrl        string `yaml:"advertiseUrl" validate:"required"`
 }

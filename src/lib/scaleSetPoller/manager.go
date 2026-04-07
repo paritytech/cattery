@@ -32,10 +32,15 @@ func (m *Manager) GetPoller(trayTypeName string) *Poller {
 // MessageHistory returns all recent messages across all pollers, newest first.
 func (m *Manager) MessageHistory() []*Message {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	pollers := make([]*Poller, 0, len(m.pollers))
+	for _, p := range m.pollers {
+		pollers = append(pollers, p)
+	}
+	m.mu.RUnlock()
+
 	var all []*Message
-	for _, poller := range m.pollers {
-		all = append(all, poller.History().Recent()...)
+	for _, p := range pollers {
+		all = append(all, p.History().Recent()...)
 	}
 	sort.Slice(all, func(i, j int) bool {
 		return all[i].Time.After(all[j].Time)
