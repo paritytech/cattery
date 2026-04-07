@@ -7,6 +7,7 @@ import (
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trayManager"
+	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
@@ -35,7 +36,7 @@ func Start() {
 	// Db connection
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().
-		ApplyURI(config.AppConfig.Database.Uri).
+		ApplyURI(config.Get().Database.Uri).
 		SetServerAPIOptions(serverAPI)
 
 	client, err := mongo.Connect(opts)
@@ -54,12 +55,12 @@ func Start() {
 		}
 	}
 
-	var database = client.Database(config.AppConfig.Database.Database)
+	var database = client.Database(config.Get().Database.Database)
 
 	// Initialize tray manager and repository
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
-	tm := trayManager.NewTrayManager(trayRepository)
+	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
 
 	// Initialize restarter
 	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
@@ -68,8 +69,8 @@ func Start() {
 
 	// Initialize scale set pollers — one per TrayType
 	ssm := scaleSetPoller.NewManager()
-	for _, trayType := range config.AppConfig.TrayTypes {
-		org := config.AppConfig.GetGitHubOrg(trayType.GitHubOrg)
+	for _, trayType := range config.Get().TrayTypes {
+		org := config.Get().GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
 			logger.Fatalf("GitHub organization '%s' not found for tray type '%s'", trayType.GitHubOrg, trayType.Name)
 		}
@@ -82,9 +83,9 @@ func Start() {
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
 
-		ssm.Wg.Add(1)
+		ssm.Add(1)
 		go func(p *scaleSetPoller.Poller, name string) {
-			defer ssm.Wg.Done()
+			defer ssm.Done()
 			for {
 				if err := p.Run(ctx); err != nil {
 					if ctx.Err() != nil {
@@ -126,13 +127,13 @@ func Start() {
 	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	var httpServer = &http.Server{
-		Addr:    config.AppConfig.Server.ListenAddress,
+		Addr:    config.Get().Server.ListenAddress,
 		Handler: mux,
 	}
 
 	// Start HTTP server
 	go func() {
-		logger.Infof("Starting server on %s", config.AppConfig.Server.ListenAddress)
+		logger.Infof("Starting server on %s", config.Get().Server.ListenAddress)
 		err := httpServer.ListenAndServe()
 		if err != nil {
 			logger.Fatal(err)
@@ -145,6 +146,13 @@ func Start() {
 	cancel()
 
 	logger.Info("Waiting for pollers to shut down...")
-	ssm.Wg.Wait()
+	ssm.Wait()
 	logger.Info("All pollers stopped")
+
+	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer disconnectCancel()
+	if err := client.Disconnect(disconnectCtx); err != nil {
+		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
+	}
+	logger.Info("MongoDB connection closed")
 }
