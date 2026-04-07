@@ -23,7 +23,6 @@ import (
 )
 
 func Start() {
-
 	var logger = log.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,29 +115,7 @@ func Start() {
 		ScaleSetManager: ssm,
 	}
 
-	var mux = http.NewServeMux()
-	mux.HandleFunc("/{$}", h.Index)
-	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
-	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
-	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
-	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
-	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
-	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
-
-	var httpServer = &http.Server{
-		Addr:    config.AppConfig.Server.ListenAddress,
-		Handler: mux,
-	}
-
-	// Start HTTP server
-	go func() {
-		logger.Infof("Starting server on %s", config.AppConfig.Server.ListenAddress)
-		err := httpServer.ListenAndServe()
-		if err != nil {
-			logger.Fatal(err)
-			return
-		}
-	}()
+	startServers(logger, h)
 
 	sig := <-sigs
 	logger.Info("Got signal ", sig)
@@ -147,4 +124,56 @@ func Start() {
 	logger.Info("Waiting for pollers to shut down...")
 	ssm.Wg.Wait()
 	logger.Info("All pollers stopped")
+}
+
+func agentMux(h *handlers.Handlers) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", h.Index)
+	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
+	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
+	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
+	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
+	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
+	return mux
+}
+
+func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
+	mux.HandleFunc("/status", h.Status)
+	mux.Handle("/metrics", promhttp.Handler())
+}
+
+func statusMux(h *handlers.Handlers) *http.ServeMux {
+	mux := http.NewServeMux()
+	registerStatusRoutes(mux, h)
+	return mux
+}
+
+func listenAndServe(logger *log.Logger, addr string, handler http.Handler) {
+	go func() {
+		logger.Infof("Starting server on %s", addr)
+		srv := &http.Server{Addr: addr, Handler: handler}
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal(err)
+		}
+	}()
+}
+
+// startServers starts the agent server and the status+metrics server.
+// If statusListenAddress is unset or matches the agent address, status and
+// metrics are served on the same port as the agent endpoints.
+func startServers(logger *log.Logger, h *handlers.Handlers) {
+	mainAddr := config.AppConfig.Server.ListenAddress
+	statusAddr := config.AppConfig.Server.StatusListenAddress
+
+	aMux := agentMux(h)
+
+	if statusAddr == "" || statusAddr == mainAddr {
+		// Serve everything on one port.
+		registerStatusRoutes(aMux, h)
+		listenAndServe(logger, mainAddr, aMux)
+		return
+	}
+
+	listenAndServe(logger, mainAddr, aMux)
+	listenAndServe(logger, statusAddr, statusMux(h))
 }

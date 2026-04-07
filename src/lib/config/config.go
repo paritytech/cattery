@@ -134,8 +134,9 @@ func (c *CatteryConfig) GetTrayType(name string) *TrayType {
 }
 
 type ServerConfig struct {
-	ListenAddress string `yaml:"listenAddress" validate:"required"`
-	AdvertiseUrl  string `yaml:"advertiseUrl" validate:"required"`
+	ListenAddress       string `yaml:"listenAddress" validate:"required"`
+	StatusListenAddress string `yaml:"statusListenAddress"`
+	AdvertiseUrl        string `yaml:"advertiseUrl" validate:"required"`
 }
 
 type DatabaseConfig struct {
@@ -148,7 +149,6 @@ type GitHubOrganization struct {
 	AppId          int64  `yaml:"appId" validate:"required"`
 	AppClientId    string `yaml:"appClientId" validate:"required"`
 	InstallationId int64  `yaml:"installationId" validate:"required"`
-	WebhookSecret  string `yaml:"webhookSecret"`
 	PrivateKeyPath string `yaml:"privateKeyPath"`
 }
 

@@ -146,7 +146,6 @@ func TestGetGitHubOrg(t *testing.T) {
 				Name:           "test-org",
 				AppId:          12345,
 				InstallationId: 67890,
-				WebhookSecret:  "secret",
 				PrivateKeyPath: "path/to/key.pem",
 			},
 		},

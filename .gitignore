@@ -3,3 +3,4 @@ bin
 /stuff/
 .DS_Store
 .claude
+src/coverage.out

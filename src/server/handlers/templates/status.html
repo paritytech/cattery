@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="5">
+  <title>Cattery Status</title>
+</head>
+<body>
+  <h1>Cattery</h1>
+  <p>{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; auto-refreshes every 5s</p>
+
+  <h2>Trays ({{len .Trays}})</h2>
+  {{if .Trays}}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Org</th>
+        <th>Status</th>
+        <th>Repository</th>
+        <th>Since</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Trays}}
+      <tr>
+        <td>{{.Id}}</td>
+        <td>{{.TrayTypeName}}</td>
+        <td>{{.GitHubOrgName}}</td>
+        <td data-status="{{.Status}}">{{.Status}}</td>
+        <td>{{.Repository}}</td>
+        <td>{{age .StatusChanged}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No trays.</p>
+  {{end}}
+
+  <h2>Recent Scale Set Events</h2>
+  {{if .Messages}}
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Type</th>
+        <th>Event</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Messages}}
+      <tr>
+        <td>{{.Time.UTC.Format "15:04:05"}}</td>
+        <td>{{.TrayType}}</td>
+        <td data-kind="{{.Kind}}">{{.Kind}}</td>
+        <td>{{.Detail}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No events yet.</p>
+  {{end}}
+</body>
+</html>

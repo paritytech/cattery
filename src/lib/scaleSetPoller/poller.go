@@ -20,6 +20,7 @@ type Poller struct {
 	client      *scaleSetClient.ScaleSetClient
 	trayType    *config.TrayType
 	trayManager *trayManager.TrayManager
+	history     *History
 	logger      *log.Entry
 }
 
@@ -32,11 +33,16 @@ func NewPoller(
 		client:      client,
 		trayType:    trayType,
 		trayManager: tm,
+		history:     &History{},
 		logger: log.WithFields(log.Fields{
 			"component": "scaleSetPoller",
 			"trayType":  trayType.Name,
 		}),
 	}
+}
+
+func (p *Poller) History() *History {
+	return p.history
 }
 
 func (p *Poller) Client() *scaleSetClient.ScaleSetClient {
@@ -117,6 +123,13 @@ func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int
 		return 0, err
 	}
 
+	cs.poller.history.Add(&Message{
+		Time:     time.Now(),
+		Kind:     MessageKindScale,
+		TrayType: cs.poller.trayType.Name,
+		Detail:   fmt.Sprintf("desired=%d", count),
+	})
+
 	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
 }
 
@@ -137,6 +150,13 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 			jobInfo.RunnerName, jobInfo.JobDisplayName, jobInfo.WorkflowRunID)
 	}
 
+	cs.poller.history.Add(&Message{
+		Time:     time.Now(),
+		Kind:     MessageKindJobStarted,
+		TrayType: cs.poller.trayType.Name,
+		Detail:   fmt.Sprintf("%s on %s", jobInfo.JobDisplayName, jobInfo.RunnerName),
+	})
+
 	return nil
 }
 
@@ -155,6 +175,13 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 		cs.poller.logger.Errorf("Failed to delete tray %s: %v", jobInfo.RunnerName, err)
 		return err
 	}
+
+	cs.poller.history.Add(&Message{
+		Time:     time.Now(),
+		Kind:     MessageKindJobCompleted,
+		TrayType: cs.poller.trayType.Name,
+		Detail:   fmt.Sprintf("%s on %s (result: %s)", jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.Result),
+	})
 
 	metrics.RegisteredTraysAdd(cs.poller.trayType.GitHubOrg, cs.poller.trayType.Name, -1)
 	return nil
