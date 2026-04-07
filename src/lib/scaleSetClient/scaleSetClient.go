@@ -27,6 +27,12 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 		return nil, fmt.Errorf("failed to read private key: %w", err)
 	}
 
+	logger := log.WithFields(log.Fields{
+		"component": "scaleSetClient",
+		"trayType":  trayType.Name,
+		"org":       org.Name,
+	})
+
 	client, err := scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{
 		GitHubConfigURL: fmt.Sprintf("https://github.com/%s", org.Name),
 		GitHubAppAuth: scaleset.GitHubAppAuth{
@@ -34,7 +40,7 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 			InstallationID: org.InstallationId,
 			PrivateKey:     string(privateKey),
 		},
-	})
+	}, scaleset.WithLogger(newSlogLogger(logger)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scale set client: %w", err)
 	}
@@ -43,11 +49,7 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 		client:   client,
 		org:      org,
 		trayType: trayType,
-		logger: log.WithFields(log.Fields{
-			"component": "scaleSetClient",
-			"trayType":  trayType.Name,
-			"org":       org.Name,
-		}),
+		logger:   logger,
 	}, nil
 }
 
@@ -86,7 +88,7 @@ func (sc *ScaleSetClient) CreateSession(ctx context.Context) error {
 	const retryDelay = 30 * time.Second
 
 	for attempt := range maxRetries {
-		session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname)
+		session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname, scaleset.WithLogger(newSlogLogger(sc.logger)))
 		if err == nil {
 			sc.session = session
 			sc.logger.Info("Message session created")
