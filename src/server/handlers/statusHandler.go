@@ -2,16 +2,13 @@ package handlers
 
 import (
 	"cattery/lib/scaleSetPoller"
-	_ "embed"
+	"cattery/ui"
 	"html/template"
 	"net/http"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 )
-
-//go:embed templates/status.html
-var statusTemplateContent string
 
 var statusTmpl = template.Must(
 	template.New("status.html").
@@ -28,7 +25,7 @@ var statusTmpl = template.Must(
 				}
 			},
 		}).
-		Parse(statusTemplateContent),
+		ParseFS(ui.Templates, "status.html"),
 )
 
 func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {

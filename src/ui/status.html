@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="5">
+  <title>Cattery Status</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      background: #111;
+      color: #ccc;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #222;
+      padding: 14px 24px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+    header h1 { color: #fff; font-size: 17px; font-weight: 600; }
+    header .meta { color: #555; font-size: 12px; }
+
+    main { padding: 28px 24px; display: flex; flex-direction: column; gap: 36px; }
+
+    section h2 {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #555;
+      margin-bottom: 10px;
+    }
+
+    .table-wrap {
+      border: 1px solid #222;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    thead { background: #181818; }
+    th {
+      padding: 9px 14px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #666;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    th:hover { color: #aaa; }
+    th[data-sort]::after { margin-left: 5px; font-size: 10px; color: #4fc3f7; }
+    th[data-sort="asc"]::after  { content: "▲"; }
+    th[data-sort="desc"]::after { content: "▼"; }
+
+    td {
+      padding: 9px 14px;
+      border-top: 1px solid #1c1c1c;
+      white-space: nowrap;
+    }
+    tr:hover td { background: #161616; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* Tray status colours */
+    [data-status="creating"]    td .badge { background: #252525; color: #777; }
+    [data-status="registering"] td .badge { background: #2e2300; color: #e6b800; }
+    [data-status="registered"]  td .badge { background: #002535; color: #4fc3f7; }
+    [data-status="running"]     td .badge { background: #0f2a18; color: #66bb6a; }
+    [data-status="deleting"]    td .badge { background: #2a1010; color: #e57373; }
+
+    /* Event kind colours */
+    [data-kind="scale"]         td .badge { background: #1e1030; color: #b57be8; }
+    [data-kind="job_started"]   td .badge { background: #002535; color: #4fc3f7; }
+    [data-kind="job_completed"] td .badge { background: #0f2a18; color: #66bb6a; }
+
+    .dim { color: #555; }
+    .detail { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+    .empty { color: #444; font-style: italic; padding: 12px 0; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Cattery</h1>
+  <span class="meta">{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; refreshes every 5s</span>
+</header>
+
+<main>
+
+  <section>
+    <h2>Trays ({{len .Trays}})</h2>
+    {{if .Trays}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Type</th>
+            <th>Org</th>
+            <th>Status</th>
+            <th>Repository</th>
+            <th>Since</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Trays}}
+          <tr data-status="{{.Status}}">
+            <td class="dim">{{.Id}}</td>
+            <td>{{.TrayTypeName}}</td>
+            <td>{{.GitHubOrgName}}</td>
+            <td><span class="badge">{{.Status}}</span></td>
+            <td>{{.Repository}}</td>
+            <td class="dim">{{age .StatusChanged}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="empty">No trays.</p>
+    {{end}}
+  </section>
+
+  <section>
+    <h2>Recent Scale Set Events</h2>
+    {{if .Messages}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Event</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Messages}}
+          <tr data-kind="{{.Kind}}">
+            <td class="dim">{{.Time.UTC.Format "15:04:05"}}</td>
+            <td>{{.TrayType}}</td>
+            <td><span class="badge">{{.Kind}}</span></td>
+            <td class="detail">{{.Detail}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="empty">No events yet.</p>
+    {{end}}
+  </section>
+
+</main>
+
+<script>
+  document.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const table = th.closest('table');
+      const col   = Array.from(th.parentElement.children).indexOf(th);
+      const asc   = th.dataset.sort !== 'asc';
+
+      Array.from(table.querySelector('tbody').rows)
+        .sort((a, b) => {
+          const av = a.cells[col].textContent.trim();
+          const bv = b.cells[col].textContent.trim();
+          return asc
+            ? av.localeCompare(bv, undefined, { numeric: true })
+            : bv.localeCompare(av, undefined, { numeric: true });
+        })
+        .forEach(tr => table.querySelector('tbody').appendChild(tr));
+
+      table.querySelectorAll('th').forEach(h => delete h.dataset.sort);
+      th.dataset.sort = asc ? 'asc' : 'desc';
+    });
+  });
+</script>
+
+</body>
+</html>
