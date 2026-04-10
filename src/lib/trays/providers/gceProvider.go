@@ -17,7 +17,6 @@ import (
 )
 
 type GceProvider struct {
-	ITrayProvider
 	Name           string
 	providerConfig config.ProviderConfig
 
@@ -26,13 +25,11 @@ type GceProvider struct {
 }
 
 func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvider {
-	var provider = &GceProvider{}
-
-	provider.Name = name
-	provider.providerConfig = providerConfig
-
-	provider.instanceClient = nil
-	provider.logger = logrus.WithFields(logrus.Fields{"name": "gceProvider"})
+	provider := &GceProvider{
+		Name:           name,
+		providerConfig: providerConfig,
+		logger:         logrus.WithFields(logrus.Fields{"name": "gceProvider"}),
+	}
 
 	client, err := provider.createInstancesClient()
 	if err != nil {
@@ -47,6 +44,13 @@ func (g *GceProvider) GetProviderName() string {
 	return g.Name
 }
 
+func (g *GceProvider) Close() error {
+	if g.instanceClient != nil {
+		return g.instanceClient.Close()
+	}
+	return nil
+}
+
 func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	ctx := context.Background()
 
@@ -55,25 +59,27 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		return fmt.Errorf("unexpected tray config type for gce provider, tray %s", tray.Id)
 	}
 
-	var (
-		project          = g.providerConfig.Get("project")
-		instanceTemplate = trayConfig.InstanceTemplate
-		zones            = trayConfig.Zones
-		machineType      = trayConfig.MachineType
-	)
+	project := g.providerConfig.Get("project")
+	instanceTemplate := trayConfig.InstanceTemplate
+	zones := trayConfig.Zones
+	machineType := trayConfig.MachineType
 
 	var extraMetadata config.TrayExtraMetadata
 	if tt := tray.TrayType(); tt != nil {
 		extraMetadata = tt.ExtraMetadata
 	}
 
-	var metadata = createGcpMetadata(
+	metadata := createGcpMetadata(
 		map[string]string{
-			"cattery-url":      config.AppConfig.Server.AdvertiseUrl,
+			"cattery-url":      config.Get().Server.AdvertiseUrl,
 			"cattery-agent-id": tray.Id,
 		},
 		extraMetadata,
 	)
+
+	if len(zones) == 0 {
+		return fmt.Errorf("no zones configured for tray %s", tray.Id)
+	}
 
 	var zone = zones[rand.Intn(len(zones))]
 
@@ -108,10 +114,8 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 		return err
 	}
 
-	var (
-		zone    = tray.ProviderData["zone"]
-		project = g.providerConfig.Get("project")
-	)
+	zone := tray.ProviderData["zone"]
+	project := g.providerConfig.Get("project")
 
 	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
 		Instance: tray.Id,
@@ -153,11 +157,12 @@ func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) 
 		instancesClient, err = compute.NewInstancesRESTClient(ctx)
 	}
 
-	if err == nil {
-		g.instanceClient = instancesClient
+	if err != nil {
+		return nil, err
 	}
 
-	return instancesClient, err
+	g.instanceClient = instancesClient
+	return instancesClient, nil
 }
 
 func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {

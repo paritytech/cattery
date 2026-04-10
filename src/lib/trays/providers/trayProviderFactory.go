@@ -10,20 +10,31 @@ import (
 )
 
 var (
-	providersMu sync.RWMutex
-	providers   = make(map[string]ITrayProvider)
+	providersMu sync.Mutex
+	providers   = make(map[string]TrayProvider)
 )
 
 var logger = log.WithFields(log.Fields{
 	"name": "trayProviderFactory",
 })
 
-func GetProviderForTray(tray *trays.Tray) (ITrayProvider, error) {
+// DefaultFactory is the standard provider factory backed by config.
+type DefaultFactory struct{}
+
+func (DefaultFactory) GetProvider(providerName string) (TrayProvider, error) {
+	return GetProvider(providerName)
+}
+
+func (DefaultFactory) GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
+	return GetProviderForTray(tray)
+}
+
+func GetProviderForTray(tray *trays.Tray) (TrayProvider, error) {
 	return GetProviderByTrayTypeName(tray.TrayTypeName)
 }
 
-func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
-	var trayType = config.AppConfig.GetTrayType(trayTypeName)
+func GetProviderByTrayTypeName(trayTypeName string) (TrayProvider, error) {
+	trayType := config.Get().GetTrayType(trayTypeName)
 
 	if trayType == nil {
 		return nil, errors.New("tray type not found: " + trayTypeName)
@@ -32,24 +43,22 @@ func GetProviderByTrayTypeName(trayTypeName string) (ITrayProvider, error) {
 	return GetProvider(trayType.Provider)
 }
 
-func GetProvider(providerName string) (ITrayProvider, error) {
-	providersMu.RLock()
+func GetProvider(providerName string) (TrayProvider, error) {
+	providersMu.Lock()
+	defer providersMu.Unlock()
+
 	if existingProvider, ok := providers[providerName]; ok {
-		providersMu.RUnlock()
 		return existingProvider, nil
 	}
-	providersMu.RUnlock()
 
-	var result ITrayProvider
-
-	var p = config.AppConfig.GetProvider(providerName)
-
+	p := config.Get().GetProvider(providerName)
 	if p == nil {
 		return nil, errors.New("no provider found for " + providerName)
 	}
 
-	var provider = *p
+	provider := *p
 
+	var result TrayProvider
 	switch provider["type"] {
 	case "docker":
 		if p := NewDockerProvider(providerName, provider); p != nil {
@@ -67,9 +76,6 @@ func GetProvider(providerName string) (ITrayProvider, error) {
 		return nil, errors.New("failed to initialize provider: " + providerName)
 	}
 
-	providersMu.Lock()
 	providers[providerName] = result
-	providersMu.Unlock()
-
 	return result, nil
 }

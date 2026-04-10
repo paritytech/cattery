@@ -237,6 +237,210 @@ func TestGetTrayType(t *testing.T) {
 	})
 }
 
+func TestGetAndSet(t *testing.T) {
+	original := Get()
+	defer Set(original)
+
+	cfg := &CatteryConfig{
+		Server: ServerConfig{ListenAddress: ":9999", AdvertiseUrl: "http://test"},
+	}
+	Set(cfg)
+
+	got := Get()
+	assert.Equal(t, ":9999", got.Server.ListenAddress)
+}
+
+func TestSetForTest(t *testing.T) {
+	// Run in a subtest so cleanup ordering is predictable
+	var restored bool
+	original := Get()
+
+	t.Run("inner", func(t *testing.T) {
+		cfg := &CatteryConfig{
+			Server: ServerConfig{ListenAddress: ":7777", AdvertiseUrl: "http://test"},
+			TrayTypes: []*TrayType{
+				{Name: "test-tt", Provider: "p", GitHubOrg: "org", RunnerGroupId: 1},
+			},
+		}
+		SetForTest(t, cfg)
+
+		// Config should be updated
+		assert.Equal(t, ":7777", Get().Server.ListenAddress)
+
+		// Maps should be initialized
+		assert.NotNil(t, Get().GetTrayType("test-tt"))
+	})
+
+	// After subtest cleanup, original config should be restored
+	restored = Get() == original
+	assert.True(t, restored, "config should be restored after SetForTest cleanup")
+}
+
+func TestInitMaps(t *testing.T) {
+	cfg := &CatteryConfig{
+		Github: []*GitHubOrganization{
+			{Name: "org1", AppId: 1, AppClientId: "c1", InstallationId: 1},
+		},
+		Providers: []*ProviderConfig{
+			{"name": "prov1", "type": "docker"},
+		},
+		TrayTypes: []*TrayType{
+			{Name: "tt1", Provider: "prov1", GitHubOrg: "org1", RunnerGroupId: 1},
+		},
+	}
+
+	cfg.InitMaps()
+
+	assert.NotNil(t, cfg.GetGitHubOrg("org1"))
+	assert.Nil(t, cfg.GetGitHubOrg("nonexistent"))
+
+	assert.NotNil(t, cfg.GetProvider("prov1"))
+	assert.Nil(t, cfg.GetProvider("nonexistent"))
+
+	assert.NotNil(t, cfg.GetTrayType("tt1"))
+	assert.Nil(t, cfg.GetTrayType("nonexistent"))
+}
+
+func TestLoadConfig_GCETrayType(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "config_gce*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	gceConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "gce-provider"
+    type: "google"
+    project: "my-project"
+trayTypes:
+  - name: "gce-runner"
+    provider: "gce-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+    config:
+      project: "my-project"
+      zones:
+        - "us-central1-a"
+        - "us-central1-b"
+      machineType: "n1-standard-4"
+      instanceTemplate: "projects/my-project/global/instanceTemplates/runner"
+`
+	_, err = tempFile.Write([]byte(gceConfig))
+	assert.NoError(t, err)
+	tempFile.Close()
+
+	configPath := tempFile.Name()
+	config, err := LoadConfig(&configPath)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+
+	tt := config.GetTrayType("gce-runner")
+	assert.NotNil(t, tt)
+
+	gc, ok := tt.Config.(GoogleTrayConfig)
+	assert.True(t, ok)
+	assert.Equal(t, "my-project", gc.Project)
+	assert.Equal(t, []string{"us-central1-a", "us-central1-b"}, gc.Zones)
+	assert.Equal(t, "n1-standard-4", gc.MachineType)
+	assert.Equal(t, "projects/my-project/global/instanceTemplates/runner", gc.InstanceTemplate)
+}
+
+func TestLoadConfig_ProviderNotFound(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "config_bad_provider*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	badConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "docker-provider"
+    type: "docker"
+trayTypes:
+  - name: "broken"
+    provider: "nonexistent-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+`
+	_, err = tempFile.Write([]byte(badConfig))
+	assert.NoError(t, err)
+	tempFile.Close()
+
+	configPath := tempFile.Name()
+	config, err := LoadConfig(&configPath)
+
+	assert.Error(t, err)
+	assert.Nil(t, config)
+	assert.Contains(t, err.Error(), "provider nonexistent-provider for trayType broken not found")
+}
+
+func TestLoadConfig_AgentSecret(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "config_secret*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	secretConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+  agentSecret: "my-secret-token"
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "docker-provider"
+    type: "docker"
+trayTypes:
+  - name: "docker-local"
+    provider: "docker-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+`
+	_, err = tempFile.Write([]byte(secretConfig))
+	assert.NoError(t, err)
+	tempFile.Close()
+
+	configPath := tempFile.Name()
+	config, err := LoadConfig(&configPath)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "my-secret-token", config.Server.AgentSecret)
+}
+
 func TestProviderConfigGet(t *testing.T) {
 	// Setup test provider config
 	providerConfig := ProviderConfig{

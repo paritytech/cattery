@@ -12,7 +12,7 @@ type RestartRequest struct {
 	CreatedAt     time.Time `bson:"createdAt"`
 }
 
-type IRestarterRepository interface {
+type RestarterRepository interface {
 	SaveRestartRequest(ctx context.Context, workflowRunId int64, orgName string, repoName string) error
 	DeleteRestartRequest(ctx context.Context, workflowRunId int64) error
 	GetAllPendingRestartRequests(ctx context.Context) ([]RestartRequest, error)

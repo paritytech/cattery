@@ -10,18 +10,18 @@ import (
 )
 
 type WorkflowRestarter struct {
-	repository repositories.IRestarterRepository
+	repository repositories.RestarterRepository
 }
 
-func NewWorkflowRestarter(repository repositories.IRestarterRepository) *WorkflowRestarter {
+func NewWorkflowRestarter(repository repositories.RestarterRepository) *WorkflowRestarter {
 	return &WorkflowRestarter{
 		repository: repository,
 	}
 }
 
-func (wr *WorkflowRestarter) RequestRestart(workflowRunId int64, orgName string, repoName string) error {
+func (wr *WorkflowRestarter) RequestRestart(ctx context.Context, workflowRunId int64, orgName string, repoName string) error {
 	log.Debugf("Requesting restart for workflow run id %d (%s/%s)", workflowRunId, orgName, repoName)
-	return wr.repository.SaveRestartRequest(context.Background(), workflowRunId, orgName, repoName)
+	return wr.repository.SaveRestartRequest(ctx, workflowRunId, orgName, repoName)
 }
 
 // StartPoller starts a background goroutine that periodically checks pending restart
@@ -58,7 +58,9 @@ func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *lo
 	for _, req := range requests {
 		if time.Since(req.CreatedAt) > ttl {
 			logger.Warnf("Restart request for workflow %d expired (age: %v), deleting", req.WorkflowRunId, time.Since(req.CreatedAt))
-			_ = wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId)
+			if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
+				logger.Errorf("Failed to delete expired restart request for workflow %d: %v", req.WorkflowRunId, err)
+			}
 			continue
 		}
 

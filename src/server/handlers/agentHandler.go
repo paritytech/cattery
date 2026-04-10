@@ -19,15 +19,21 @@ import (
 // AgentRegister is a handler for agent registration requests
 func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Request) {
 
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRegister",
 	})
 
 	logger.Tracef("AgentRegister: %v", r)
 
-	var id = r.PathValue("id")
-	var agentId = validateAgentId(id)
+	_, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
+		logger.Warn(errMsg)
+		http.Error(responseWriter, errMsg, code)
+		return
+	}
+
+	agentId := r.PathValue("id")
 
 	logger = logger.WithFields(log.Fields{
 		"agentId": agentId,
@@ -35,17 +41,17 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Debug("Agent registration request")
 
-	var tray, err = h.TrayManager.Registering(r.Context(), agentId)
+	tray, err := h.TrayManager.Registering(r.Context(), agentId)
 	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
+		errMsg := fmt.Sprintf("Failed to update tray status for agent '%s': %v", agentId, err)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	var trayType = config.AppConfig.GetTrayType(tray.TrayTypeName)
+	trayType := config.Get().GetTrayType(tray.TrayTypeName)
 	if trayType == nil {
-		var errMsg = fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
+		errMsg := fmt.Sprintf("Tray type '%s' not found", tray.TrayTypeName)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
@@ -56,7 +62,7 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	poller := h.ScaleSetManager.GetPoller(trayType.Name)
 	if poller == nil {
-		var errMsg = fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
+		errMsg := fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
@@ -69,24 +75,23 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var jitConfig = jitRunnerConfig.EncodedJITConfig
+	jitConfig := jitRunnerConfig.EncodedJITConfig
 
-	var newAgent = agents.Agent{
+	newAgent := agents.Agent{
 		AgentId:  agentId,
 		RunnerId: int64(jitRunnerConfig.Runner.ID),
 		Shutdown: trayType.Shutdown,
 	}
 
-	var registerResponse = messages.RegisterResponse{
+	registerResponse := messages.RegisterResponse{
 		Agent:     newAgent,
 		JitConfig: jitConfig,
 	}
 
 	responseWriter.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(responseWriter).Encode(registerResponse)
-	if err != nil {
+	if err = json.NewEncoder(responseWriter).Encode(registerResponse); err != nil {
+		// Response headers already sent; can only log, not send http.Error
 		logger.Errorf("Failed to encode response: %v", err)
-		http.Error(responseWriter, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -100,40 +105,62 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
 }
 
-// validateAgentId validates the agent ID
-func validateAgentId(agentId string) string {
-	return agentId
+// authenticateAgent checks the optional Bearer token and verifies the tray exists.
+// Returns the tray on success, or (nil, statusCode, errorMessage) on failure.
+func (h *Handlers) authenticateAgent(r *http.Request) (*trays.Tray, int, string) {
+	secret := config.Get().Server.AgentSecret
+	if secret != "" {
+		header := r.Header.Get("Authorization")
+		if header == "" {
+			return nil, http.StatusUnauthorized, "missing Authorization header"
+		}
+
+		const prefix = "Bearer "
+		if len(header) < len(prefix) || header[:len(prefix)] != prefix {
+			return nil, http.StatusUnauthorized, "invalid Authorization header format"
+		}
+
+		if header[len(prefix):] != secret {
+			return nil, http.StatusUnauthorized, "invalid agent secret"
+		}
+	}
+
+	agentId := r.PathValue("id")
+	if agentId != "" {
+		tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
+		if err != nil {
+			return nil, http.StatusInternalServerError, "failed to look up agent"
+		}
+		if tray == nil {
+			return nil, http.StatusNotFound, "unknown agent"
+		}
+		return tray, 0, ""
+	}
+
+	return nil, 0, ""
 }
 
 // AgentUnregister is a handler for agent unregister requests
 func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentUnregister",
 	})
 
 	logger.Tracef("AgentUnregister: %v", r)
 
-	var trayId = r.PathValue("id")
-
-	var tray, err = h.TrayManager.GetTrayById(r.Context(), trayId)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray for agent '%s': %v", trayId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusBadRequest)
-		return
-	}
-	if tray == nil {
-		http.Error(responseWriter, "Tray does not exist", http.StatusNotFound)
+	tray, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
+		logger.Warn(errMsg)
+		http.Error(responseWriter, errMsg, code)
 		return
 	}
 
-	var unregisterRequest messages.UnregisterRequest
-	err = json.NewDecoder(r.Body).Decode(&unregisterRequest)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", trayId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusBadRequest)
+	unregisterRequest := messages.UnregisterRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&unregisterRequest); err != nil {
+		decodeErr := fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", tray.Id, err)
+		logger.Error(decodeErr)
+		http.Error(responseWriter, decodeErr, http.StatusBadRequest)
 		return
 	}
 
@@ -143,10 +170,10 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("Agent unregister request")
 
-	_, err = h.TrayManager.DeleteTray(r.Context(), tray.Id)
+	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
-	if err != nil {
-		logger.Errorf("Failed to delete tray: %v", err)
+	if deleteErr != nil {
+		logger.Errorf("Failed to delete tray: %v", deleteErr)
 		http.Error(responseWriter, "Failed to delete tray", http.StatusInternalServerError)
 		return
 	}
@@ -158,6 +185,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 		metrics.PreemptedTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 	}
 
+	responseWriter.WriteHeader(http.StatusOK)
 }
 
 func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
@@ -172,41 +200,23 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentPing",
 	})
 
 	logger.Tracef("AgentPing: %v", r)
 
-	var id = r.PathValue("id")
-	var agentId = validateAgentId(id)
+	tray, code, authErr := h.authenticateAgent(r)
+	if code != 0 {
+		logger.Warn(authErr)
+		http.Error(responseWriter, authErr, code)
+		return
+	}
 
-	var pingResponse = &messages.PingResponse{
+	pingResponse := &messages.PingResponse{
 		Terminate: false,
 		Message:   "",
-	}
-
-	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
-		logger.Error(errMsg)
-
-		pingResponse.Message = errMsg
-		pingResponse.Terminate = true
-		writeResponse(responseWriter, pingResponse, logger)
-
-		return
-	}
-	if tray == nil {
-		var errMsg = fmt.Sprintf("Tray with id '%s' not found", agentId)
-		logger.Error(errMsg)
-
-		pingResponse.Message = errMsg
-		pingResponse.Terminate = true
-		writeResponse(responseWriter, pingResponse, logger)
-
-		return
 	}
 
 	if tray.Status == trays.TrayStatusRunning {
@@ -215,7 +225,7 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*2 {
-		var errMsg = fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
+		errMsg := fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
 		logger.Error(errMsg)
 
 		pingResponse.Terminate = true
@@ -237,37 +247,28 @@ func writeResponse(responseWriter http.ResponseWriter, pingResponse any, logger 
 }
 
 func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Request) {
-	var logger = log.WithFields(log.Fields{
+	logger := log.WithFields(log.Fields{
 		"handler": "agent",
 		"call":    "AgentRestart",
 	})
 
 	logger.Tracef("AgentRestart: %v", r)
 
-	var id = r.PathValue("id")
-	var agentId = validateAgentId(id)
+	tray, code, errMsg := h.authenticateAgent(r)
+	if code != 0 {
+		logger.Warn(errMsg)
+		http.Error(responseWriter, errMsg, code)
+		return
+	}
 
 	logger = logger.WithFields(log.Fields{
-		"agentId": agentId,
+		"agentId": tray.Id,
 	})
 
-	logger.Debug("Agent restart request with id " + agentId)
+	logger.Debug("Agent restart request with id " + tray.Id)
 
-	tray, err := h.TrayManager.GetTrayById(r.Context(), agentId)
-	if err != nil {
-		var errMsg = fmt.Sprintf("Failed to get tray by id '%s': %v", agentId, err)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
-		return
-	}
-	if tray == nil {
-		var errMsg = fmt.Sprintf("Tray with id '%s' not found", agentId)
-		logger.Error(errMsg)
-		http.Error(responseWriter, errMsg, http.StatusGone)
-		return
-	}
 	workflowRunId := tray.WorkflowRunId
-	if err := h.RestartManager.RequestRestart(workflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
+	if err := h.RestartManager.RequestRestart(r.Context(), workflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
 		logger.Errorf("Failed to request restart for workflow %d: %v", workflowRunId, err)
 		http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
 		return

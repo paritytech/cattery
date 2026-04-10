@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v70/github"
 	log "github.com/sirupsen/logrus"
 )
+
+const githubAPITimeout = 30 * time.Second
 
 var (
 	githubClientsMu sync.Mutex
@@ -25,7 +28,7 @@ type GithubClient struct {
 
 func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 
-	var orgConfig = config.AppConfig.GetGitHubOrg(orgName)
+	orgConfig := config.Get().GetGitHubOrg(orgName)
 	if orgConfig == nil {
 		return nil, errors.New("GitHub organization not found")
 	}
@@ -42,18 +45,28 @@ func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
 }
 
 func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) error {
-	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowId)
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowId)
 	if err != nil {
 		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
 		return err
 	}
 	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
-	_, err = gc.client.Actions.RerunFailedJobsByID(context.Background(), gc.Org.Name, repoName, workflowId)
+
+	rerunCtx, rerunCancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer rerunCancel()
+
+	_, err = gc.client.Actions.RerunFailedJobsByID(rerunCtx, gc.Org.Name, repoName, workflowId)
 	return err
 }
 
 func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int64) (string, string, error) {
-	wr, _, err := gc.client.Actions.GetWorkflowRunByID(context.Background(), gc.Org.Name, repoName, workflowRunId)
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowRunId)
 	if err != nil {
 		return "", "", err
 	}

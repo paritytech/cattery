@@ -18,6 +18,7 @@ import (
 
 type Poller struct {
 	client      *scaleSetClient.ScaleSetClient
+	jitClient   scaleSetClient.JitConfigGenerator
 	trayType    *config.TrayType
 	trayManager *trayManager.TrayManager
 	history     *History
@@ -45,7 +46,27 @@ func (p *Poller) History() *History {
 	return p.history
 }
 
-func (p *Poller) Client() *scaleSetClient.ScaleSetClient {
+// NewPollerWithJitClient creates a Poller with a custom JitConfigGenerator (for testing).
+func NewPollerWithJitClient(
+	jitClient scaleSetClient.JitConfigGenerator,
+	trayType *config.TrayType,
+	tm *trayManager.TrayManager,
+) *Poller {
+	return &Poller{
+		jitClient:   jitClient,
+		trayType:    trayType,
+		trayManager: tm,
+		logger: log.WithFields(log.Fields{
+			"component": "scaleSetPoller",
+			"trayType":  trayType.Name,
+		}),
+	}
+}
+
+func (p *Poller) Client() scaleSetClient.JitConfigGenerator {
+	if p.jitClient != nil {
+		return p.jitClient
+	}
 	return p.client
 }
 

@@ -35,14 +35,17 @@ func NewCatteryClient(baseURL string, agentId string) *CatteryClient {
 // https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-configuration-for-a-just-in-time-runner-for-an-organization
 func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error) {
 
-	var client = c.httpClient
+	client := c.httpClient
 
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "register/", id)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var request, _ = http.NewRequest("GET", requestUrl, nil)
+	request, err := http.NewRequest("GET", requestUrl, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, nil, err
@@ -55,7 +58,7 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 		return nil, nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
-	var registerResponse = &messages.RegisterResponse{}
+	registerResponse := &messages.RegisterResponse{}
 	err = json.NewDecoder(response.Body).Decode(registerResponse)
 	if err != nil {
 		return nil, nil, err
@@ -67,7 +70,7 @@ func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error)
 // UnregisterAgent sends a POST request to the Cattery server to unregister the agent
 func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.UnregisterReason, message string) error {
 
-	var client = c.httpClient
+	client := c.httpClient
 
 	requestJson, err := json.Marshal(messages.UnregisterRequest{
 		Agent:   *agent,
@@ -83,7 +86,10 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 		return err
 	}
 
-	var request, _ = http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
+	request, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -106,7 +112,10 @@ func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 		return nil, fmt.Errorf("failed to join path: %w", err)
 	}
 
-	request, _ := http.NewRequest("POST", requestUrl, nil)
+	request, err := http.NewRequest("POST", requestUrl, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("post error: %w", err)
@@ -119,7 +128,7 @@ func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
 		return nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
-	var pingResponse = &messages.PingResponse{}
+	pingResponse := &messages.PingResponse{}
 	err = json.NewDecoder(response.Body).Decode(pingResponse)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding ping response: %w", err)
