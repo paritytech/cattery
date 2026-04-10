@@ -240,3 +240,8 @@ func (tm *TrayManager) ScaleForDemand(ctx context.Context, trayType *config.Tray
 func (tm *TrayManager) CountTrays(ctx context.Context, trayTypeName string) (int, error) {
 	return tm.trayRepository.CountActive(ctx, trayTypeName)
 }
+
+// ListTrays returns all trays sorted by most recently changed.
+func (tm *TrayManager) ListTrays(ctx context.Context) ([]*trays.Tray, error) {
+	return tm.trayRepository.List(ctx)
+}

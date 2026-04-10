@@ -38,6 +38,19 @@ func (m *MongodbTrayRepository) GetById(ctx context.Context, trayId string) (*tr
 	return &result, nil
 }
 
+func (m *MongodbTrayRepository) List(ctx context.Context) ([]*trays.Tray, error) {
+	opts := options.Find().SetSort(bson.D{{Key: "statusChanged", Value: -1}})
+	cursor, err := m.collection.Find(ctx, bson.M{}, opts)
+	if err != nil {
+		return nil, err
+	}
+	var result []*trays.Tray
+	if err := cursor.All(ctx, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (m *MongodbTrayRepository) GetStale(ctx context.Context, d time.Duration) ([]*trays.Tray, error) {
 	dbResult, err := m.collection.Find(ctx,
 		bson.M{

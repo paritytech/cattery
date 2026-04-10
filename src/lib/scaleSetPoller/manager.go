@@ -1,6 +1,9 @@
 package scaleSetPoller
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 type Manager struct {
 	mu      sync.RWMutex
@@ -24,6 +27,25 @@ func (m *Manager) GetPoller(trayTypeName string) *Poller {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.pollers[trayTypeName]
+}
+
+// MessageHistory returns all recent messages across all pollers, newest first.
+func (m *Manager) MessageHistory() []*Message {
+	m.mu.RLock()
+	pollers := make([]*Poller, 0, len(m.pollers))
+	for _, p := range m.pollers {
+		pollers = append(pollers, p)
+	}
+	m.mu.RUnlock()
+
+	var all []*Message
+	for _, p := range pollers {
+		all = append(all, p.History().Recent()...)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Time.After(all[j].Time)
+	})
+	return all
 }
 
 func (m *Manager) Add(delta int) {

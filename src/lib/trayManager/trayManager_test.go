@@ -7,6 +7,7 @@ import (
 	"cattery/lib/trays/providers"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,7 @@ import (
 // --- Mock provider ---
 
 type mockProvider struct {
+	mu       sync.Mutex
 	name     string
 	runErr   error
 	cleanErr error
@@ -24,10 +26,14 @@ type mockProvider struct {
 
 func (m *mockProvider) GetProviderName() string { return m.name }
 func (m *mockProvider) RunTray(_ *trays.Tray) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.runCalls++
 	return m.runErr
 }
 func (m *mockProvider) CleanTray(tray *trays.Tray) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.cleaned = append(m.cleaned, tray.Id)
 	return m.cleanErr
 }

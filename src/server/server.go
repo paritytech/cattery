@@ -11,6 +11,7 @@ import (
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,7 +25,6 @@ import (
 )
 
 func Start() {
-
 	var logger = log.New()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,33 +117,23 @@ func Start() {
 		ScaleSetManager: ssm,
 	}
 
-	var mux = http.NewServeMux()
-	mux.HandleFunc("/{$}", h.Index)
-	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
-	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
-	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
-	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
-	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
-	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
+	servers := startServers(logger, cancel, h)
 
-	var httpServer = &http.Server{
-		Addr:    config.Get().Server.ListenAddress,
-		Handler: mux,
+	select {
+	case sig := <-sigs:
+		logger.Info("Got signal ", sig)
+	case <-ctx.Done():
+		logger.Info("Context cancelled, shutting down")
 	}
-
-	// Start HTTP server
-	go func() {
-		logger.Infof("Starting server on %s", config.Get().Server.ListenAddress)
-		err := httpServer.ListenAndServe()
-		if err != nil {
-			logger.Fatal(err)
-			return
-		}
-	}()
-
-	sig := <-sigs
-	logger.Info("Got signal ", sig)
 	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	for _, srv := range servers {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Errorf("HTTP server shutdown error: %v", err)
+		}
+	}
 
 	logger.Info("Waiting for pollers to shut down...")
 	ssm.Wait()
@@ -155,4 +145,54 @@ func Start() {
 		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
 	}
 	logger.Info("MongoDB connection closed")
+}
+
+func agentMux(h *handlers.Handlers) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", h.Index)
+	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
+	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
+	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
+	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
+	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
+	return mux
+}
+
+func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
+	mux.HandleFunc("/status", h.Status)
+	mux.Handle("/metrics", promhttp.Handler())
+}
+
+func listenAndServe(logger *log.Logger, cancel context.CancelFunc, addr string, handler http.Handler) *http.Server {
+	srv := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		logger.Infof("Starting server on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Errorf("HTTP server on %s failed: %v", addr, err)
+			cancel()
+		}
+	}()
+	return srv
+}
+
+// startServers starts the agent server and the status+metrics server.
+// If statusListenAddress is unset or matches the agent address, status and
+// metrics are served on the same port as the agent endpoints.
+func startServers(logger *log.Logger, cancel context.CancelFunc, h *handlers.Handlers) []*http.Server {
+	mainAddr := config.Get().Server.ListenAddress
+	statusAddr := config.Get().Server.StatusListenAddress
+
+	aMux := agentMux(h)
+
+	if statusAddr == "" || statusAddr == mainAddr {
+		registerStatusRoutes(aMux, h)
+		return []*http.Server{listenAndServe(logger, cancel, mainAddr, aMux)}
+	}
+
+	sMux := http.NewServeMux()
+	registerStatusRoutes(sMux, h)
+	return []*http.Server{
+		listenAndServe(logger, cancel, mainAddr, aMux),
+		listenAndServe(logger, cancel, statusAddr, sMux),
+	}
 }

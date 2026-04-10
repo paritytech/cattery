@@ -4,6 +4,7 @@ import (
 	"cattery/lib/trays"
 	"cattery/lib/trays/repositories"
 	"context"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ var _ repositories.TrayRepository = (*MockTrayRepository)(nil)
 
 // MockTrayRepository is a test double for repositories.TrayRepository.
 type MockTrayRepository struct {
+	mu          sync.Mutex
 	Trays       map[string]*trays.Tray
 	CountResult int
 	CountErr    error
@@ -30,6 +32,8 @@ func NewMockTrayRepository() *MockTrayRepository {
 }
 
 func (m *MockTrayRepository) GetById(_ context.Context, trayId string) (*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.GetErr != nil {
 		return nil, m.GetErr
 	}
@@ -37,6 +41,8 @@ func (m *MockTrayRepository) GetById(_ context.Context, trayId string) (*trays.T
 }
 
 func (m *MockTrayRepository) Save(_ context.Context, tray *trays.Tray) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.SaveErr != nil {
 		return m.SaveErr
 	}
@@ -45,6 +51,8 @@ func (m *MockTrayRepository) Save(_ context.Context, tray *trays.Tray) error {
 }
 
 func (m *MockTrayRepository) Delete(_ context.Context, trayId string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.DeleteErr != nil {
 		return m.DeleteErr
 	}
@@ -53,6 +61,8 @@ func (m *MockTrayRepository) Delete(_ context.Context, trayId string) error {
 }
 
 func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string) (*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return nil, m.UpdateErr
 	}
@@ -78,13 +88,27 @@ func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, stat
 }
 
 func (m *MockTrayRepository) CountActive(_ context.Context, _ string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CountErr != nil {
 		return 0, m.CountErr
 	}
 	return m.CountResult, nil
 }
 
+func (m *MockTrayRepository) List(_ context.Context) ([]*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*trays.Tray, 0, len(m.Trays))
+	for _, t := range m.Trays {
+		result = append(result, t)
+	}
+	return result, nil
+}
+
 func (m *MockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.StaleErr != nil {
 		return nil, m.StaleErr
 	}

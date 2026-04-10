@@ -177,8 +177,11 @@ func (c *CatteryConfig) GetTrayType(name string) *TrayType {
 
 type ServerConfig struct {
 	ListenAddress string `yaml:"listenAddress" validate:"required"`
-	AdvertiseUrl  string `yaml:"advertiseUrl" validate:"required"`
-	AgentSecret   string `yaml:"agentSecret"`
+	// StatusListenAddress is the address for the /status and /metrics endpoints.
+	// If empty or equal to ListenAddress, these routes are served on the agent port.
+	StatusListenAddress string `yaml:"statusListenAddress"`
+	AdvertiseUrl        string `yaml:"advertiseUrl" validate:"required"`
+	AgentSecret         string `yaml:"agentSecret"`
 }
 
 type DatabaseConfig struct {
@@ -191,7 +194,6 @@ type GitHubOrganization struct {
 	AppId          int64  `yaml:"appId" validate:"required"`
 	AppClientId    string `yaml:"appClientId" validate:"required"`
 	InstallationId int64  `yaml:"installationId" validate:"required"`
-	WebhookSecret  string `yaml:"webhookSecret"`
 	PrivateKeyPath string `yaml:"privateKeyPath"`
 }
 
