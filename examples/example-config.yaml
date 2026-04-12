@@ -2,9 +2,16 @@ server:
   listenAddress: "0.0.0.0:5137"
   advertiseUrl: https://cattery.my-org.com
 
+# SQLite (default, zero external dependencies):
 database:
-  uri: mongodb://localhost:27017/cattery
-  database: cattery
+  type: sqlite
+  path: /var/lib/cattery/cattery.db
+
+# MongoDB (uncomment to use instead of SQLite):
+# database:
+#   type: mongodb
+#   uri: mongodb://localhost:27017/cattery
+#   database: cattery
 
 github:
   - name: paritytech-stg

@@ -42,9 +42,9 @@ Stale trays (no heartbeat for 2+ minutes) are automatically cleaned up.
 ## Prerequisites
 
 - Go 1.25+
-- MongoDB
 - A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with Actions read/write permissions, installed on your organization
 - Docker and/or GCP credentials depending on your provider choice
+- A database: **SQLite** (no external dependencies) or **MongoDB**
 
 ## Quick start
 
@@ -71,8 +71,8 @@ server:
   advertiseUrl: https://cattery.example.com
 
 database:
-  uri: mongodb://localhost:27017/
-  database: cattery
+  type: sqlite
+  path: /var/lib/cattery/cattery.db
 
 github:
   - name: my-org

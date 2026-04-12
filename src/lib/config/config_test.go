@@ -23,6 +23,7 @@ server:
   listenAddress: ":8080"
   advertiseUrl: "http://localhost:8080"
 database:
+  type: mongodb
   uri: "mongodb://localhost:27017"
   database: "cattery"
 github:
@@ -113,8 +114,8 @@ server:
   listenAddress: ":8080"
   # Missing advertiseUrl
 database:
-  uri: "mongodb://localhost:27017"
-  database: "cattery"
+  type: sqlite
+  path: ":memory:"
 # Missing github section
 providers:
   - name: "docker"
@@ -313,6 +314,7 @@ server:
   listenAddress: ":8080"
   advertiseUrl: "http://localhost:8080"
 database:
+  type: mongodb
   uri: "mongodb://localhost:27017"
   database: "cattery"
 github:
@@ -371,6 +373,7 @@ server:
   listenAddress: ":8080"
   advertiseUrl: "http://localhost:8080"
 database:
+  type: mongodb
   uri: "mongodb://localhost:27017"
   database: "cattery"
 github:
@@ -413,6 +416,7 @@ server:
   advertiseUrl: "http://localhost:8080"
   agentSecret: "my-secret-token"
 database:
+  type: mongodb
   uri: "mongodb://localhost:27017"
   database: "cattery"
 github:

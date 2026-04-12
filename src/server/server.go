@@ -11,7 +11,9 @@ import (
 	"cattery/lib/trays/repositories"
 	"cattery/server/handlers"
 	"context"
+	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +24,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	_ "modernc.org/sqlite"
 )
 
 func Start() {
@@ -33,39 +37,72 @@ func Start() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	// Db connection
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().
-		ApplyURI(config.Get().Database.Uri).
-		SetServerAPIOptions(serverAPI)
+	// Initialize database
+	var trayRepo repositories.TrayRepository
+	var restarterRepo_ restarterRepo.RestarterRepository
+	var dbCloser io.Closer
 
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		logger.Fatal(err)
-	}
-
-	{
-		timeoutCtx, cf := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cf()
-
-		err = client.Ping(timeoutCtx, nil)
+	switch config.Get().Database.Type {
+	case "sqlite":
+		db, err := sql.Open("sqlite", config.Get().Database.Path)
 		if err != nil {
-			logger.Errorf("Failed to connect to MongoDB: %v", err)
-			os.Exit(1)
+			logger.Fatalf("Failed to open SQLite database: %v", err)
 		}
+		// SQLite doesn't handle concurrent writes well without WAL mode
+		db.SetMaxOpenConns(1)
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			logger.Fatalf("Failed to enable WAL mode: %v", err)
+		}
+
+		tr, err := repositories.NewSqliteTrayRepository(db)
+		if err != nil {
+			logger.Fatalf("Failed to initialize SQLite tray repository: %v", err)
+		}
+		rr, err := restarterRepo.NewSqliteRestarterRepository(db)
+		if err != nil {
+			logger.Fatalf("Failed to initialize SQLite restarter repository: %v", err)
+		}
+		trayRepo = tr
+		restarterRepo_ = rr
+		dbCloser = db
+		logger.Infof("Using SQLite database: %s", config.Get().Database.Path)
+
+	default: // mongodb
+		serverAPI := options.ServerAPI(options.ServerAPIVersion1)
+		opts := options.Client().
+			ApplyURI(config.Get().Database.Uri).
+			SetServerAPIOptions(serverAPI)
+
+		client, err := mongo.Connect(opts)
+		if err != nil {
+			logger.Fatal(err)
+		}
+
+		{
+			timeoutCtx, cf := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cf()
+			err = client.Ping(timeoutCtx, nil)
+			if err != nil {
+				logger.Fatalf("Failed to connect to MongoDB: %v", err)
+			}
+		}
+
+		database := client.Database(config.Get().Database.Database)
+
+		mongoTrayRepo := repositories.NewMongodbTrayRepository()
+		mongoTrayRepo.Connect(database.Collection("trays"))
+		trayRepo = mongoTrayRepo
+
+		mongoRestarterRepo := restarterRepo.NewMongodbRestarterRepository()
+		mongoRestarterRepo.Connect(database.Collection("restarters"))
+		restarterRepo_ = mongoRestarterRepo
+
+		dbCloser = mongoCloser{client}
+		logger.Info("Using MongoDB database")
 	}
 
-	var database = client.Database(config.Get().Database.Database)
-
-	// Initialize tray manager and repository
-	var trayRepository = repositories.NewMongodbTrayRepository()
-	trayRepository.Connect(database.Collection("trays"))
-	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
-
-	// Initialize restarter
-	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
-	restartManagerRepository.Connect(database.Collection("restarters"))
-	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
+	tm := trayManager.NewTrayManager(trayRepo, providers.DefaultFactory{})
+	rm := restarter.NewWorkflowRestarter(restarterRepo_)
 
 	// Initialize scale set pollers — one per TrayType
 	ssm := scaleSetPoller.NewManager()
@@ -139,12 +176,21 @@ func Start() {
 	ssm.Wait()
 	logger.Info("All pollers stopped")
 
-	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer disconnectCancel()
-	if err := client.Disconnect(disconnectCtx); err != nil {
-		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
+	if err := dbCloser.Close(); err != nil {
+		logger.Errorf("Failed to close database: %v", err)
 	}
-	logger.Info("MongoDB connection closed")
+	logger.Info("Database connection closed")
+}
+
+// mongoCloser adapts mongo.Client to io.Closer.
+type mongoCloser struct {
+	client *mongo.Client
+}
+
+func (m mongoCloser) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return m.client.Disconnect(ctx)
 }
 
 func agentMux(h *handlers.Handlers) *http.ServeMux {

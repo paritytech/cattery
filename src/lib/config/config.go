@@ -94,6 +94,24 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 		return nil, fmt.Errorf("failed to unmarshal config file: %w", err)
 	}
 
+	switch cfg.Database.Type {
+	case "":
+		return nil, fmt.Errorf("database.type is required (supported: sqlite, mongodb)")
+	case "mongodb":
+		if cfg.Database.Uri == "" {
+			return nil, fmt.Errorf("database.uri is required for mongodb")
+		}
+		if cfg.Database.Database == "" {
+			return nil, fmt.Errorf("database.database is required for mongodb")
+		}
+	case "sqlite":
+		if cfg.Database.Path == "" {
+			return nil, fmt.Errorf("database.path is required for sqlite")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported database type: %s", cfg.Database.Type)
+	}
+
 	cfg.githubMap = make(map[string]*GitHubOrganization)
 	for _, organization := range cfg.Github {
 		cfg.githubMap[organization.Name] = organization
@@ -185,8 +203,10 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Uri      string `yaml:"uri" validate:"required"`
-	Database string `yaml:"database" validate:"required"`
+	Type     string `yaml:"type"` // "mongodb" (default) or "sqlite"
+	Uri      string `yaml:"uri"`
+	Database string `yaml:"database"`
+	Path     string `yaml:"path"` // SQLite file path
 }
 
 type GitHubOrganization struct {

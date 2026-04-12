@@ -12,9 +12,16 @@ server:
   advertiseUrl: https://example.org
   agentSecret: my-secret-token
 
+# SQLite (default):
 database:
-  uri: mongodb://localhost:27017/
-  database: cattery
+  type: sqlite
+  path: /var/lib/cattery/cattery.db
+
+# Or MongoDB:
+# database:
+#   type: mongodb
+#   uri: mongodb://localhost:27017/
+#   database: cattery
 
 github:
   - name: my-org
@@ -74,10 +81,12 @@ trayTypes:
 
 #### database
 
-| Key      | Type   | Required | Description                                                   |
-|----------|--------|----------|---------------------------------------------------------------|
-| uri      | string | yes      | MongoDB connection string (e.g., mongodb://localhost:27017/). |
-| database | string | yes      | Database name (e.g., cattery).                                |
+| Key      | Type   | Required          | Description                                                          |
+|----------|--------|-------------------|----------------------------------------------------------------------|
+| type     | string | no                | Database backend: `sqlite` (default) or `mongodb`.                   |
+| path     | string | yes (for sqlite)  | Path to the SQLite database file (e.g., /var/lib/cattery/cattery.db) |
+| uri      | string | yes (for mongodb) | MongoDB connection string (e.g., mongodb://localhost:27017/).        |
+| database | string | yes (for mongodb) | MongoDB database name (e.g., cattery).                               |
 
 #### github
 A list of GitHub organizations/accounts the server manages via a GitHub App.
