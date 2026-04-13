@@ -31,6 +31,18 @@ type Params struct {
 	AgentFolder  string
 	RunnerFolder string
 	User         string
+	// Background controls how the agent process is launched.
+	//
+	// false (default): the script `exec`s the agent in the foreground. Use this
+	// when the script will *be* the long-running process -- e.g. a Docker
+	// container entrypoint where the shell is PID 1.
+	//
+	// true: the script installs and starts a systemd unit, then exits cleanly.
+	// Use this when the script is delivered by something that expects it to
+	// terminate -- e.g. GCE startup-scripts (which keep
+	// google-startup-scripts.service running until the script returns) or
+	// generic cloud-init.
+	Background bool
 }
 
 // Generate renders the bootstrap script for the given config + params.

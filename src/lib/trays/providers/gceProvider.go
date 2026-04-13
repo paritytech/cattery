@@ -81,9 +81,13 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	// agent binary from the server and runs it. The user's machine image only
 	// needs base OS + their tooling -- the agent installs itself.
 	if bootstrapCfg.Enabled {
+		// Background=true: GCE startup-scripts must terminate so that
+		// google-startup-scripts.service completes; the agent runs as a
+		// systemd unit installed by the script.
 		script, err := bootstrap.Generate(bootstrapCfg, bootstrap.Params{
-			ServerURL: config.Get().Server.AdvertiseUrl,
-			AgentID:   tray.Id,
+			ServerURL:  config.Get().Server.AdvertiseUrl,
+			AgentID:    tray.Id,
+			Background: true,
 		})
 		if err != nil {
 			return fmt.Errorf("generate bootstrap script: %w", err)

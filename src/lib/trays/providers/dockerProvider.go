@@ -77,9 +77,13 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 // piped to the container's shell via stdin, which avoids quote-escaping
 // headaches with `-c "..."` for multiline scripts.
 func (d *DockerProvider) runWithBootstrap(tray *trays.Tray, containerName, image, serverUrl string, cfg config.BootstrapConfig) error {
+	// Background=false: the script is the container entrypoint; /bin/sh is
+	// PID 1 and `exec`ing the agent makes it the long-running container
+	// process. If the script exited, the container would terminate.
 	script, err := bootstrap.Generate(cfg, bootstrap.Params{
-		ServerURL: serverUrl,
-		AgentID:   tray.Id,
+		ServerURL:  serverUrl,
+		AgentID:    tray.Id,
+		Background: false,
 	})
 	if err != nil {
 		return fmt.Errorf("generate bootstrap script: %w", err)

@@ -20,8 +20,40 @@ func TestGenerate_DefaultsApplied(t *testing.T) {
 	assert.Contains(t, script, "tray-abc")
 	assert.Contains(t, script, DefaultAgentFolder)
 	assert.Contains(t, script, DefaultRunnerFolder)
+	// Foreground (default) -> exec, no detachment.
+	assert.Contains(t, script, "exec ")
+	assert.NotContains(t, script, "setsid")
 	// No User -> no sudo branch.
 	assert.NotContains(t, script, "sudo -E -u")
+}
+
+func TestGenerate_BackgroundDetaches(t *testing.T) {
+	script, err := Generate(config.BootstrapConfig{Enabled: true}, Params{
+		ServerURL:  "https://srv",
+		AgentID:    "id1",
+		Background: true,
+	})
+	require.NoError(t, err)
+
+	// Background mode launches detached and exits -- no `exec` of the agent.
+	assert.Contains(t, script, "setsid")
+	assert.Contains(t, script, `</dev/null`)
+	assert.Contains(t, script, "disown")
+	assert.NotContains(t, script, "exec sudo")
+	assert.NotContains(t, script, `exec "${CATTERY_BIN}"`)
+}
+
+func TestGenerate_BackgroundWithUserUsesSudo(t *testing.T) {
+	script, err := Generate(config.BootstrapConfig{Enabled: true, User: "cattery"}, Params{
+		ServerURL:  "https://srv",
+		AgentID:    "id1",
+		Background: true,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, script, `setsid sudo -E -u "cattery"`)
+	// Ownership chown still applies in background mode.
+	assert.Contains(t, script, `chown -R "cattery":"cattery"`)
 }
 
 func TestGenerate_CustomFolders(t *testing.T) {
