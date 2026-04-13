@@ -84,8 +84,9 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 	}
 
 	registerResponse := messages.RegisterResponse{
-		Agent:     newAgent,
-		JitConfig: jitConfig,
+		Agent:         newAgent,
+		JitConfig:     jitConfig,
+		RunnerVersion: trayType.RunnerVersion,
 	}
 
 	responseWriter.Header().Set("Content-Type", "application/json")

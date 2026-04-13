@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"cattery/lib/bootstrap"
 	"cattery/lib/config"
 	"cattery/lib/trays"
 	"context"
@@ -65,15 +66,33 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	machineType := trayConfig.MachineType
 
 	var extraMetadata config.TrayExtraMetadata
+	var bootstrapCfg config.BootstrapConfig
 	if tt := tray.TrayType(); tt != nil {
 		extraMetadata = tt.ExtraMetadata
+		bootstrapCfg = tt.Bootstrap
+	}
+
+	baseMetadata := map[string]string{
+		"cattery-url":      config.Get().Server.AdvertiseUrl,
+		"cattery-agent-id": tray.Id,
+	}
+
+	// When bootstrap is enabled, inject a startup-script that downloads the
+	// agent binary from the server and runs it. The user's machine image only
+	// needs base OS + their tooling -- the agent installs itself.
+	if bootstrapCfg.Enabled {
+		script, err := bootstrap.Generate(bootstrapCfg, bootstrap.Params{
+			ServerURL: config.Get().Server.AdvertiseUrl,
+			AgentID:   tray.Id,
+		})
+		if err != nil {
+			return fmt.Errorf("generate bootstrap script: %w", err)
+		}
+		baseMetadata["startup-script"] = script
 	}
 
 	metadata := createGcpMetadata(
-		map[string]string{
-			"cattery-url":      config.Get().Server.AdvertiseUrl,
-			"cattery-agent-id": tray.Id,
-		},
+		baseMetadata,
 		extraMetadata,
 	)
 

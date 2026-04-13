@@ -1,0 +1,37 @@
+#!/bin/bash
+# Cattery bootstrap script (linux). Downloads the cattery agent binary from the
+# server and starts it. Heavy tooling (Docker, language runtimes, etc.) is the
+# user's responsibility via the underlying machine image.
+set -euo pipefail
+
+AGENT_FOLDER="{{.AgentFolder}}"
+RUNNER_FOLDER="{{.RunnerFolder}}"
+CATTERY_BIN="${AGENT_FOLDER}/cattery"
+SERVER_URL="{{.ServerURL}}"
+AGENT_ID="{{.AgentID}}"
+
+mkdir -p "${AGENT_FOLDER}" "${RUNNER_FOLDER}"
+
+{{- if .User}}
+# Ensure the runtime user owns the agent + runner trees.
+if id -u "{{.User}}" >/dev/null 2>&1; then
+    chown -R "{{.User}}":"{{.User}}" "${AGENT_FOLDER}" "${RUNNER_FOLDER}" || true
+fi
+{{- end}}
+
+echo "[cattery-bootstrap] downloading agent from ${SERVER_URL}/agent/download"
+curl -fsSL "${SERVER_URL}/agent/download" -o "${CATTERY_BIN}"
+chmod +x "${CATTERY_BIN}"
+
+echo "[cattery-bootstrap] launching agent"
+{{- if .User}}
+exec sudo -E -u "{{.User}}" "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}"
+{{- else}}
+exec "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}"
+{{- end}}

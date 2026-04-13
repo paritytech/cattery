@@ -116,17 +116,49 @@ Provider-specific fields:
 #### trayTypes
 Defines one or more tray "profiles" that the Tray Manager can maintain.
 
-| Key                 | Type               | Required | Description                                                                    |
-|---------------------|--------------------|----------|--------------------------------------------------------------------------------|
-| name                | string             | yes      | Unique name for the tray type. Also used as the runner scale set name/label.   |
-| provider            | string             | yes      | Name of a provider defined in `providers`.                                     |
-| runnerGroupId       | int                | yes      | GitHub Runner Group ID to register runners into.                               |
-| githubOrg           | string             | yes      | The GitHub org key, matching one of the entries under `github`.                |
-| shutdown            | bool               | no       | Whether instances should self-terminate when the job completes.                |
-| maxTrays            | int                | no       | Maximum number of concurrent trays of this type.                               |
-| maxParallelCreation | int                | no       | Maximum number of trays to create in parallel. Defaults to 10.                 |
-| extraMetadata       | map[string]string  | no       | Extra key-value metadata passed to the provider (e.g., GCE instance metadata). |
-| config              | provider-dependent | yes      | Provider-specific configuration for how to create a tray (see below).          |
+| Key                 | Type               | Required | Description                                                                                                |
+|---------------------|--------------------|----------|------------------------------------------------------------------------------------------------------------|
+| name                | string             | yes      | Unique name for the tray type. Also used as the runner scale set name/label.                               |
+| provider            | string             | yes      | Name of a provider defined in `providers`.                                                                 |
+| runnerGroupId       | int                | yes      | GitHub Runner Group ID to register runners into.                                                           |
+| githubOrg           | string             | yes      | The GitHub org key, matching one of the entries under `github`.                                            |
+| shutdown            | bool               | no       | Whether instances should self-terminate when the job completes.                                            |
+| maxTrays            | int                | no       | Maximum number of concurrent trays of this type.                                                           |
+| maxParallelCreation | int                | no       | Maximum number of trays to create in parallel. Defaults to 10.                                             |
+| runnerVersion       | string             | no       | Pin the GitHub Actions runner version the agent downloads. Empty -> latest from GH releases.               |
+| bootstrap           | object             | no       | Provider-injected agent bootstrap (see below). Enabled by default; set `bootstrap.enabled: false` to opt out. |
+| extraMetadata       | map[string]string  | no       | Extra key-value metadata passed to the provider (e.g., GCE instance metadata).                             |
+| config              | provider-dependent | yes      | Provider-specific configuration for how to create a tray (see below).                                      |
+
+#### bootstrap
+
+When enabled, the provider injects a script into the spawned tray that
+downloads the cattery agent binary from `<advertiseUrl>/agent/download` and
+starts it. The agent in turn downloads the GitHub Actions runner if it is not
+already present on disk.
+
+This means a fresh VM image only needs the OS plus whatever heavy tooling the
+user wants (Docker, language runtimes, security agents). Cattery handles
+installing itself and the runner.
+
+| Key          | Type   | Required | Description                                                                                                            |
+|--------------|--------|----------|------------------------------------------------------------------------------------------------------------------------|
+| enabled      | bool   | no       | Master switch. Defaults to `true`. Set `false` for legacy pre-baked images that already start the agent themselves.    |
+| os           | string | no       | Selects the built-in script template. Default: `linux`.                                                                |
+| agentFolder  | string | no       | Where to download the cattery binary on the tray. Default: `/opt/cattery`.                                             |
+| runnerFolder | string | no       | Where to install the GH Actions runner. Default: `/opt/cattery/actions-runner`. Passed to the agent as `--runner-folder`. |
+| user         | string | no       | OS user to run the agent as. Default: empty (script runs as whatever user the provider's delivery mechanism uses).     |
+| script       | string | no       | Override the built-in template. Treated as a Go `text/template` with `{{.ServerURL}}`, `{{.AgentID}}`, `{{.AgentFolder}}`, `{{.RunnerFolder}}`, `{{.User}}` available. |
+
+Provider delivery:
+
+- **gce**: script is set as the `startup-script` instance metadata key.
+- **docker**: script is piped to `/bin/sh -s` as the container's entrypoint stdin.
+
+**Migration note**: If you previously relied on a pre-baked image with its own
+systemd unit (e.g. `cattery.service` + `install-agent.sh`) starting the agent,
+add `bootstrap: { enabled: false }` to those tray types after upgrading.
+Otherwise the injected startup script will spawn a second agent.
 
 Provider-specific config under trayType.config:
 

@@ -29,42 +29,43 @@ func NewCatteryClient(baseURL string, agentId string) *CatteryClient {
 	}
 }
 
-// RegisterAgent request just-in-time runner configuration from the Cattery server
-// and returns the configuration as a base64 encoded string
+// RegisterAgent requests just-in-time runner configuration from the Cattery server.
+// Returns the full RegisterResponse so callers can read the JIT config, agent info,
+// and runner version (used for runner bootstrap).
 //
 // https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-configuration-for-a-just-in-time-runner-for-an-organization
-func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error) {
+func (c *CatteryClient) RegisterAgent(id string) (*messages.RegisterResponse, error) {
 
 	client := c.httpClient
 
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "register/", id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	request, err := http.NewRequest("GET", requestUrl, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
+		return nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
 	}
 
 	registerResponse := &messages.RegisterResponse{}
 	err = json.NewDecoder(response.Body).Decode(registerResponse)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return &registerResponse.Agent, &registerResponse.JitConfig, nil
+	return registerResponse, nil
 }
 
 // UnregisterAgent sends a POST request to the Cattery server to unregister the agent
