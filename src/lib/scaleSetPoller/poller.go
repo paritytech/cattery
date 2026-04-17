@@ -1,7 +1,6 @@
 package scaleSetPoller
 
 import (
-	"cattery/lib/metrics"
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/trayManager"
 	"context"
@@ -204,6 +203,5 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 		Detail:   fmt.Sprintf("%s on %s (result: %s)", jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.Result),
 	})
 
-	metrics.RegisteredTraysAdd(cs.poller.trayType.GitHubOrg, cs.poller.trayType.Name, -1)
 	return nil
 }

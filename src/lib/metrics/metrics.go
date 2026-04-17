@@ -1,9 +1,19 @@
 package metrics
 
 import (
+	"cattery/lib/trays"
+	"context"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	log "github.com/sirupsen/logrus"
 )
+
+// TrayLister is the subset of TrayManager needed by the metrics collector.
+type TrayLister interface {
+	ListTrays(ctx context.Context) ([]*trays.Tray, error)
+}
 
 var (
 	// Counters
@@ -30,15 +40,16 @@ var (
 
 	// Gauges
 
-	registeredTraysTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "cattery_registered_trays",
-		Help: "Number of currently registered trays",
-	}, []string{"org", "tray_type"})
-
 	scaleSetPendingJobs = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "cattery_scaleset_pending_jobs",
 		Help: "Number of pending jobs reported by scale set statistics",
 	}, []string{"org", "tray_type"})
+
+	registeredTraysDesc = prometheus.NewDesc(
+		"cattery_registered_trays",
+		"Number of currently registered trays",
+		[]string{"org", "tray_type"}, nil,
+	)
 )
 
 // StaleTrays
@@ -61,12 +72,6 @@ func PreemptedTraysInc(org string, trayType string) {
 	PreemptedTraysAdd(org, trayType, 1)
 }
 
-// RegisteredTrays
-
-func RegisteredTraysAdd(org string, trayType string, count int) {
-	registeredTraysTotal.WithLabelValues(org, trayType).Add(float64(count))
-}
-
 // TrayProviderErrors
 
 func TrayProviderErrors(org string, provider, trayType string, operationType string) {
@@ -81,4 +86,40 @@ func ScaleSetPollErrorsInc(org string, trayType string) {
 
 func ScaleSetPendingJobsSet(org string, trayType string, count int) {
 	scaleSetPendingJobs.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+// trayCollector queries the database on each Prometheus scrape.
+type trayCollector struct {
+	lister TrayLister
+}
+
+func (c *trayCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- registeredTraysDesc
+}
+
+func (c *trayCollector) Collect(ch chan<- prometheus.Metric) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	allTrays, err := c.lister.ListTrays(ctx)
+	if err != nil {
+		log.Errorf("metrics: failed to list trays: %v", err)
+		return
+	}
+
+	counts := make(map[[2]string]int)
+	for _, t := range allTrays {
+		if t.Status != trays.TrayStatusDeleting {
+			counts[[2]string{t.GitHubOrgName, t.TrayTypeName}]++
+		}
+	}
+
+	for key, count := range counts {
+		ch <- prometheus.MustNewConstMetric(registeredTraysDesc, prometheus.GaugeValue, float64(count), key[0], key[1])
+	}
+}
+
+// RegisterTrayCollector registers the DB-backed registered trays collector.
+func RegisterTrayCollector(lister TrayLister) {
+	prometheus.MustRegister(&trayCollector{lister: lister})
 }
