@@ -2,6 +2,7 @@ package server
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/metrics"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
 	"cattery/lib/scaleSetClient"
@@ -61,6 +62,9 @@ func Start() {
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
 	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
+
+	// Register DB-backed metrics collector
+	metrics.RegisterTrayCollector(tm)
 
 	// Initialize restarter
 	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
@@ -160,6 +164,7 @@ func agentMux(h *handlers.Handlers) *http.ServeMux {
 
 func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
 	mux.HandleFunc("/status", h.Status)
+	mux.HandleFunc("GET /status/data", h.StatusData)
 	mux.Handle("/metrics", promhttp.Handler())
 }
 

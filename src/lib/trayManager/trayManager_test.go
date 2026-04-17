@@ -336,7 +336,7 @@ func TestSetJob(t *testing.T) {
 	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRegistered}
 	tm := newTestManager(repo, &mockProviderFactory{})
 
-	tray, err := tm.SetJob(context.Background(), "tray-1", 100, 200, "org/repo")
+	tray, err := tm.SetJob(context.Background(), "tray-1", 100, 200, "org/repo", "build", "ci")
 	assert.NoError(t, err)
 	assert.Equal(t, trays.TrayStatusRunning, tray.Status)
 	assert.Equal(t, int64(100), tray.JobRunId)

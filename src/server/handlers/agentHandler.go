@@ -100,8 +100,6 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		logger.Errorf("%v", err)
 	}
 
-	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, 1)
-
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
 }
 
@@ -180,7 +178,6 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 
-	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, -1)
 	if unregisterRequest.Reason == messages.UnregisterReasonPreempted {
 		metrics.PreemptedTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 	}

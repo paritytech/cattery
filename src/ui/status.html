@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="5">
   <title>Cattery Status</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -37,6 +36,44 @@
       margin-bottom: 10px;
     }
 
+    details summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before {
+      content: "\25B6";
+      font-size: 10px;
+      color: #555;
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+    details[open] summary::before { transform: rotate(90deg); }
+    details .section-body { margin-top: 10px; }
+
+    /* Filter bar */
+    .filters {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .filters button {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .filters button:hover { color: #ccc; border-color: #555; }
+    .filters button.active { background: #222; color: #fff; border-color: #4fc3f7; }
+
     .table-wrap {
       border: 1px solid #222;
       border-radius: 6px;
@@ -59,9 +96,7 @@
       white-space: nowrap;
     }
     th:hover { color: #aaa; }
-    th[data-sort]::after { margin-left: 5px; font-size: 10px; color: #4fc3f7; }
-    th[data-sort="asc"]::after  { content: "▲"; }
-    th[data-sort="desc"]::after { content: "▼"; }
+    th .sort-indicator { margin-left: 5px; font-size: 10px; color: #4fc3f7; }
 
     td {
       padding: 9px 14px;
@@ -93,104 +128,427 @@
     .dim { color: #555; }
     .detail { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
     .empty { color: #444; font-style: italic; padding: 12px 0; }
+
+    a { color: #4fc3f7; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Tabs */
+    nav.tabs {
+      background: #1a1a1a;
+      border-bottom: 1px solid #222;
+      padding: 0 24px;
+      display: flex;
+      gap: 4px;
+    }
+    nav.tabs button {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #777;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    nav.tabs button:hover { color: #ccc; }
+    nav.tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .kv-grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 4px 16px;
+      font-size: 13px;
+    }
+    .kv-grid .k { color: #666; }
+    .kv-grid .v { color: #ccc; word-break: break-all; }
+
+    .card {
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 14px 18px;
+      margin-bottom: 12px;
+    }
+    .card .name {
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
 
 <header>
   <h1>Cattery</h1>
-  <span class="meta">{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; refreshes every 5s</span>
+  <span class="meta" id="timestamp">{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; refreshes every 5s</span>
 </header>
+
+<nav class="tabs" id="tabs">
+  <button class="active" data-tab="status">Status</button>
+  <button data-tab="orgs">GitHub Orgs ({{len .Orgs}})</button>
+  <button data-tab="providers">Providers ({{len .Providers}})</button>
+  <button data-tab="traytypes">Tray Types ({{len .TrayTypes}})</button>
+</nav>
 
 <main>
 
+  <div class="tab-panel active" id="tab-status">
+
   <section>
-    <h2>Trays ({{len .Trays}})</h2>
-    {{if .Trays}}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Type</th>
-            <th>Org</th>
-            <th>Status</th>
-            <th>Repository</th>
-            <th>Since</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Trays}}
-          <tr data-status="{{.Status}}">
-            <td class="dim">{{.Id}}</td>
-            <td>{{.TrayTypeName}}</td>
-            <td>{{.GitHubOrgName}}</td>
-            <td><span class="badge">{{.Status}}</span></td>
-            <td>{{.Repository}}</td>
-            <td class="dim">{{age .StatusChanged}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-    </div>
-    {{else}}
-    <p class="empty">No trays.</p>
-    {{end}}
+    <details id="trays-details" open>
+      <summary><h2>Trays (<span id="tray-count">{{len .Trays}}</span>)</h2></summary>
+      <div class="section-body">
+        <div class="filters" id="tray-filters">
+          <button class="active" data-filter="*">All</button>
+        </div>
+        <div class="table-wrap">
+          <table id="tray-table">
+            <thead>
+              <tr>
+                <th data-col="0">ID</th>
+                <th data-col="1">Type</th>
+                <th data-col="2">Org</th>
+                <th data-col="3">Status</th>
+                <th data-col="4">Repository</th>
+                <th data-col="5">Workflow</th>
+                <th data-col="6">Job</th>
+                <th data-col="7">Since</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Trays}}
+              <tr data-status="{{.Status}}" data-type="{{.TrayTypeName}}">
+                <td class="dim">{{.Id}}</td>
+                <td>{{.TrayTypeName}}</td>
+                <td>{{.GitHubOrgName}}</td>
+                <td><span class="badge">{{.Status}}</span></td>
+                <td>{{.Repository}}</td>
+                <td>{{.WorkflowName}}</td>
+                <td>{{if joburl .}}<a href="{{joburl .}}" target="_blank" rel="noopener">{{.JobName}}</a>{{else}}{{.JobName}}{{end}}</td>
+                <td class="dim">{{age .StatusChanged}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        <p class="empty" id="tray-empty" style="display:none">No trays.</p>
+      </div>
+    </details>
   </section>
 
   <section>
-    <h2>Recent Scale Set Events</h2>
-    {{if .Messages}}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Type</th>
-            <th>Event</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Messages}}
-          <tr data-kind="{{.Kind}}">
-            <td class="dim">{{.Time.UTC.Format "15:04:05"}}</td>
-            <td>{{.TrayType}}</td>
-            <td><span class="badge">{{.Kind}}</span></td>
-            <td class="detail">{{.Detail}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-    </div>
-    {{else}}
-    <p class="empty">No events yet.</p>
-    {{end}}
+    <details id="events-details" open>
+      <summary><h2>Recent Scale Set Events</h2></summary>
+      <div class="section-body">
+        <div class="table-wrap">
+          <table id="event-table">
+            <thead>
+              <tr>
+                <th data-col="0">Time</th>
+                <th data-col="1">Type</th>
+                <th data-col="2">Event</th>
+                <th data-col="3">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Messages}}
+              <tr data-kind="{{.Kind}}">
+                <td class="dim">{{.Time.UTC.Format "15:04:05"}}</td>
+                <td>{{.TrayType}}</td>
+                <td><span class="badge">{{.Kind}}</span></td>
+                <td class="detail">{{.Detail}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        <p class="empty" id="event-empty" style="display:none">No events yet.</p>
+      </div>
+    </details>
   </section>
+
+  </div>
+
+  <div class="tab-panel" id="tab-orgs">
+    {{if .Orgs}}
+      {{range .Orgs}}
+      <div class="card">
+        <div class="name">{{.Name}}</div>
+      </div>
+      {{end}}
+    {{else}}
+      <p class="empty">No GitHub orgs configured.</p>
+    {{end}}
+  </div>
+
+  <div class="tab-panel" id="tab-providers">
+    {{if .Providers}}
+      {{range .Providers}}
+      <div class="card">
+        <div class="name">{{.Get "name"}} <span class="dim" style="font-weight:400;font-size:12px;">({{.Get "type"}})</span></div>
+      </div>
+      {{end}}
+    {{else}}
+      <p class="empty">No providers configured.</p>
+    {{end}}
+  </div>
+
+  <div class="tab-panel" id="tab-traytypes">
+    {{if .TrayTypes}}
+      <div class="table-wrap">
+        <table id="traytype-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">Provider</th>
+              <th data-col="2">Org</th>
+              <th data-col="3">Runner Group</th>
+              <th data-col="4">Max Trays</th>
+              <th data-col="5">Max Parallel Creation</th>
+              <th data-col="6">Shutdown</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .TrayTypes}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td>{{.Provider}}</td>
+              <td>{{.GitHubOrg}}</td>
+              <td>{{.RunnerGroupId}}</td>
+              <td>{{if .MaxTrays}}{{.MaxTrays}}{{else}}<span class="dim">&infin;</span>{{end}}</td>
+              <td>{{if .MaxParallelCreation}}{{.MaxParallelCreation}}{{else}}<span class="dim">10</span>{{end}}</td>
+              <td>{{.Shutdown}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="empty">No tray types configured.</p>
+    {{end}}
+  </div>
 
 </main>
 
 <script>
-  document.querySelectorAll('th').forEach(th => {
+(function() {
+  // --- Tabs ---
+  const tabs = document.getElementById('tabs');
+  if (tabs) {
+    tabs.querySelectorAll('button[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.tab;
+        tabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const panel = document.getElementById('tab-' + target);
+        if (panel) panel.classList.add('active');
+        try { history.replaceState(null, '', '#' + target); } catch (e) {}
+      });
+    });
+    // Restore tab from hash on load
+    const initial = (location.hash || '').replace('#', '');
+    if (initial) {
+      const btn = tabs.querySelector('button[data-tab="' + initial + '"]');
+      if (btn) btn.click();
+    }
+  }
+
+  // --- Sort state per table ---
+  const sortState = {}; // tableId -> { col, asc }
+
+  function applySort(tableId) {
+    const s = sortState[tableId];
+    if (!s) return;
+    const table = document.getElementById(tableId);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.rows);
+    rows.sort((a, b) => {
+      const av = a.cells[s.col].textContent.trim();
+      const bv = b.cells[s.col].textContent.trim();
+      return s.asc
+        ? av.localeCompare(bv, undefined, { numeric: true })
+        : bv.localeCompare(av, undefined, { numeric: true });
+    });
+    rows.forEach(tr => tbody.appendChild(tr));
+    // Update indicators
+    table.querySelectorAll('th .sort-indicator').forEach(el => el.remove());
+    const th = table.querySelector('th[data-col="' + s.col + '"]');
+    if (th) {
+      const span = document.createElement('span');
+      span.className = 'sort-indicator';
+      span.textContent = s.asc ? '\u25B2' : '\u25BC';
+      th.appendChild(span);
+    }
+  }
+
+  document.querySelectorAll('th[data-col]').forEach(th => {
     th.addEventListener('click', () => {
-      const table = th.closest('table');
-      const col   = Array.from(th.parentElement.children).indexOf(th);
-      const asc   = th.dataset.sort !== 'asc';
-
-      Array.from(table.querySelector('tbody').rows)
-        .sort((a, b) => {
-          const av = a.cells[col].textContent.trim();
-          const bv = b.cells[col].textContent.trim();
-          return asc
-            ? av.localeCompare(bv, undefined, { numeric: true })
-            : bv.localeCompare(av, undefined, { numeric: true });
-        })
-        .forEach(tr => table.querySelector('tbody').appendChild(tr));
-
-      table.querySelectorAll('th').forEach(h => delete h.dataset.sort);
-      th.dataset.sort = asc ? 'asc' : 'desc';
+      const tableId = th.closest('table').id;
+      const col = parseInt(th.dataset.col);
+      const prev = sortState[tableId];
+      const asc = prev && prev.col === col ? !prev.asc : true;
+      sortState[tableId] = { col, asc };
+      applySort(tableId);
     });
   });
+
+  // --- Filter state ---
+  let activeFilter = '*';
+
+  function applyFilter() {
+    const tbody = document.querySelector('#tray-table tbody');
+    let visible = 0;
+    Array.from(tbody.rows).forEach(tr => {
+      const match = activeFilter === '*' || tr.dataset.type === activeFilter;
+      tr.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    document.getElementById('tray-count').textContent = visible;
+    document.getElementById('tray-empty').style.display = visible === 0 ? '' : 'none';
+    document.querySelector('#tray-table').closest('.table-wrap').style.display = visible === 0 ? 'none' : '';
+  }
+
+  function buildFilterButtons(trays) {
+    const types = [...new Set(trays.map(t => t.type))].sort();
+    const bar = document.getElementById('tray-filters');
+    // Keep "All" button, remove the rest
+    while (bar.children.length > 1) bar.removeChild(bar.lastChild);
+    types.forEach(type => {
+      let btn = bar.querySelector('[data-filter="' + type + '"]');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.dataset.filter = type;
+        btn.textContent = type;
+        btn.addEventListener('click', () => {
+          activeFilter = type;
+          bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          applyFilter();
+        });
+        bar.appendChild(btn);
+      }
+    });
+    // Wire up "All"
+    const allBtn = bar.querySelector('[data-filter="*"]');
+    allBtn.onclick = () => {
+      activeFilter = '*';
+      bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      allBtn.classList.add('active');
+      applyFilter();
+    };
+    // Remove buttons for types that no longer exist
+    Array.from(bar.querySelectorAll('button[data-filter]')).forEach(btn => {
+      if (btn.dataset.filter !== '*' && !types.includes(btn.dataset.filter)) {
+        btn.remove();
+        if (activeFilter === btn.dataset.filter) {
+          activeFilter = '*';
+          allBtn.classList.add('active');
+        }
+      }
+    });
+  }
+
+  // --- Render helpers ---
+  function renderTrayRows(trays) {
+    const tbody = document.querySelector('#tray-table tbody');
+    tbody.innerHTML = '';
+    trays.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.dataset.status = t.status;
+      tr.dataset.type = t.type;
+      var jobCell = t.jobUrl
+        ? '<a href="' + esc(t.jobUrl) + '" target="_blank" rel="noopener">' + esc(t.job) + '</a>'
+        : esc(t.job);
+      tr.innerHTML =
+        '<td class="dim">' + esc(t.id) + '</td>' +
+        '<td>' + esc(t.type) + '</td>' +
+        '<td>' + esc(t.org) + '</td>' +
+        '<td><span class="badge">' + esc(t.status) + '</span></td>' +
+        '<td>' + esc(t.repository) + '</td>' +
+        '<td>' + esc(t.workflow) + '</td>' +
+        '<td>' + jobCell + '</td>' +
+        '<td class="dim">' + esc(t.since) + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderEventRows(messages) {
+    const tbody = document.querySelector('#event-table tbody');
+    tbody.innerHTML = '';
+    messages.forEach(m => {
+      const tr = document.createElement('tr');
+      tr.dataset.kind = m.kind;
+      tr.innerHTML =
+        '<td class="dim">' + esc(m.time) + '</td>' +
+        '<td>' + esc(m.type) + '</td>' +
+        '<td><span class="badge">' + esc(m.kind) + '</span></td>' +
+        '<td class="detail">' + esc(m.detail) + '</td>';
+      tbody.appendChild(tr);
+    });
+    document.getElementById('event-empty').style.display = messages.length === 0 ? '' : 'none';
+    document.querySelector('#event-table').closest('.table-wrap').style.display = messages.length === 0 ? 'none' : '';
+  }
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  // --- Fetch loop ---
+  async function refresh() {
+    try {
+      const resp = await fetch('/status/data');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      document.getElementById('timestamp').textContent = data.now + ' \u2014 refreshes every 5s';
+
+      buildFilterButtons(data.trays || []);
+      renderTrayRows(data.trays || []);
+      applySort('tray-table');
+      applyFilter();
+
+      renderEventRows(data.messages || []);
+      applySort('event-table');
+    } catch (e) {
+      // silently retry next cycle
+    }
+  }
+
+  // Initial filter buttons from server-rendered data
+  (function initFilters() {
+    const rows = document.querySelectorAll('#tray-table tbody tr[data-type]');
+    const types = [...new Set(Array.from(rows).map(r => r.dataset.type))].sort();
+    const bar = document.getElementById('tray-filters');
+    types.forEach(type => {
+      const btn = document.createElement('button');
+      btn.dataset.filter = type;
+      btn.textContent = type;
+      btn.addEventListener('click', () => {
+        activeFilter = type;
+        bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyFilter();
+      });
+      bar.appendChild(btn);
+    });
+    // Show/hide empty states based on initial data
+    const trayCount = document.querySelectorAll('#tray-table tbody tr').length;
+    document.getElementById('tray-empty').style.display = trayCount === 0 ? '' : 'none';
+    document.querySelector('#tray-table').closest('.table-wrap').style.display = trayCount === 0 ? 'none' : '';
+    const eventCount = document.querySelectorAll('#event-table tbody tr').length;
+    document.getElementById('event-empty').style.display = eventCount === 0 ? '' : 'none';
+    document.querySelector('#event-table').closest('.table-wrap').style.display = eventCount === 0 ? 'none' : '';
+  })();
+
+  setInterval(refresh, 5000);
+})();
 </script>
 
 </body>

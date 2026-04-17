@@ -60,7 +60,7 @@ func (m *MockTrayRepository) Delete(_ context.Context, trayId string) error {
 	return nil
 }
 
-func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string) (*trays.Tray, error) {
+func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string, jobName string, workflowName string) (*trays.Tray, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
@@ -82,6 +82,12 @@ func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, stat
 	}
 	if repository != "" {
 		tray.Repository = repository
+	}
+	if jobName != "" {
+		tray.JobName = jobName
+	}
+	if workflowName != "" {
+		tray.WorkflowName = workflowName
 	}
 	tray.StatusChanged = time.Now()
 	return tray, nil
