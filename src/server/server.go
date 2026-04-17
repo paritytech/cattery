@@ -164,6 +164,7 @@ func agentMux(h *handlers.Handlers) *http.ServeMux {
 
 func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
 	mux.HandleFunc("/status", h.Status)
+	mux.HandleFunc("GET /status/data", h.StatusData)
 	mux.Handle("/metrics", promhttp.Handler())
 }
 

@@ -5,7 +5,9 @@ import (
 	"cattery/lib/trayManager"
 	"context"
 	"fmt"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"cattery/lib/config"
@@ -158,8 +160,9 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.WorkflowRunID)
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
+	workflowName := parseWorkflowName(jobInfo.JobWorkflowRef)
 
-	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName)
+	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName, jobInfo.JobDisplayName, workflowName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
 		return err
@@ -204,4 +207,22 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 	})
 
 	return nil
+}
+
+// parseWorkflowName extracts the workflow filename (without extension) from
+// a JobWorkflowRef like "owner/repo/.github/workflows/ci.yml@refs/heads/main".
+func parseWorkflowName(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	// Strip @ref suffix
+	if i := strings.LastIndex(ref, "@"); i != -1 {
+		ref = ref[:i]
+	}
+	name := path.Base(ref)
+	// Remove extension (.yml / .yaml)
+	if ext := path.Ext(name); ext != "" {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
 }

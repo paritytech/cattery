@@ -16,7 +16,9 @@ type Tray struct {
 	GitHubOrgName  string     `bson:"gitHubOrgName"`
 	GitHubRunnerId int64      `bson:"gitHubRunnerId"`
 	JobRunId       int64      `bson:"jobRunId"`
+	JobName        string     `bson:"jobName"`
 	WorkflowRunId  int64      `bson:"workflowRunId"`
+	WorkflowName   string     `bson:"workflowName"`
 	Repository     string     `bson:"repository"`
 	Status         TrayStatus `bson:"status"`
 	StatusChanged  time.Time  `bson:"statusChanged"`
