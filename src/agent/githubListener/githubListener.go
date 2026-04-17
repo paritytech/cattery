@@ -2,72 +2,65 @@ package githubListener
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
-	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
+// gracePeriod is how long the runner is given to exit after an interrupt
+// before we escalate to SIGKILL.
+const gracePeriod = 10 * time.Second
+
 type GithubListener struct {
 	listenerPath string
-	process      *os.Process
-	started      chan struct{} // closed once process has started (or failed)
-
-	mut sync.Mutex
 }
 
 func NewGithubListener(listenerPath string) *GithubListener {
-	return &GithubListener{
-		listenerPath: listenerPath,
-		started:      make(chan struct{}),
+	return &GithubListener{listenerPath: listenerPath}
+}
+
+// Run starts the GitHub runner listener and blocks until either the process
+// exits or ctx is cancelled. On cancellation the process is interrupted and,
+// if it doesn't exit within gracePeriod, forcefully killed with SIGKILL.
+func (l *GithubListener) Run(ctx context.Context, jitConfig *string) error {
+	cmd := exec.Command(l.listenerPath, "run", "--jitconfig", *jitConfig)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start listener: %w", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		shutdownProcess(cmd.Process, done)
+		return ctx.Err()
 	}
 }
 
-// Start launches the GitHub runner listener in a background goroutine.
-// When the process exits, it cancels ctx with the resulting error (nil on success).
-func (l *GithubListener) Start(ctx context.Context, cancel context.CancelCauseFunc, jitConfig *string) {
-	var commandRun = exec.Command(l.listenerPath, "run", "--jitconfig", *jitConfig)
-	commandRun.Stdout = os.Stdout
-	commandRun.Stderr = os.Stderr
+// shutdownProcess asks the process to exit, escalating to SIGKILL if the
+// grace period elapses. Blocks until cmd.Wait() observes the exit.
+func shutdownProcess(p *os.Process, done <-chan error) {
+	if err := interrupt(p); err != nil {
+		log.Errorf("Failed to interrupt listener: %v", err)
+	}
 
-	go func() {
-		err := commandRun.Start()
-		if err != nil {
-			log.Errorf("Listener failed to start: %v", err)
-			close(l.started)
-			cancel(err)
-			return
-		}
-
-		l.mut.Lock()
-		l.process = commandRun.Process
-		l.mut.Unlock()
-		close(l.started)
-
-		err = commandRun.Wait()
-		cancel(err) // nil means clean exit
-	}()
-}
-
-func (l *GithubListener) Stop() {
-	<-l.started // wait for process to be set before attempting kill
-
-	l.mut.Lock()
-	defer l.mut.Unlock()
-
-	if l.process == nil {
+	select {
+	case <-done:
 		return
+	case <-time.After(gracePeriod):
+		log.Warnf("Listener did not exit within %s, sending SIGKILL", gracePeriod)
+		if err := p.Kill(); err != nil {
+			log.Errorf("Failed to kill listener: %v", err)
+		}
+		<-done
 	}
-
-	err := l.kill()
-	if err != nil {
-		log.Error("Failed to kill process: ", err)
-	}
-
-	l.process = nil
-}
-
-func (l *GithubListener) kill() error {
-	return kill(l)
 }
