@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cattery/lib/config"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trays"
 	"cattery/ui"
@@ -42,14 +43,21 @@ func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg := config.Get()
 	data := struct {
-		Now      time.Time
-		Trays    []*trays.Tray
-		Messages []*scaleSetPoller.Message
+		Now       time.Time
+		Trays     []*trays.Tray
+		Messages  []*scaleSetPoller.Message
+		Orgs      []*config.GitHubOrganization
+		Providers []*config.ProviderConfig
+		TrayTypes []*config.TrayType
 	}{
-		Now:      time.Now().UTC(),
-		Trays:    trayList,
-		Messages: h.ScaleSetManager.MessageHistory(),
+		Now:       time.Now().UTC(),
+		Trays:     trayList,
+		Messages:  h.ScaleSetManager.MessageHistory(),
+		Orgs:      cfg.Github,
+		Providers: cfg.Providers,
+		TrayTypes: cfg.TrayTypes,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

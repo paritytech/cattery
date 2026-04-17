@@ -131,6 +131,53 @@
 
     a { color: #4fc3f7; text-decoration: none; }
     a:hover { text-decoration: underline; }
+
+    /* Tabs */
+    nav.tabs {
+      background: #1a1a1a;
+      border-bottom: 1px solid #222;
+      padding: 0 24px;
+      display: flex;
+      gap: 4px;
+    }
+    nav.tabs button {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #777;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    nav.tabs button:hover { color: #ccc; }
+    nav.tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .kv-grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 4px 16px;
+      font-size: 13px;
+    }
+    .kv-grid .k { color: #666; }
+    .kv-grid .v { color: #ccc; word-break: break-all; }
+
+    .card {
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 14px 18px;
+      margin-bottom: 12px;
+    }
+    .card .name {
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
@@ -140,7 +187,16 @@
   <span class="meta" id="timestamp">{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; refreshes every 5s</span>
 </header>
 
+<nav class="tabs" id="tabs">
+  <button class="active" data-tab="status">Status</button>
+  <button data-tab="orgs">GitHub Orgs ({{len .Orgs}})</button>
+  <button data-tab="providers">Providers ({{len .Providers}})</button>
+  <button data-tab="traytypes">Tray Types ({{len .TrayTypes}})</button>
+</nav>
+
 <main>
+
+  <div class="tab-panel active" id="tab-status">
 
   <section>
     <details id="trays-details" open>
@@ -215,10 +271,93 @@
     </details>
   </section>
 
+  </div>
+
+  <div class="tab-panel" id="tab-orgs">
+    {{if .Orgs}}
+      {{range .Orgs}}
+      <div class="card">
+        <div class="name">{{.Name}}</div>
+      </div>
+      {{end}}
+    {{else}}
+      <p class="empty">No GitHub orgs configured.</p>
+    {{end}}
+  </div>
+
+  <div class="tab-panel" id="tab-providers">
+    {{if .Providers}}
+      {{range .Providers}}
+      <div class="card">
+        <div class="name">{{.Get "name"}} <span class="dim" style="font-weight:400;font-size:12px;">({{.Get "type"}})</span></div>
+      </div>
+      {{end}}
+    {{else}}
+      <p class="empty">No providers configured.</p>
+    {{end}}
+  </div>
+
+  <div class="tab-panel" id="tab-traytypes">
+    {{if .TrayTypes}}
+      <div class="table-wrap">
+        <table id="traytype-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">Provider</th>
+              <th data-col="2">Org</th>
+              <th data-col="3">Runner Group</th>
+              <th data-col="4">Max Trays</th>
+              <th data-col="5">Max Parallel Creation</th>
+              <th data-col="6">Shutdown</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .TrayTypes}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td>{{.Provider}}</td>
+              <td>{{.GitHubOrg}}</td>
+              <td>{{.RunnerGroupId}}</td>
+              <td>{{if .MaxTrays}}{{.MaxTrays}}{{else}}<span class="dim">&infin;</span>{{end}}</td>
+              <td>{{if .MaxParallelCreation}}{{.MaxParallelCreation}}{{else}}<span class="dim">10</span>{{end}}</td>
+              <td>{{.Shutdown}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="empty">No tray types configured.</p>
+    {{end}}
+  </div>
+
 </main>
 
 <script>
 (function() {
+  // --- Tabs ---
+  const tabs = document.getElementById('tabs');
+  if (tabs) {
+    tabs.querySelectorAll('button[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.tab;
+        tabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const panel = document.getElementById('tab-' + target);
+        if (panel) panel.classList.add('active');
+        try { history.replaceState(null, '', '#' + target); } catch (e) {}
+      });
+    });
+    // Restore tab from hash on load
+    const initial = (location.hash || '').replace('#', '');
+    if (initial) {
+      const btn = tabs.querySelector('button[data-tab="' + initial + '"]');
+      if (btn) btn.click();
+    }
+  }
+
   // --- Sort state per table ---
   const sortState = {}; // tableId -> { col, asc }
 
