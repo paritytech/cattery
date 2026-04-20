@@ -249,14 +249,14 @@ func TestIntegration_HappyPath_Register_Ping_Unregister(t *testing.T) {
 func TestIntegration_PingTerminatesStaleAgent(t *testing.T) {
 	th := setupIntegrationTest(t)
 
-	// Insert a tray that's been in Registered state for 5 minutes (stale)
+	// Insert a tray that's been in Registered state for 20 minutes (stale)
 	tray := &trays.Tray{
 		Id:            "test-type-stale1",
 		TrayTypeName:  "test-type",
 		ProviderName:  "mock",
 		GitHubOrgName: "test-org",
 		Status:        trays.TrayStatusRegistered,
-		StatusChanged: time.Now().Add(-5 * time.Minute),
+		StatusChanged: time.Now().Add(-20 * time.Minute),
 		ProviderData:  make(map[string]string),
 	}
 	th.insertTray(t, tray)
@@ -271,7 +271,7 @@ func TestIntegration_PingTerminatesStaleAgent(t *testing.T) {
 	var pingResp messages.PingResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&pingResp))
 	assert.True(t, pingResp.Terminate)
-	assert.Contains(t, pingResp.Message, "not changed in 2 minutes")
+	assert.Contains(t, pingResp.Message, "not changed in 15 minutes")
 }
 
 func TestIntegration_PingDoesNotTerminateRunningTray(t *testing.T) {
