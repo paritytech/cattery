@@ -1,6 +1,7 @@
 package scaleSetPoller
 
 import (
+	"cattery/lib/metrics"
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/trayManager"
 	"context"
@@ -137,6 +138,15 @@ type catteryScaler struct {
 
 func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {
 	cs.latestStat.Store(statistics)
+
+	org := cs.poller.trayType.GitHubOrg
+	name := cs.poller.trayType.Name
+	metrics.ScaleSetPendingJobsSet(org, name, statistics.TotalAvailableJobs)
+	metrics.ScaleSetAssignedJobsSet(org, name, statistics.TotalAssignedJobs)
+	metrics.ScaleSetRunningJobsSet(org, name, statistics.TotalRunningJobs)
+	metrics.ScaleSetBusyRunnersSet(org, name, statistics.TotalBusyRunners)
+	metrics.ScaleSetIdleRunnersSet(org, name, statistics.TotalIdleRunners)
+	metrics.ScaleSetRegisteredRunnersSet(org, name, statistics.TotalRegisteredRunners)
 }
 func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)     {}
 func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted) {}
