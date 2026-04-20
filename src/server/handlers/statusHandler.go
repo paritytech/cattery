@@ -31,6 +31,7 @@ var statusTmpl = template.Must(
 			"joburl": func(t *trays.Tray) string {
 				return jobURL(t)
 			},
+			"msgJobURL": messageJobURL,
 		}).
 		ParseFS(ui.Templates, "status.html"),
 )
@@ -82,7 +83,26 @@ type statusMessageJSON struct {
 	Time     string `json:"time"`
 	TrayType string `json:"type"`
 	Kind     string `json:"kind"`
-	Detail   string `json:"detail"`
+
+	// Job event fields.
+	Repository     string `json:"repository,omitempty"`
+	JobDisplayName string `json:"jobDisplayName,omitempty"`
+	RunnerName     string `json:"runnerName,omitempty"`
+	Result         string `json:"result,omitempty"`
+	JobURL         string `json:"jobUrl,omitempty"`
+
+	// Scale event fields.
+	DesiredCount int                  `json:"desiredCount,omitempty"`
+	Stats        *statusScaleStatsJSON `json:"stats,omitempty"`
+}
+
+type statusScaleStatsJSON struct {
+	Available  int `json:"available"`
+	Assigned   int `json:"assigned"`
+	Running    int `json:"running"`
+	Busy       int `json:"busy"`
+	Idle       int `json:"idle"`
+	Registered int `json:"registered"`
 }
 
 func (h *Handlers) StatusData(w http.ResponseWriter, r *http.Request) {
@@ -111,12 +131,31 @@ func (h *Handlers) StatusData(w http.ResponseWriter, r *http.Request) {
 	msgs := h.ScaleSetManager.MessageHistory()
 	msgItems := make([]statusMessageJSON, len(msgs))
 	for i, m := range msgs {
-		msgItems[i] = statusMessageJSON{
+		item := statusMessageJSON{
 			Time:     m.Time.UTC().Format("15:04:05"),
 			TrayType: m.TrayType,
 			Kind:     string(m.Kind),
-			Detail:   m.Detail,
 		}
+		if m.IsScale() {
+			item.DesiredCount = m.DesiredCount
+			if m.Stats != nil {
+				item.Stats = &statusScaleStatsJSON{
+					Available:  m.Stats.Available,
+					Assigned:   m.Stats.Assigned,
+					Running:    m.Stats.Running,
+					Busy:       m.Stats.Busy,
+					Idle:       m.Stats.Idle,
+					Registered: m.Stats.Registered,
+				}
+			}
+		} else {
+			item.Repository = m.Repository
+			item.JobDisplayName = m.JobDisplayName
+			item.RunnerName = m.RunnerName
+			item.Result = m.Result
+			item.JobURL = messageJobURL(m)
+		}
+		msgItems[i] = item
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -131,13 +170,21 @@ func (h *Handlers) StatusData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// jobURL builds a GitHub Actions job URL when repository and job run ID are known.
+// buildJobURL returns the GitHub Actions job URL, or "" if any part is missing.
 // Format: https://github.com/{owner}/{repo}/actions/runs/{workflowRunId}/job/{jobRunId}
-func jobURL(t *trays.Tray) string {
-	if t.Repository == "" || t.WorkflowRunId == 0 || t.JobRunId == 0 {
+func buildJobURL(repo string, workflowRunID, jobRunID int64) string {
+	if repo == "" || workflowRunID == 0 || jobRunID == 0 {
 		return ""
 	}
-	return fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", t.Repository, t.WorkflowRunId, t.JobRunId)
+	return fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repo, workflowRunID, jobRunID)
+}
+
+func jobURL(t *trays.Tray) string {
+	return buildJobURL(t.Repository, t.WorkflowRunId, t.JobRunId)
+}
+
+func messageJobURL(m *scaleSetPoller.Message) string {
+	return buildJobURL(m.Repository, m.WorkflowRunID, m.JobID)
 }
 
 func formatAge(t time.Time) string {
