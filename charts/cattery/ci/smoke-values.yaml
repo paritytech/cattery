@@ -47,6 +47,15 @@ ingress:
 
 serviceMonitor:
   enabled: true
+  annotations:
+    example.com/owner: team-a
+
+deploymentAnnotations:
+  example.com/owner: team-a
+
+service:
+  annotations:
+    cloud.google.com/load-balancer-type: Internal
 
 resources:
   requests:

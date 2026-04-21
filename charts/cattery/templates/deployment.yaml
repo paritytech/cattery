@@ -4,6 +4,10 @@ metadata:
   name: {{ include "cattery.fullname" . }}
   labels:
     {{- include "cattery.labels" . | nindent 4 }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
