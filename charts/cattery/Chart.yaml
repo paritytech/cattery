@@ -1,0 +1,17 @@
+apiVersion: v2
+name: cattery
+description: Scheduler and lifecycle manager for GitHub Actions self-hosted runners
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+home: https://github.com/paritytech/cattery
+sources:
+  - https://github.com/paritytech/cattery
+keywords:
+  - github-actions
+  - self-hosted-runners
+  - ci
+  - runner-scale-set
+maintainers:
+  - name: paritytech
+    url: https://github.com/paritytech/cattery

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cattery.fullname" . }}
+  labels:
+    {{- include "cattery.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- if .Values.config.server.statusListenAddress }}
+    - port: {{ .Values.service.statusPort }}
+      targetPort: status
+      protocol: TCP
+      name: status
+    {{- end }}
+  selector:
+    {{- include "cattery.selectorLabels" . | nindent 4 }}

@@ -1,0 +1,41 @@
+Cattery {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Service:
+  {{ include "cattery.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+{{- if .Values.config.server.statusListenAddress }}
+
+Status / metrics port:
+  {{ include "cattery.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.statusPort }}
+  - /status   status page
+  - /metrics  Prometheus metrics
+{{- else }}
+
+Status / metrics are served on the main port (/status, /metrics).
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Ingress enabled on:
+{{- range .Values.ingress.hosts }}
+  - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+
+To reach the status page from your laptop:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cattery.fullname" . }} \
+    {{- if .Values.config.server.statusListenAddress }} {{ .Values.service.statusPort }}:{{ .Values.service.statusPort }}{{ else }} {{ .Values.service.port }}:{{ .Values.service.port }}{{ end }}
+  Then open http://localhost:{{ if .Values.config.server.statusListenAddress }}{{ .Values.service.statusPort }}{{ else }}{{ .Values.service.port }}{{ end }}/status
+{{- end }}
+
+{{- if not .Values.config.github }}
+
+WARNING: no GitHub apps configured. Add entries under `config.github` before
+cattery can poll for jobs. See docs/configuration.md in the cattery repo.
+{{- end }}
+
+{{- if not .Values.config.trayTypes }}
+
+WARNING: no trayTypes configured. Cattery will run but won't provision any
+runners until you add at least one trayType under `config.trayTypes`.
+{{- end }}
