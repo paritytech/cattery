@@ -1,0 +1,180 @@
+# Cattery is a singleton — do not raise replicaCount.
+replicaCount: 1
+
+image:
+  repository: docker.io/paritytech/cattery
+  pullPolicy: IfNotPresent
+  # Defaults to .Chart.AppVersion when unset.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+revisionHistoryLimit: 5
+terminationGracePeriodSeconds: 30
+priorityClassName: ""
+
+# Cattery config rendered into /etc/cattery/config.yaml.
+# See https://github.com/paritytech/cattery/blob/main/docs/configuration.md
+config:
+  server:
+    listenAddress: "0.0.0.0:5137"
+    # Optionally serve /status and /metrics on a separate port. Leave empty
+    # to serve them on listenAddress.
+    statusListenAddress: "0.0.0.0:3925"
+    # URL agents use to reach the server. Must be reachable from runners.
+    advertiseUrl: http://cattery.example.com
+
+  database:
+    uri: mongodb://mongodb:27017/
+    database: cattery
+
+  # One entry per GitHub App / organization.
+  github: []
+  # - name: my-org
+  #   appId: 123456
+  #   appClientId: Iv123abC
+  #   installationId: 987654321
+  #   privateKeyPath: /cattery/secrets/my-org/private-key.pem
+
+  providers: []
+  # - name: docker-local
+  #   type: docker
+  # - name: gce
+  #   type: google
+  #   project: my-gcp-project
+
+  trayTypes: []
+  # - name: my-runner
+  #   provider: docker-local
+  #   githubOrg: my-org
+  #   runnerGroupId: 1
+  #   maxTrays: 5
+  #   shutdown: true
+  #   config:
+  #     image: my-runner-image:latest
+
+# Extra arbitrary files mounted into the container.
+#
+# Use this for GitHub App private keys and any other sensitive file the
+# config.yaml references by path.
+#
+# Two modes per entry:
+#   1. `value` — inline content, rendered into a Secret managed by this chart
+#      (convenient, but puts the secret in your values file).
+#   2. `existingSecret` / `existingSecretKey` — reference an externally
+#      managed Secret (recommended for production).
+secretFiles: {}
+# secretFiles:
+#   my-org-private-key:
+#     mountPath: /cattery/secrets/my-org/private-key.pem
+#     value: |
+#       -----BEGIN RSA PRIVATE KEY-----
+#       ...
+#       -----END RSA PRIVATE KEY-----
+#   other-org-private-key:
+#     mountPath: /cattery/secrets/other-org/private-key.pem
+#     existingSecret: other-org-github-app
+#     existingSecretKey: private-key.pem
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Cattery does not call the Kubernetes API. Keep disabled unless you need it.
+  automountServiceAccountToken: false
+
+deploymentAnnotations: {}
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 65532
+
+# The upstream image runs as the non-root `cattery` user (uid 65532).
+# These are recommended hardening flags — enable them if your providers
+# don't need any extra capabilities.
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 65532
+  # runAsGroup: 65532
+  # capabilities:
+  #   drop: ["ALL"]
+  # seccompProfile:
+  #   type: RuntimeDefault
+
+# Extra environment variables (e.g. to override config via env, for debugging).
+env: []
+# env:
+#   - name: TZ
+#     value: UTC
+
+# envFrom entries — handy for pulling MongoDB URIs or provider credentials
+# out of existing ConfigMaps / Secrets without embedding them in values.
+envFrom: []
+# envFrom:
+#   - secretRef:
+#       name: cattery-runtime
+
+# Extra volumes/volumeMounts for anything `secretFiles` does not cover
+# (e.g. hostPath for Docker socket, projected tokens, extra ConfigMaps).
+extraVolumes: []
+extraVolumeMounts: []
+
+service:
+  type: ClusterIP
+  port: 5137
+  # Exposed only when config.server.statusListenAddress is set.
+  statusPort: 3925
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  # - host: cattery.example.com
+  #   paths:
+  #     - path: /
+  #       pathType: Prefix
+  tls: []
+  # - secretName: cattery-tls
+  #   hosts:
+  #     - cattery.example.com
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 512Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Probes hit /status. They target the status port when
+# config.server.statusListenAddress is set, otherwise the main http port.
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  annotations: {}
