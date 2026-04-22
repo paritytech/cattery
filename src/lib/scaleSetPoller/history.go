@@ -15,12 +15,36 @@ const (
 	MessageKindJobCompleted MessageKind = "job_completed"
 )
 
+// ScaleStats is a display-only snapshot of scale-set statistics, decoupled from
+// the scaleset library types so the history package has no upstream dependency.
+type ScaleStats struct {
+	Available  int
+	Assigned   int
+	Running    int
+	Busy       int
+	Idle       int
+	Registered int
+}
+
 type Message struct {
 	Time     time.Time
 	Kind     MessageKind
 	TrayType string
-	Detail   string
+
+	// Job event fields (set on job_started / job_completed).
+	Repository     string
+	WorkflowRunID  int64
+	JobID          int64
+	JobDisplayName string
+	RunnerName     string
+	Result         string
+
+	// Scale event fields (set on scale).
+	DesiredCount int
+	Stats        *ScaleStats
 }
+
+func (m *Message) IsScale() bool { return m.Kind == MessageKindScale }
 
 type History struct {
 	mu    sync.RWMutex

@@ -184,7 +184,7 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 }
 
 func (tm *TrayManager) HandleStale(ctx context.Context) {
-	interval := time.Minute * 2
+	interval := time.Minute * 15
 
 	go func() {
 		for {

@@ -154,7 +154,7 @@
     nav.tabs button.active { color: #fff; border-bottom-color: #4fc3f7; }
 
     .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
+    .tab-panel.active { display: flex; flex-direction: column; gap: 36px; }
 
     .kv-grid {
       display: grid;
@@ -256,11 +256,18 @@
             </thead>
             <tbody>
               {{range .Messages}}
-              <tr data-kind="{{.Kind}}">
+              <tr data-kind="{{.Kind}}" data-type="{{.TrayType}}">
                 <td class="dim">{{.Time.UTC.Format "15:04:05"}}</td>
                 <td>{{.TrayType}}</td>
                 <td><span class="badge">{{.Kind}}</span></td>
-                <td class="detail">{{.Detail}}</td>
+                <td class="detail">
+                  {{- if .IsScale -}}
+                    desired={{.DesiredCount}}{{with .Stats}} available={{.Available}} assigned={{.Assigned}} running={{.Running}} runners(busy={{.Busy}} idle={{.Idle}} registered={{.Registered}}){{end}}
+                  {{- else -}}
+                    {{- $url := msgJobURL . -}}
+                    {{- if $url -}}<a href="{{$url}}" target="_blank" rel="noopener">{{.JobDisplayName}}</a>{{- else -}}{{.JobDisplayName}}{{- end }} on {{.RunnerName}}{{if .Result}} (result: {{.Result}}){{end -}}
+                  {{- end -}}
+                </td>
               </tr>
               {{end}}
             </tbody>
@@ -401,56 +408,58 @@
   let activeFilter = '*';
 
   function applyFilter() {
-    const tbody = document.querySelector('#tray-table tbody');
-    let visible = 0;
-    Array.from(tbody.rows).forEach(tr => {
+    const trayBody = document.querySelector('#tray-table tbody');
+    let trayVisible = 0;
+    Array.from(trayBody.rows).forEach(tr => {
       const match = activeFilter === '*' || tr.dataset.type === activeFilter;
       tr.style.display = match ? '' : 'none';
-      if (match) visible++;
+      if (match) trayVisible++;
     });
-    document.getElementById('tray-count').textContent = visible;
-    document.getElementById('tray-empty').style.display = visible === 0 ? '' : 'none';
-    document.querySelector('#tray-table').closest('.table-wrap').style.display = visible === 0 ? 'none' : '';
+    document.getElementById('tray-count').textContent = trayVisible;
+    document.getElementById('tray-empty').style.display = trayVisible === 0 ? '' : 'none';
+    document.querySelector('#tray-table').closest('.table-wrap').style.display = trayVisible === 0 ? 'none' : '';
+
+    const eventBody = document.querySelector('#event-table tbody');
+    let eventVisible = 0;
+    Array.from(eventBody.rows).forEach(tr => {
+      const match = activeFilter === '*' || tr.dataset.type === activeFilter;
+      tr.style.display = match ? '' : 'none';
+      if (match) eventVisible++;
+    });
+    document.getElementById('event-empty').style.display = eventVisible === 0 ? '' : 'none';
+    document.querySelector('#event-table').closest('.table-wrap').style.display = eventVisible === 0 ? 'none' : '';
+  }
+
+  function selectFilter(type) {
+    activeFilter = type;
+    const bar = document.getElementById('tray-filters');
+    bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    const btn = bar.querySelector('[data-filter="' + type + '"]') || bar.querySelector('[data-filter="*"]');
+    btn.classList.add('active');
+    applyFilter();
   }
 
   function buildFilterButtons(trays) {
     const types = [...new Set(trays.map(t => t.type))].sort();
+    // If the selected type no longer exists, fall back to All.
+    if (activeFilter !== '*' && !types.includes(activeFilter)) {
+      activeFilter = '*';
+    }
     const bar = document.getElementById('tray-filters');
-    // Keep "All" button, remove the rest
+    // Rebuild: the "All" button is the first child and stays; rest are re-created.
     while (bar.children.length > 1) bar.removeChild(bar.lastChild);
     types.forEach(type => {
-      let btn = bar.querySelector('[data-filter="' + type + '"]');
-      if (!btn) {
-        btn = document.createElement('button');
-        btn.dataset.filter = type;
-        btn.textContent = type;
-        btn.addEventListener('click', () => {
-          activeFilter = type;
-          bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          applyFilter();
-        });
-        bar.appendChild(btn);
-      }
+      const btn = document.createElement('button');
+      btn.dataset.filter = type;
+      btn.textContent = type;
+      btn.addEventListener('click', () => selectFilter(type));
+      bar.appendChild(btn);
     });
-    // Wire up "All"
     const allBtn = bar.querySelector('[data-filter="*"]');
-    allBtn.onclick = () => {
-      activeFilter = '*';
-      bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-      allBtn.classList.add('active');
-      applyFilter();
-    };
-    // Remove buttons for types that no longer exist
-    Array.from(bar.querySelectorAll('button[data-filter]')).forEach(btn => {
-      if (btn.dataset.filter !== '*' && !types.includes(btn.dataset.filter)) {
-        btn.remove();
-        if (activeFilter === btn.dataset.filter) {
-          activeFilter = '*';
-          allBtn.classList.add('active');
-        }
-      }
-    });
+    allBtn.onclick = () => selectFilter('*');
+    // Apply active class for whichever filter is current.
+    bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    (bar.querySelector('[data-filter="' + activeFilter + '"]') || allBtn).classList.add('active');
   }
 
   // --- Render helpers ---
@@ -477,21 +486,42 @@
     });
   }
 
+  function renderDetail(m) {
+    if (m.kind === 'scale') {
+      let s = 'desired=' + (m.desiredCount || 0);
+      if (m.stats) {
+        s += ' available=' + m.stats.available +
+             ' assigned=' + m.stats.assigned +
+             ' running=' + m.stats.running +
+             ' runners(busy=' + m.stats.busy +
+             ' idle=' + m.stats.idle +
+             ' registered=' + m.stats.registered + ')';
+      }
+      return esc(s);
+    }
+    const job = esc(m.jobDisplayName || '');
+    const jobLink = m.jobUrl
+      ? '<a href="' + esc(m.jobUrl) + '" target="_blank" rel="noopener">' + job + '</a>'
+      : job;
+    let s = jobLink + ' on ' + esc(m.runnerName || '');
+    if (m.result) s += ' (result: ' + esc(m.result) + ')';
+    return s;
+  }
+
   function renderEventRows(messages) {
     const tbody = document.querySelector('#event-table tbody');
     tbody.innerHTML = '';
     messages.forEach(m => {
       const tr = document.createElement('tr');
       tr.dataset.kind = m.kind;
+      tr.dataset.type = m.type;
       tr.innerHTML =
         '<td class="dim">' + esc(m.time) + '</td>' +
         '<td>' + esc(m.type) + '</td>' +
         '<td><span class="badge">' + esc(m.kind) + '</span></td>' +
-        '<td class="detail">' + esc(m.detail) + '</td>';
+        '<td class="detail">' + renderDetail(m) + '</td>';
       tbody.appendChild(tr);
     });
-    document.getElementById('event-empty').style.display = messages.length === 0 ? '' : 'none';
-    document.querySelector('#event-table').closest('.table-wrap').style.display = messages.length === 0 ? 'none' : '';
   }
 
   function esc(s) {
@@ -512,40 +542,21 @@
       buildFilterButtons(data.trays || []);
       renderTrayRows(data.trays || []);
       applySort('tray-table');
-      applyFilter();
 
       renderEventRows(data.messages || []);
       applySort('event-table');
+
+      applyFilter();
     } catch (e) {
       // silently retry next cycle
     }
   }
 
-  // Initial filter buttons from server-rendered data
-  (function initFilters() {
-    const rows = document.querySelectorAll('#tray-table tbody tr[data-type]');
-    const types = [...new Set(Array.from(rows).map(r => r.dataset.type))].sort();
-    const bar = document.getElementById('tray-filters');
-    types.forEach(type => {
-      const btn = document.createElement('button');
-      btn.dataset.filter = type;
-      btn.textContent = type;
-      btn.addEventListener('click', () => {
-        activeFilter = type;
-        bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        applyFilter();
-      });
-      bar.appendChild(btn);
-    });
-    // Show/hide empty states based on initial data
-    const trayCount = document.querySelectorAll('#tray-table tbody tr').length;
-    document.getElementById('tray-empty').style.display = trayCount === 0 ? '' : 'none';
-    document.querySelector('#tray-table').closest('.table-wrap').style.display = trayCount === 0 ? 'none' : '';
-    const eventCount = document.querySelectorAll('#event-table tbody tr').length;
-    document.getElementById('event-empty').style.display = eventCount === 0 ? '' : 'none';
-    document.querySelector('#event-table').closest('.table-wrap').style.display = eventCount === 0 ? 'none' : '';
-  })();
+  // Derive initial filter buttons from server-rendered rows; applyFilter sets empty states.
+  const initialTrays = Array.from(document.querySelectorAll('#tray-table tbody tr[data-type]'))
+    .map(r => ({ type: r.dataset.type }));
+  buildFilterButtons(initialTrays);
+  applyFilter();
 
   setInterval(refresh, 5000);
 })();

@@ -42,7 +42,32 @@ var (
 
 	scaleSetPendingJobs = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "cattery_scaleset_pending_jobs",
-		Help: "Number of pending jobs reported by scale set statistics",
+		Help: "Number of available (queued) jobs reported by scale set statistics",
+	}, []string{"org", "tray_type"})
+
+	scaleSetAssignedJobs = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cattery_scaleset_assigned_jobs",
+		Help: "Number of jobs assigned to runners reported by scale set statistics",
+	}, []string{"org", "tray_type"})
+
+	scaleSetRunningJobs = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cattery_scaleset_running_jobs",
+		Help: "Number of currently running jobs reported by scale set statistics",
+	}, []string{"org", "tray_type"})
+
+	scaleSetBusyRunners = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cattery_scaleset_busy_runners",
+		Help: "Number of busy runners reported by scale set statistics",
+	}, []string{"org", "tray_type"})
+
+	scaleSetIdleRunners = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cattery_scaleset_idle_runners",
+		Help: "Number of idle runners reported by scale set statistics",
+	}, []string{"org", "tray_type"})
+
+	scaleSetRegisteredRunners = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cattery_scaleset_registered_runners",
+		Help: "Number of registered runners reported by scale set statistics",
 	}, []string{"org", "tray_type"})
 
 	registeredTraysDesc = prometheus.NewDesc(
@@ -86,6 +111,26 @@ func ScaleSetPollErrorsInc(org string, trayType string) {
 
 func ScaleSetPendingJobsSet(org string, trayType string, count int) {
 	scaleSetPendingJobs.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+func ScaleSetAssignedJobsSet(org string, trayType string, count int) {
+	scaleSetAssignedJobs.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+func ScaleSetRunningJobsSet(org string, trayType string, count int) {
+	scaleSetRunningJobs.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+func ScaleSetBusyRunnersSet(org string, trayType string, count int) {
+	scaleSetBusyRunners.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+func ScaleSetIdleRunnersSet(org string, trayType string, count int) {
+	scaleSetIdleRunners.WithLabelValues(org, trayType).Set(float64(count))
+}
+
+func ScaleSetRegisteredRunnersSet(org string, trayType string, count int) {
+	scaleSetRegisteredRunners.WithLabelValues(org, trayType).Set(float64(count))
 }
 
 // trayCollector queries the database on each Prometheus scrape.

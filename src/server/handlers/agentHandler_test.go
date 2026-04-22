@@ -133,7 +133,7 @@ func TestAgentPing_StaleNonRunningTray(t *testing.T) {
 	repo.Trays["tray-1"] = &trays.Tray{
 		Id:            "tray-1",
 		Status:        trays.TrayStatusRegistered,
-		StatusChanged: time.Now().Add(-5 * time.Minute),
+		StatusChanged: time.Now().Add(-20 * time.Minute),
 	}
 	h := setupHandlers(repo)
 
@@ -150,7 +150,7 @@ func TestAgentPing_StaleNonRunningTray(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	assert.NoError(t, err)
 	assert.True(t, resp.Terminate)
-	assert.Contains(t, resp.Message, "not changed in 2 minutes")
+	assert.Contains(t, resp.Message, "not changed in 15 minutes")
 }
 
 func TestAgentPing_RecentNonRunningTray(t *testing.T) {
