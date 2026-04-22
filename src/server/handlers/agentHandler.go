@@ -270,4 +270,6 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 		http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
 		return
 	}
+
+	responseWriter.WriteHeader(http.StatusOK)
 }

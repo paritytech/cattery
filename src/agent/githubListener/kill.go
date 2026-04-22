@@ -7,11 +7,12 @@ import (
 	"os"
 )
 
-func kill(l *GithubListener) error {
-	err := l.process.Signal(os.Kill)
-	if err != nil {
-		return fmt.Errorf("failed to kill process: %w", err)
+// interrupt asks the process to exit gracefully. On non-linux platforms we
+// don't have a separate graceful signal in use here, so we fall through to
+// os.Kill — the caller's grace-period + SIGKILL escalation still applies.
+func interrupt(process *os.Process) error {
+	if err := process.Signal(os.Interrupt); err != nil {
+		return fmt.Errorf("signal process: %w", err)
 	}
-
 	return nil
 }
