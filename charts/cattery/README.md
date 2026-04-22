@@ -67,8 +67,43 @@ secretFiles:
     existingSecretKey: private-key.pem
 ```
 
-```bash
-helm install cattery ./charts/cattery -f values.yaml
+### GCP provider
+
+When using the `google` provider outside of GKE Workload Identity, mount the
+service account key JSON as a file and point `credentialsFile` at it:
+
+```yaml
+secretFiles:
+  gcp-sa:
+    mountPath: /cattery/secrets/gcp-sa.json
+    existingSecret: my-gcp-sa
+    existingSecretKey: key.json
+
+config:
+  providers:
+    - name: gce
+      type: google
+      project: my-gcp-project
+      credentialsFile: /cattery/secrets/gcp-sa.json
+```
+
+On GKE, skip the file and use Workload Identity via `serviceAccount.annotations`.
+
+### Docker provider
+
+The `docker` provider needs access to a Docker daemon. Typical pattern is a
+hostPath mount of the socket (requires a privileged node configuration — not
+recommended for multi-tenant clusters):
+
+```yaml
+extraVolumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
+extraVolumeMounts:
+  - name: docker-sock
+    mountPath: /var/run/docker.sock
 ```
 
 ## Configuration
@@ -88,10 +123,6 @@ the path `config.github[*].privateKeyPath` expects. Two modes per entry:
 - **External** — set `existingSecret` (and optionally `existingSecretKey`,
   default `content`) to reference a Secret you manage elsewhere (sealed
   secrets, external-secrets-operator, vault, etc).
-
-Webhook secrets are handled the same way: inline `webhookSecret` on a
-`config.github[*]` entry renders a Secret, or reference an existing one via
-the top-level `webhookSecrets` map.
 
 ### Status port
 
@@ -121,7 +152,8 @@ CRDs installed in the cluster).
 | `config.providers`                    | `[]`                           | List of provider configs.                       |
 | `config.trayTypes`                    | `[]`                           | List of tray type configs.                      |
 | `secretFiles`                         | `{}`                           | Files mounted into the container from Secrets.  |
-| `webhookSecrets`                      | `{}`                           | References to existing webhook Secrets.         |
+| `env` / `envFrom`                     | `[]` / `[]`                    | Extra env vars on the container.                |
+| `extraVolumes` / `extraVolumeMounts`  | `[]` / `[]`                    | Escape hatch for arbitrary volume mounts.       |
 | `service.type`                        | `ClusterIP`                    |                                                 |
 | `service.port`                        | `5137`                         | Service port mapped to `http`.                  |
 | `service.statusPort`                  | `3925`                         | Service port for status/metrics (when enabled). |
@@ -129,10 +161,14 @@ CRDs installed in the cluster).
 | `serviceMonitor.enabled`              | `false`                        | Requires Prometheus Operator.                   |
 | `serviceAccount.create`               | `true`                         |                                                 |
 | `serviceAccount.annotations`          | `{}`                           | e.g. GKE Workload Identity binding.             |
+| `serviceAccount.automountServiceAccountToken` | `false`                | Cattery doesn't call the k8s API.               |
 | `resources`                           | `{}`                           |                                                 |
 | `livenessProbe.enabled`               | `true`                         |                                                 |
 | `readinessProbe.enabled`              | `true`                         |                                                 |
 | `nodeSelector` / `tolerations` / `affinity` | `{}` / `[]` / `{}`       |                                                 |
+| `priorityClassName`                   | `""`                           |                                                 |
+| `revisionHistoryLimit`                | `5`                            |                                                 |
+| `terminationGracePeriodSeconds`       | `30`                           |                                                 |
 
 ## Upgrading
 

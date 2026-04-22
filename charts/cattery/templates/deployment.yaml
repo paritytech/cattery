@@ -10,6 +10,7 @@ metadata:
   {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
     type: Recreate
   selector:
@@ -18,7 +19,7 @@ spec:
   template:
     metadata:
       annotations:
-        cattery/config-checksum: {{ .Values.config | toYaml | sha256sum }}
+        checksum/config: {{ .Values.config | toYaml | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -29,6 +30,11 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "cattery.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -45,10 +51,14 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          args:
-            - server
-            - -c
-            - /etc/cattery/config.yaml
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ regexReplaceAll ".*:" .Values.config.server.listenAddress "" | int }}
@@ -93,6 +103,9 @@ spec:
               subPath: {{ default "content" $spec.existingSecretKey }}
               readOnly: true
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -105,6 +118,9 @@ spec:
             {{- else }}
             secretName: {{ include "cattery.fullname" $ }}-file-{{ $name }}
             {{- end }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

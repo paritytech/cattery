@@ -1,3 +1,4 @@
+# Cattery is a singleton — do not raise replicaCount.
 replicaCount: 1
 
 image:
@@ -9,6 +10,10 @@ image:
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+
+revisionHistoryLimit: 5
+terminationGracePeriodSeconds: 30
+priorityClassName: ""
 
 # Cattery config rendered into /etc/cattery/config.yaml.
 # See https://github.com/paritytech/cattery/blob/main/docs/configuration.md
@@ -73,21 +78,12 @@ secretFiles: {}
 #     existingSecret: other-org-github-app
 #     existingSecretKey: private-key.pem
 
-# Webhook secrets per GitHub App entry.
-#
-# If you set `webhookSecret` inline on a `config.github[*]` entry it will be
-# rendered into a Secret. To reference an existing Secret instead, omit
-# `webhookSecret` in config and add an entry here keyed by the org name.
-webhookSecrets: {}
-# webhookSecrets:
-#   my-org:
-#     existingSecret: my-org-webhook
-#     existingSecretKey: secret
-
 serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # Cattery does not call the Kubernetes API. Keep disabled unless you need it.
+  automountServiceAccountToken: false
 
 deploymentAnnotations: {}
 podAnnotations: {}
@@ -96,13 +92,37 @@ podLabels: {}
 podSecurityContext: {}
   # fsGroup: 65532
 
+# The upstream image runs as the non-root `cattery` user (uid 65532).
+# These are recommended hardening flags — enable them if your providers
+# don't need any extra capabilities.
 securityContext: {}
   # allowPrivilegeEscalation: false
   # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 65532
+  # runAsGroup: 65532
   # capabilities:
   #   drop: ["ALL"]
+  # seccompProfile:
+  #   type: RuntimeDefault
+
+# Extra environment variables (e.g. to override config via env, for debugging).
+env: []
+# env:
+#   - name: TZ
+#     value: UTC
+
+# envFrom entries — handy for pulling MongoDB URIs or provider credentials
+# out of existing ConfigMaps / Secrets without embedding them in values.
+envFrom: []
+# envFrom:
+#   - secretRef:
+#       name: cattery-runtime
+
+# Extra volumes/volumeMounts for anything `secretFiles` does not cover
+# (e.g. hostPath for Docker socket, projected tokens, extra ConfigMaps).
+extraVolumes: []
+extraVolumeMounts: []
 
 service:
   type: ClusterIP

@@ -39,3 +39,10 @@ cattery can poll for jobs. See docs/configuration.md in the cattery repo.
 WARNING: no trayTypes configured. Cattery will run but won't provision any
 runners until you add at least one trayType under `config.trayTypes`.
 {{- end }}
+
+{{- if gt (int .Values.replicaCount) 1 }}
+
+WARNING: replicaCount={{ .Values.replicaCount }} but cattery is a singleton.
+Multiple replicas will double-poll GitHub and race on provider calls.
+Set replicaCount back to 1.
+{{- end }}

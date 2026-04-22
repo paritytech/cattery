@@ -7,7 +7,6 @@ config:
       appClientId: Iv1abc
       installationId: 456
       privateKeyPath: /cattery/secrets/testorg/pk.pem
-      webhookSecret: hunter2
   providers:
     - name: docker-local
       type: docker
@@ -68,3 +67,23 @@ resources:
 serviceAccount:
   annotations:
     iam.gke.io/gcp-service-account: cattery@example.iam.gserviceaccount.com
+
+env:
+  - name: TZ
+    value: UTC
+
+envFrom:
+  - secretRef:
+      name: cattery-extra-env
+
+extraVolumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
+extraVolumeMounts:
+  - name: docker-sock
+    mountPath: /var/run/docker.sock
+
+priorityClassName: system-cluster-critical
+terminationGracePeriodSeconds: 60
