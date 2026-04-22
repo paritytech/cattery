@@ -1,11 +1,12 @@
-Dockerfile
-bin/
-examples/
-README.MD
-LICENCE
-.github/
-.git/
-docs
-tests
-.dockerignore
-.gitignore
+# Deny-by-default. Ship only what the Dockerfile actually reads.
+
+*
+
+# Allow the Go source tree
+!src
+!src/**
+
+# Trim cruft that sneaks into src/
+**/coverage.out
+**/*.test
+**/.DS_Store

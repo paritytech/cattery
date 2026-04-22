@@ -1,0 +1,89 @@
+config:
+  server:
+    advertiseUrl: http://cattery.test.local
+  github:
+    - name: testorg
+      appId: 123
+      appClientId: Iv1abc
+      installationId: 456
+      privateKeyPath: /cattery/secrets/testorg/pk.pem
+  providers:
+    - name: docker-local
+      type: docker
+  trayTypes:
+    - name: basic
+      provider: docker-local
+      githubOrg: testorg
+      runnerGroupId: 1
+      maxTrays: 2
+      config:
+        image: ghcr.io/actions/actions-runner:latest
+
+secretFiles:
+  testorg-pk:
+    mountPath: /cattery/secrets/testorg/pk.pem
+    value: |
+      -----BEGIN RSA PRIVATE KEY-----
+      MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu
+      -----END RSA PRIVATE KEY-----
+  other-pk:
+    mountPath: /cattery/secrets/other/pk.pem
+    existingSecret: other-github-pk
+    existingSecretKey: key.pem
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: cattery.test.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cattery-tls
+      hosts:
+        - cattery.test.local
+
+serviceMonitor:
+  enabled: true
+  annotations:
+    example.com/owner: team-a
+
+deploymentAnnotations:
+  example.com/owner: team-a
+
+service:
+  annotations:
+    cloud.google.com/load-balancer-type: Internal
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: cattery@example.iam.gserviceaccount.com
+
+env:
+  - name: TZ
+    value: UTC
+
+envFrom:
+  - secretRef:
+      name: cattery-extra-env
+
+extraVolumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
+extraVolumeMounts:
+  - name: docker-sock
+    mountPath: /var/run/docker.sock
+
+priorityClassName: system-cluster-critical
+terminationGracePeriodSeconds: 60

@@ -86,17 +86,18 @@ jobs:
 
   docker-build:
     needs: [tests]
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push') || github.event_name == 'push'
     runs-on: parity-ubuntu
     environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
     env:
       REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}/cattery
       VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || (github.event.pull_request.head.sha || github.sha) }}
       EXTRA_TAG: ${{ github.event_name == 'workflow_dispatch' && 'latest' || 'main' }}
+      PUSH: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push') || github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Docker login
+        if: env.PUSH == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.REGISTRY_USER }}
@@ -110,6 +111,6 @@ jobs:
           tags: |
             ${{ env.REGISTRY_PATH }}:${{ env.VERSION }}
             ${{ env.REGISTRY_PATH }}:${{ env.EXTRA_TAG }}
-          push: true
+          push: ${{ env.PUSH }}
           build-args: |
             CATTERY_VERSION=${{ env.VERSION }}
