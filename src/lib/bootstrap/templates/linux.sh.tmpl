@@ -1,0 +1,69 @@
+#!/bin/bash
+# Cattery bootstrap script (linux). Downloads the cattery agent binary from the
+# server and starts it. Heavy tooling (Docker, language runtimes, etc.) is the
+# user's responsibility via the underlying machine image.
+set -euo pipefail
+
+AGENT_FOLDER="{{.AgentFolder}}"
+RUNNER_FOLDER="{{.RunnerFolder}}"
+CATTERY_BIN="${AGENT_FOLDER}/cattery"
+SERVER_URL="{{.ServerURL}}"
+AGENT_ID="{{.AgentID}}"
+
+mkdir -p "${AGENT_FOLDER}" "${RUNNER_FOLDER}"
+
+{{- if .User}}
+# Ensure the runtime user owns the agent + runner trees.
+if id -u "{{.User}}" >/dev/null 2>&1; then
+    chown -R "{{.User}}":"{{.User}}" "${AGENT_FOLDER}" "${RUNNER_FOLDER}" || true
+fi
+{{- end}}
+
+echo "[cattery-bootstrap] downloading agent from ${SERVER_URL}/agent/download"
+curl -fsSL "${SERVER_URL}/agent/download" -o "${CATTERY_BIN}"
+chmod +x "${CATTERY_BIN}"
+
+{{if .Background -}}
+# Background mode: launch the agent as a detached process and exit. Used when
+# the script is delivered by something that expects it to terminate -- e.g.
+# GCE startup-scripts (which keep google-startup-scripts.service running until
+# the script returns) or generic cloud-init.
+#
+# `setsid` detaches the agent from this script's session/process group, and
+# the redirects free the controlling terminal so the parent runner sees EOF
+# on the agent's stdio when the script exits. Output goes to a log file so it
+# survives the script's exit.
+LOG_FILE="${AGENT_FOLDER}/agent.log"
+echo "[cattery-bootstrap] launching agent in background; logs at ${LOG_FILE}"
+{{if .User -}}
+setsid sudo -E -u "{{.User}}" "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}" \
+    </dev/null >"${LOG_FILE}" 2>&1 &
+{{- else -}}
+setsid "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}" \
+    </dev/null >"${LOG_FILE}" 2>&1 &
+{{- end}}
+disown || true
+echo "[cattery-bootstrap] agent pid=$! detached; bootstrap exiting"
+{{- else -}}
+# Foreground mode: replace this shell with the agent process. Use this when the
+# script itself is meant to be the long-running process -- e.g. a container
+# entrypoint where the shell is PID 1 and exiting would kill the container.
+echo "[cattery-bootstrap] launching agent in foreground"
+{{if .User -}}
+exec sudo -E -u "{{.User}}" "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}"
+{{- else -}}
+exec "${CATTERY_BIN}" agent \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --runner-folder "${RUNNER_FOLDER}"
+{{- end}}
+{{- end}}

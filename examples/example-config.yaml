@@ -32,15 +32,17 @@ providers:
     credentialsFile: path/to/credentials.json
 
 trayTypes:
-  - name: cattery-tiny
-    provider: docker-local
-    shutdown: false
-    runnerGroupId: 3
-    githubOrg: My-Github-Org
-    config:
-      image: cattery-runner-tiny:latest
+  # Bootstrap is enabled by default for every tray type. The provider injects
+  # a script that downloads the cattery agent from /agent/download and runs it.
+  # The agent itself downloads the GH Actions runner if not present on disk
+  # (latest release by default, or pinned via runnerVersion).
 
-  - name: cattery-gce
+  - name: cattery-gce-default
+    provider: gce
+    githubOrg: My-Github-Org
+    runnerGroupId: 3
+    shutdown: true
+    maxTrays: 3
     config:
       instanceTemplate: global/instanceTemplates/<instance-template>
       machineType: e2-standard-2
@@ -48,12 +50,50 @@ trayTypes:
       zones:
         - us-west1-a
         - us-west1-b
-    extraMetadata:
-      # can be: version (0.0.2), server (to download binary from server) or a commit hash
-      cattery-agent-version: 0.0.4
-      # cattery-agent-version: 13d197aa1e73db09514772e55794b3a0f9b7952b
-    githubOrg: My-Github-Org
-    maxTrays: 3 # max number of VMs of this type
+
+  - name: cattery-gce-custom
     provider: gce
-    runnerGroupId: 3 # check in github org settings -> Runner groups
+    githubOrg: My-Github-Org
+    runnerGroupId: 3
     shutdown: true
+    runnerVersion: "2.332.0"          # pin runner version (default: latest)
+    bootstrap:
+      user: cattery                   # run agent as this user (default: root)
+      agentFolder: /home/cattery
+      runnerFolder: /home/cattery/actions-runner
+      # script: |                     # optional template override
+      #   #!/bin/bash
+      #   curl -sSfL {{.ServerURL}}/agent/download -o /tmp/cattery
+      #   ...
+    config:
+      instanceTemplate: global/instanceTemplates/<instance-template>
+      machineType: e2-standard-2
+      project: my-gcp-project
+      zones:
+        - us-west1-a
+
+  # Opt out: legacy pre-baked image where the agent is already installed and
+  # started by your own systemd unit (e.g. the cattery.service chain).
+  - name: cattery-gce-legacy
+    provider: gce
+    githubOrg: My-Github-Org
+    runnerGroupId: 3
+    shutdown: true
+    bootstrap:
+      enabled: false
+    extraMetadata:
+      cattery-agent-version: 0.0.4    # consumed by your image's install-agent.sh
+    config:
+      instanceTemplate: global/instanceTemplates/legacy-image
+      machineType: e2-standard-2
+      project: my-gcp-project
+      zones:
+        - us-west1-a
+
+  - name: cattery-tiny
+    provider: docker-local
+    shutdown: false
+    runnerGroupId: 3
+    githubOrg: My-Github-Org
+    config:
+      image: ubuntu:24.04             # plain image -- bootstrap installs the agent

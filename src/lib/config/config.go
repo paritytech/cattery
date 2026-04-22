@@ -105,8 +105,16 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 	}
 
 	cfg.trayTypesMap = make(map[string]*TrayType)
-	for _, trayType := range cfg.TrayTypes {
+	for i, trayType := range cfg.TrayTypes {
 		cfg.trayTypesMap[trayType.Name] = trayType
+
+		// Default Bootstrap.Enabled to true unless the user explicitly set it.
+		// We check viper.IsSet so that omitting the field (or the whole
+		// `bootstrap:` block) means "enabled", while `enabled: false` opts out.
+		enabledKey := fmt.Sprintf("traytypes.%d.bootstrap.enabled", i)
+		if !viper.IsSet(enabledKey) {
+			trayType.Bootstrap.Enabled = true
+		}
 
 		providerConfig, ok := cfg.providerMap[trayType.Provider]
 
@@ -200,15 +208,30 @@ type GitHubOrganization struct {
 const DefaultMaxParallelCreation = 10
 
 type TrayType struct {
-	Name                string     `yaml:"name" validate:"required"`
-	Provider            string     `yaml:"provider" validate:"required"`
-	RunnerGroupId       int64      `yaml:"runnerGroupId" validate:"required"`
-	Shutdown            bool       `yaml:"shutdown"`
-	GitHubOrg           string     `yaml:"githubOrg" validate:"required"`
-	MaxTrays            int        `yaml:"maxTrays"`
-	MaxParallelCreation int        `yaml:"maxParallelCreation"`
-	Config              TrayConfig `yaml:"config"`
+	Name                string          `yaml:"name" validate:"required"`
+	Provider            string          `yaml:"provider" validate:"required"`
+	RunnerGroupId       int64           `yaml:"runnerGroupId" validate:"required"`
+	Shutdown            bool            `yaml:"shutdown"`
+	GitHubOrg           string          `yaml:"githubOrg" validate:"required"`
+	MaxTrays            int             `yaml:"maxTrays"`
+	MaxParallelCreation int             `yaml:"maxParallelCreation"`
+	RunnerVersion       string          `yaml:"runnerVersion"`
+	Bootstrap           BootstrapConfig `yaml:"bootstrap"`
+	Config              TrayConfig      `yaml:"config"`
 	ExtraMetadata       TrayExtraMetadata
+}
+
+// BootstrapConfig controls whether the provider injects a script that downloads
+// and runs the cattery agent on the spawned tray. All fields optional; defaults
+// applied at use sites (Enabled defaulted in LoadConfig, strings defaulted in
+// bootstrap.Generate).
+type BootstrapConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	OS           string `yaml:"os"`
+	AgentFolder  string `yaml:"agentFolder"`
+	RunnerFolder string `yaml:"runnerFolder"`
+	User         string `yaml:"user"`
+	Script       string `yaml:"script"`
 }
 
 type TrayExtraMetadata map[string]string
