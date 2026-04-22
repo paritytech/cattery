@@ -101,8 +101,6 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 		logger.Errorf("%v", err)
 	}
 
-	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, 1)
-
 	logger.Infof("Agent %s registered with runner ID %d", agentId, newAgent.RunnerId)
 }
 
@@ -181,7 +179,6 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Infof("Agent %s unregistered, reason: %d", unregisterRequest.Agent.AgentId, unregisterRequest.Reason)
 
-	metrics.RegisteredTraysAdd(tray.GitHubOrgName, tray.TrayTypeName, -1)
 	if unregisterRequest.Reason == messages.UnregisterReasonPreempted {
 		metrics.PreemptedTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 	}
@@ -225,8 +222,8 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*2 {
-		errMsg := fmt.Sprintf("Tray '%s' status not changed in 2 minutes", tray.Id)
+	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
+		errMsg := fmt.Sprintf("Tray '%s' status not changed in 15 minutes", tray.Id)
 		logger.Error(errMsg)
 
 		pingResponse.Terminate = true

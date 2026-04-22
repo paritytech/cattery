@@ -85,7 +85,7 @@ func (m *MongodbTrayRepository) Save(ctx context.Context, tray *trays.Tray) erro
 	return err
 }
 
-func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string) (*trays.Tray, error) {
+func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string, jobName string, workflowName string) (*trays.Tray, error) {
 	setQuery := bson.M{"status": status, "statusChanged": time.Now().UTC()}
 
 	if jobRunId != 0 {
@@ -99,6 +99,12 @@ func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string,
 	}
 	if repository != "" {
 		setQuery["repository"] = repository
+	}
+	if jobName != "" {
+		setQuery["jobName"] = jobName
+	}
+	if workflowName != "" {
+		setQuery["workflowName"] = workflowName
 	}
 
 	dbResult := m.collection.FindOneAndUpdate(

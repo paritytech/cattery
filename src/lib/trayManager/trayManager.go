@@ -125,7 +125,7 @@ func (tm *TrayManager) GetTrayById(ctx context.Context, trayId string) (*trays.T
 }
 
 func (tm *TrayManager) Registering(ctx context.Context, trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistering, 0, 0, 0, "")
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistering, 0, 0, 0, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func (tm *TrayManager) Registering(ctx context.Context, trayId string) (*trays.T
 }
 
 func (tm *TrayManager) Registered(ctx context.Context, trayId string, ghRunnerId int64) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId, "")
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRegistered, 0, 0, ghRunnerId, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +146,8 @@ func (tm *TrayManager) Registered(ctx context.Context, trayId string, ghRunnerId
 	return tray, nil
 }
 
-func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64, workflowRunId int64, repository string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0, repository)
+func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64, workflowRunId int64, repository string, jobName string, workflowName string) (*trays.Tray, error) {
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusRunning, jobRunId, workflowRunId, 0, repository, jobName, workflowName)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 }
 
 func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "")
+	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 }
 
 func (tm *TrayManager) HandleStale(ctx context.Context) {
-	interval := time.Minute * 2
+	interval := time.Minute * 15
 
 	go func() {
 		for {

@@ -205,7 +205,7 @@ func TestUpdateStatus(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{testTray})
 
 	// Test UpdateStatus with jobRunId only
-	updatedTray, err := repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRegistered, 123, 0, 0, "")
+	updatedTray, err := repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRegistered, 123, 0, 0, "", "", "")
 	if err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with ghRunnerId
-	updatedTray, err = repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRunning, 456, 333, 789, "")
+	updatedTray, err = repo.UpdateStatus(context.Background(),"test-tray-1", trays.TrayStatusRunning, 456, 333, 789, "", "", "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with ghRunnerId failed: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	// Test UpdateStatus with non-existent ID
-	updatedTray, err = repo.UpdateStatus(context.Background(),"non-existent", trays.TrayStatusRegistered, 123, 0, 0, "")
+	updatedTray, err = repo.UpdateStatus(context.Background(),"non-existent", trays.TrayStatusRegistered, 123, 0, 0, "", "", "")
 	if err != nil {
 		t.Fatalf("UpdateStatus with non-existent ID failed: %v", err)
 	}

@@ -6,7 +6,10 @@ import (
 	"cattery/lib/trayManager"
 	"context"
 	"fmt"
+	"path"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"cattery/lib/config"
@@ -127,15 +130,27 @@ func (s *sessionAdapter) Session() scaleset.RunnerScaleSetSession {
 
 // catteryScaler implements the listener.Scaler and listener.MetricsRecorder interfaces.
 type catteryScaler struct {
-	poller *Poller
+	poller     *Poller
+	latestStat atomic.Pointer[scaleset.RunnerScaleSetStatistic]
 }
 
 // MetricsRecorder implementation.
 
-func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {}
-func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)                     {}
-func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted)                  {}
-func (cs *catteryScaler) RecordDesiredRunners(count int)                                 {}
+func (cs *catteryScaler) RecordStatistics(statistics *scaleset.RunnerScaleSetStatistic) {
+	cs.latestStat.Store(statistics)
+
+	org := cs.poller.trayType.GitHubOrg
+	name := cs.poller.trayType.Name
+	metrics.ScaleSetPendingJobsSet(org, name, statistics.TotalAvailableJobs)
+	metrics.ScaleSetAssignedJobsSet(org, name, statistics.TotalAssignedJobs)
+	metrics.ScaleSetRunningJobsSet(org, name, statistics.TotalRunningJobs)
+	metrics.ScaleSetBusyRunnersSet(org, name, statistics.TotalBusyRunners)
+	metrics.ScaleSetIdleRunnersSet(org, name, statistics.TotalIdleRunners)
+	metrics.ScaleSetRegisteredRunnersSet(org, name, statistics.TotalRegisteredRunners)
+}
+func (cs *catteryScaler) RecordJobStarted(msg *scaleset.JobStarted)     {}
+func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted) {}
+func (cs *catteryScaler) RecordDesiredRunners(count int)                {}
 
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
 	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
@@ -144,12 +159,23 @@ func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int
 		return 0, err
 	}
 
-	cs.poller.history.Add(&Message{
-		Time:     time.Now(),
-		Kind:     MessageKindScale,
-		TrayType: cs.poller.trayType.Name,
-		Detail:   fmt.Sprintf("desired=%d", count),
-	})
+	msg := &Message{
+		Time:         time.Now(),
+		Kind:         MessageKindScale,
+		TrayType:     cs.poller.trayType.Name,
+		DesiredCount: count,
+	}
+	if stats := cs.latestStat.Load(); stats != nil {
+		msg.Stats = &ScaleStats{
+			Available:  stats.TotalAvailableJobs,
+			Assigned:   stats.TotalAssignedJobs,
+			Running:    stats.TotalRunningJobs,
+			Busy:       stats.TotalBusyRunners,
+			Idle:       stats.TotalIdleRunners,
+			Registered: stats.TotalRegisteredRunners,
+		}
+	}
+	cs.poller.history.Add(msg)
 
 	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
 }
@@ -159,8 +185,9 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.WorkflowRunID)
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
+	workflowName := parseWorkflowName(jobInfo.JobWorkflowRef)
 
-	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName)
+	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName, jobInfo.JobDisplayName, workflowName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
 		return err
@@ -172,10 +199,14 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 	}
 
 	cs.poller.history.Add(&Message{
-		Time:     time.Now(),
-		Kind:     MessageKindJobStarted,
-		TrayType: cs.poller.trayType.Name,
-		Detail:   fmt.Sprintf("%s on %s", jobInfo.JobDisplayName, jobInfo.RunnerName),
+		Time:           time.Now(),
+		Kind:           MessageKindJobStarted,
+		TrayType:       cs.poller.trayType.Name,
+		Repository:     jobInfo.RepositoryName,
+		WorkflowRunID:  jobInfo.WorkflowRunID,
+		JobID:          jobID,
+		JobDisplayName: jobInfo.JobDisplayName,
+		RunnerName:     jobInfo.RunnerName,
 	})
 
 	return nil
@@ -197,13 +228,36 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 		return err
 	}
 
+	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
 	cs.poller.history.Add(&Message{
-		Time:     time.Now(),
-		Kind:     MessageKindJobCompleted,
-		TrayType: cs.poller.trayType.Name,
-		Detail:   fmt.Sprintf("%s on %s (result: %s)", jobInfo.JobDisplayName, jobInfo.RunnerName, jobInfo.Result),
+		Time:           time.Now(),
+		Kind:           MessageKindJobCompleted,
+		TrayType:       cs.poller.trayType.Name,
+		Repository:     jobInfo.RepositoryName,
+		WorkflowRunID:  jobInfo.WorkflowRunID,
+		JobID:          jobID,
+		JobDisplayName: jobInfo.JobDisplayName,
+		RunnerName:     jobInfo.RunnerName,
+		Result:         jobInfo.Result,
 	})
 
-	metrics.RegisteredTraysAdd(cs.poller.trayType.GitHubOrg, cs.poller.trayType.Name, -1)
 	return nil
+}
+
+// parseWorkflowName extracts the workflow filename (without extension) from
+// a JobWorkflowRef like "owner/repo/.github/workflows/ci.yml@refs/heads/main".
+func parseWorkflowName(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	// Strip @ref suffix
+	if i := strings.LastIndex(ref, "@"); i != -1 {
+		ref = ref[:i]
+	}
+	name := path.Base(ref)
+	// Remove extension (.yml / .yaml)
+	if ext := path.Ext(name); ext != "" {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
 }

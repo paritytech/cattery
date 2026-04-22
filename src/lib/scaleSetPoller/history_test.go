@@ -17,15 +17,15 @@ func TestHistory_AddUnderCapacity(t *testing.T) {
 	h := &History{}
 	base := time.Now()
 	for i := 0; i < 3; i++ {
-		h.Add(&Message{Time: base.Add(time.Duration(i) * time.Second), Detail: string(rune('a' + i))})
+		h.Add(&Message{Time: base.Add(time.Duration(i) * time.Second), TrayType: string(rune('a' + i))})
 	}
 
 	got := h.Recent()
 	assert.Len(t, got, 3)
 	// Newest first
-	assert.Equal(t, "c", got[0].Detail)
-	assert.Equal(t, "b", got[1].Detail)
-	assert.Equal(t, "a", got[2].Detail)
+	assert.Equal(t, "c", got[0].TrayType)
+	assert.Equal(t, "b", got[1].TrayType)
+	assert.Equal(t, "a", got[2].TrayType)
 }
 
 func TestHistory_RingOverwrite(t *testing.T) {
