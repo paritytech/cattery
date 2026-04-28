@@ -184,17 +184,21 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 }
 
 func (tm *TrayManager) HandleStale(ctx context.Context) {
-	interval := time.Minute * 15
+	cfg := config.Get().Stale.WithDefaults()
+	thresholds := resolveStaleThresholds(cfg.Thresholds)
+
+	log.Infof("Stale handler starting: pollInterval=%s thresholds=%v", cfg.PollInterval, formatThresholds(thresholds))
 
 	go func() {
+		ticker := time.NewTicker(cfg.PollInterval)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			default:
-				time.Sleep(interval / 2)
-
-				stale, err := tm.trayRepository.GetStale(ctx, interval)
+			case <-ticker.C:
+				stale, err := tm.trayRepository.GetStale(ctx, thresholds)
 				if err != nil {
 					log.Errorf("Failed to get stale trays: %v", err)
 					continue
@@ -205,7 +209,7 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 				}
 
 				for _, tray := range stale {
-					log.Debugf("Deleting stale tray: %s", tray.Id)
+					log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
 					if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
 						log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
 					}
@@ -214,6 +218,38 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// resolveStaleThresholds converts the string-keyed config map into a
+// TrayStatus-keyed map. Unknown or invalid status names are logged and
+// skipped; "running" is rejected since running trays are never stale.
+func resolveStaleThresholds(in map[string]time.Duration) map[trays.TrayStatus]time.Duration {
+	out := make(map[trays.TrayStatus]time.Duration, len(in))
+	for name, d := range in {
+		status, err := trays.TrayStatusFromString(name)
+		if err != nil {
+			log.Warnf("Ignoring stale threshold for unknown status %q", name)
+			continue
+		}
+		if status == trays.TrayStatusRunning {
+			log.Warnf("Ignoring stale threshold for status %q: running trays are never stale", name)
+			continue
+		}
+		if d <= 0 {
+			log.Warnf("Ignoring non-positive stale threshold for status %q: %s", name, d)
+			continue
+		}
+		out[status] = d
+	}
+	return out
+}
+
+func formatThresholds(m map[trays.TrayStatus]time.Duration) map[string]time.Duration {
+	out := make(map[string]time.Duration, len(m))
+	for s, d := range m {
+		out[s.String()] = d
+	}
+	return out
 }
 
 // ScaleForDemand scales trays for a given tray type based on the desired runner count.

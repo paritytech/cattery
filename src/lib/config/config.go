@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-playground/validator"
 	"github.com/go-viper/mapstructure/v2"
@@ -40,6 +41,7 @@ func SetForTest(t *testing.T, cfg *CatteryConfig) {
 type CatteryConfig struct {
 	Server    ServerConfig          `yaml:"server" validate:"required"`
 	Database  DatabaseConfig        `yaml:"database" validate:"required"`
+	Stale     StaleConfig           `yaml:"stale"`
 	Github    []*GitHubOrganization `yaml:"github" validate:"required,dive,required"`
 	Providers []*ProviderConfig     `yaml:"providers" validate:"required,dive,required"`
 	TrayTypes []*TrayType           `yaml:"trayTypes" validate:"required,dive,required"`
@@ -187,6 +189,46 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	Uri      string `yaml:"uri" validate:"required"`
 	Database string `yaml:"database" validate:"required"`
+}
+
+// StaleConfig configures the stale-tray cleanup loop.
+//
+// PollInterval is how often the loop checks for stale trays.
+// Thresholds maps a tray status name (lowercase: "creating", "registering",
+// "registered", "deleting") to the duration after which a tray sitting in
+// that status is considered stale. Statuses not present in the map are not
+// checked. "running" should not be set — running trays are never stale.
+//
+// Defaults are applied in StaleConfig.WithDefaults when fields are zero.
+type StaleConfig struct {
+	PollInterval time.Duration            `yaml:"pollInterval"`
+	Thresholds   map[string]time.Duration `yaml:"thresholds"`
+}
+
+// DefaultStalePollInterval is used when StaleConfig.PollInterval is zero.
+const DefaultStalePollInterval = time.Minute
+
+// DefaultStaleThresholds is used when StaleConfig.Thresholds is empty.
+// Creating/Registering are tight: a VM that hasn't booted+registered within
+// a few minutes is almost certainly broken. Registered is generous: a tray
+// may legitimately idle waiting for a job.
+var DefaultStaleThresholds = map[string]time.Duration{
+	"creating":    5 * time.Minute,
+	"registering": 5 * time.Minute,
+	"registered":  15 * time.Minute,
+	"deleting":    15 * time.Minute,
+}
+
+// WithDefaults returns a copy with zero/empty fields populated from defaults.
+func (s StaleConfig) WithDefaults() StaleConfig {
+	out := s
+	if out.PollInterval <= 0 {
+		out.PollInterval = DefaultStalePollInterval
+	}
+	if len(out.Thresholds) == 0 {
+		out.Thresholds = DefaultStaleThresholds
+	}
+	return out
 }
 
 type GitHubOrganization struct {

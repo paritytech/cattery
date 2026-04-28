@@ -13,5 +13,8 @@ type TrayRepository interface {
 	Delete(ctx context.Context, trayId string) error
 	UpdateStatus(ctx context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string, jobName string, workflowName string) (*trays.Tray, error)
 	CountActive(ctx context.Context, trayType string) (int, error)
-	GetStale(ctx context.Context, d time.Duration) ([]*trays.Tray, error)
+	// GetStale returns trays whose status is a key in thresholds and whose
+	// statusChanged is older than the corresponding duration. A status absent
+	// from the map is not checked.
+	GetStale(ctx context.Context, thresholds map[trays.TrayStatus]time.Duration) ([]*trays.Tray, error)
 }

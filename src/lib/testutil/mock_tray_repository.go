@@ -112,7 +112,7 @@ func (m *MockTrayRepository) List(_ context.Context) ([]*trays.Tray, error) {
 	return result, nil
 }
 
-func (m *MockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*trays.Tray, error) {
+func (m *MockTrayRepository) GetStale(_ context.Context, _ map[trays.TrayStatus]time.Duration) ([]*trays.Tray, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.StaleErr != nil {
