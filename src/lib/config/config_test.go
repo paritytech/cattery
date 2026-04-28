@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -439,6 +440,104 @@ trayTypes:
 
 	assert.NoError(t, err)
 	assert.Equal(t, "my-secret-token", config.Server.AgentSecret)
+}
+
+func TestLoadConfig_Stale(t *testing.T) {
+	t.Run("parses durations and threshold map from YAML", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", "config_stale*.yaml")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tempFile.Name())
+
+		staleConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+stale:
+  pollInterval: 30s
+  thresholds:
+    creating: 2m
+    registered: 20m
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "docker-provider"
+    type: "docker"
+trayTypes:
+  - name: "docker-local"
+    provider: "docker-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+`
+		_, err = tempFile.Write([]byte(staleConfig))
+		assert.NoError(t, err)
+		tempFile.Close()
+
+		configPath := tempFile.Name()
+		cfg, err := LoadConfig(&configPath)
+
+		assert.NoError(t, err)
+		assert.Equal(t, 30*time.Second, cfg.Stale.PollInterval)
+		assert.Equal(t, 2*time.Minute, cfg.Stale.Thresholds["creating"])
+		assert.Equal(t, 20*time.Minute, cfg.Stale.Thresholds["registered"])
+		// Status not present in YAML should be absent (defaults are applied later by WithDefaults).
+		_, hasRegistering := cfg.Stale.Thresholds["registering"]
+		assert.False(t, hasRegistering)
+	})
+
+	t.Run("missing stale block leaves zero value", func(t *testing.T) {
+		tempFile, err := os.CreateTemp("", "config_nostale*.yaml")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tempFile.Name())
+
+		bareConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "docker-provider"
+    type: "docker"
+trayTypes:
+  - name: "docker-local"
+    provider: "docker-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+`
+		_, err = tempFile.Write([]byte(bareConfig))
+		assert.NoError(t, err)
+		tempFile.Close()
+
+		configPath := tempFile.Name()
+		cfg, err := LoadConfig(&configPath)
+
+		assert.NoError(t, err)
+		assert.Equal(t, time.Duration(0), cfg.Stale.PollInterval)
+		assert.Empty(t, cfg.Stale.Thresholds)
+
+		// WithDefaults must produce a fully populated config.
+		def := cfg.Stale.WithDefaults()
+		assert.Equal(t, DefaultStalePollInterval, def.PollInterval)
+		assert.Equal(t, DefaultStaleThresholds, def.Thresholds)
+	})
 }
 
 func TestProviderConfigGet(t *testing.T) {

@@ -28,6 +28,37 @@ func TestTrayStatusString(t *testing.T) {
 	}
 }
 
+func TestTrayStatusFromString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    TrayStatus
+		wantErr bool
+	}{
+		{"creating", "creating", TrayStatusCreating, false},
+		{"registering", "registering", TrayStatusRegistering, false},
+		{"registered", "registered", TrayStatusRegistered, false},
+		{"running", "running", TrayStatusRunning, false},
+		{"deleting", "deleting", TrayStatusDeleting, false},
+		{"uppercase", "CREATING", TrayStatusCreating, false},
+		{"mixed case", "Registered", TrayStatusRegistered, false},
+		{"unknown", "bogus", 0, true},
+		{"empty", "", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TrayStatusFromString(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestTrayStatusUnknownValue(t *testing.T) {
 	unknown := TrayStatus(99)
 	assert.Equal(t, "", unknown.String())

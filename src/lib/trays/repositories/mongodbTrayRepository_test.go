@@ -366,8 +366,14 @@ func TestGetStale(t *testing.T) {
 	// Insert all test trays
 	insertTestTrays(t, collection, []*TestTray{staleTray1, staleTray2, freshTray1, freshTray2})
 
-	// Test GetStale with 5 minute duration
-	staleTrays, err := repo.GetStale(context.Background(),5*time.Minute)
+	// Test GetStale with 5 minute duration across all non-running statuses
+	thresholds := map[trays.TrayStatus]time.Duration{
+		trays.TrayStatusCreating:    5 * time.Minute,
+		trays.TrayStatusRegistering: 5 * time.Minute,
+		trays.TrayStatusRegistered:  5 * time.Minute,
+		trays.TrayStatusDeleting:    5 * time.Minute,
+	}
+	staleTrays, err := repo.GetStale(context.Background(), thresholds)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
@@ -412,7 +418,7 @@ func TestGetStale(t *testing.T) {
 	insertTestTrays(t, collection, []*TestTray{freshTray1, freshTray2})
 
 	// Test GetStale again with 5 minute duration
-	staleTrays, err = repo.GetStale(context.Background(),5*time.Minute)
+	staleTrays, err = repo.GetStale(context.Background(), thresholds)
 	if err != nil {
 		t.Fatalf("GetStale failed: %v", err)
 	}
@@ -421,6 +427,113 @@ func TestGetStale(t *testing.T) {
 	if len(staleTrays) != 0 {
 		t.Errorf("Expected 0 stale trays, got %d", len(staleTrays))
 	}
+}
+
+// TestGetStale_PerStatusThresholds verifies that GetStale applies a different
+// threshold per status, only returning trays whose statusChanged is older than
+// the threshold for their specific status. Statuses absent from the map are
+// never returned.
+func TestGetStale_PerStatusThresholds(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	// Six trays at varying ages and statuses.
+	creatingOld := createTestTray("creating-old", "t", trays.TrayStatusCreating, 0)
+	creatingOld.StatusChanged = time.Now().UTC().Add(-6 * time.Minute)
+
+	creatingFresh := createTestTray("creating-fresh", "t", trays.TrayStatusCreating, 0)
+	creatingFresh.StatusChanged = time.Now().UTC().Add(-2 * time.Minute)
+
+	registeredOld := createTestTray("registered-old", "t", trays.TrayStatusRegistered, 0)
+	registeredOld.StatusChanged = time.Now().UTC().Add(-20 * time.Minute)
+
+	registeredMid := createTestTray("registered-mid", "t", trays.TrayStatusRegistered, 0)
+	registeredMid.StatusChanged = time.Now().UTC().Add(-6 * time.Minute)
+
+	// Status absent from threshold map — must never be returned.
+	runningAncient := createTestTray("running-ancient", "t", trays.TrayStatusRunning, 0)
+	runningAncient.StatusChanged = time.Now().UTC().Add(-1 * time.Hour)
+
+	deletingOld := createTestTray("deleting-old", "t", trays.TrayStatusDeleting, 0)
+	deletingOld.StatusChanged = time.Now().UTC().Add(-30 * time.Minute)
+
+	insertTestTrays(t, collection, []*TestTray{
+		creatingOld, creatingFresh, registeredOld, registeredMid, runningAncient, deletingOld,
+	})
+
+	// Threshold map: tight on Creating, generous on Registered, no entry for
+	// Running or Deleting (so even very old trays in those statuses are skipped).
+	thresholds := map[trays.TrayStatus]time.Duration{
+		trays.TrayStatusCreating:   5 * time.Minute,
+		trays.TrayStatusRegistered: 15 * time.Minute,
+	}
+
+	stale, err := repo.GetStale(context.Background(), thresholds)
+	if err != nil {
+		t.Fatalf("GetStale failed: %v", err)
+	}
+
+	got := make(map[string]bool, len(stale))
+	for _, tr := range stale {
+		got[tr.Id] = true
+	}
+
+	// Expected:
+	// - creating-old (6min > 5min creating threshold): match
+	// - creating-fresh (2min < 5min): no match
+	// - registered-old (20min > 15min registered threshold): match
+	// - registered-mid (6min < 15min): no match
+	// - running-ancient: status not in map, never matches
+	// - deleting-old: status not in map, never matches
+	wantMatch := []string{"creating-old", "registered-old"}
+	wantSkip := []string{"creating-fresh", "registered-mid", "running-ancient", "deleting-old"}
+
+	if len(stale) != len(wantMatch) {
+		t.Errorf("Expected %d stale trays, got %d: %v", len(wantMatch), len(stale), keysOf(got))
+	}
+	for _, id := range wantMatch {
+		if !got[id] {
+			t.Errorf("Expected %q to be in stale set, but it was missing", id)
+		}
+	}
+	for _, id := range wantSkip {
+		if got[id] {
+			t.Errorf("Expected %q to be skipped, but it was returned", id)
+		}
+	}
+}
+
+// TestGetStale_EmptyThresholds verifies that an empty threshold map returns
+// no trays without hitting the database with a malformed $or clause.
+func TestGetStale_EmptyThresholds(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	tray := createTestTray("any", "t", trays.TrayStatusCreating, 0)
+	tray.StatusChanged = time.Now().UTC().Add(-1 * time.Hour)
+	insertTestTrays(t, collection, []*TestTray{tray})
+
+	stale, err := repo.GetStale(context.Background(), map[trays.TrayStatus]time.Duration{})
+	if err != nil {
+		t.Fatalf("GetStale failed: %v", err)
+	}
+	if len(stale) != 0 {
+		t.Errorf("Expected 0 stale trays for empty threshold map, got %d", len(stale))
+	}
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // TestNewMongodbTrayRepository tests the NewMongodbTrayRepository constructor

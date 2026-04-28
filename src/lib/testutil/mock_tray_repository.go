@@ -112,11 +112,24 @@ func (m *MockTrayRepository) List(_ context.Context) ([]*trays.Tray, error) {
 	return result, nil
 }
 
-func (m *MockTrayRepository) GetStale(_ context.Context, _ time.Duration) ([]*trays.Tray, error) {
+func (m *MockTrayRepository) GetStale(_ context.Context, _ map[trays.TrayStatus]time.Duration) ([]*trays.Tray, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.StaleErr != nil {
 		return nil, m.StaleErr
 	}
 	return m.StaleTrays, nil
+}
+
+// SetStale atomically updates the stale-list and error returned by GetStale,
+// and inserts the supplied trays into the Trays map so DeleteTray can find them.
+// Safe to call concurrently with GetStale.
+func (m *MockTrayRepository) SetStale(staleTrays []*trays.Tray, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.StaleTrays = staleTrays
+	m.StaleErr = err
+	for _, tr := range staleTrays {
+		m.Trays[tr.Id] = tr
+	}
 }

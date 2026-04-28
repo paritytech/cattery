@@ -21,7 +21,7 @@ concurrency:
 jobs:
 
   tests:
-    runs-on: parity-ubuntu
+    runs-on: ubuntu-latest
     env:
       DOCKER_API_VERSION: '1.44'
     steps:
@@ -36,8 +36,10 @@ jobs:
 
       - name: run tests
         working-directory: src
+        env:
+          CGO_ENABLED: 1   # required for -race
         run: |
-          go test -tags=integration -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
+          go test -tags=integration -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
           # go 1.25 covdata bug causes exit code 1 for packages without tests
           # fail only if actual test failures exist
           if grep -q "^FAIL" test-output.txt; then
@@ -53,7 +55,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
-    runs-on: parity-ubuntu
+    runs-on: ubuntu-latest
     env:
       VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
     steps:
@@ -86,7 +88,7 @@ jobs:
 
   docker-build:
     needs: [tests]
-    runs-on: parity-ubuntu
+    runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
     env:
       REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}/cattery

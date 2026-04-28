@@ -6,6 +6,17 @@ database:
   uri: mongodb://localhost:27017/cattery
   database: cattery
 
+# Optional. Stale-tray cleanup loop. Defaults shown below.
+# A tray sitting in `status` for longer than its threshold is deleted.
+# `running` is intentionally absent — running trays are never stale.
+stale:
+  pollInterval: 1m
+  thresholds:
+    creating: 5m
+    registering: 5m
+    registered: 15m
+    deleting: 15m
+
 github:
   - name: paritytech-stg
     appId: 123456

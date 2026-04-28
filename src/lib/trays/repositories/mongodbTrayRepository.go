@@ -51,12 +51,21 @@ func (m *MongodbTrayRepository) List(ctx context.Context) ([]*trays.Tray, error)
 	return result, nil
 }
 
-func (m *MongodbTrayRepository) GetStale(ctx context.Context, d time.Duration) ([]*trays.Tray, error) {
-	dbResult, err := m.collection.Find(ctx,
-		bson.M{
-			"status":        bson.M{"$ne": trays.TrayStatusRunning},
-			"statusChanged": bson.M{"$lte": time.Now().UTC().Add(-d)},
+func (m *MongodbTrayRepository) GetStale(ctx context.Context, thresholds map[trays.TrayStatus]time.Duration) ([]*trays.Tray, error) {
+	if len(thresholds) == 0 {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	or := make([]bson.M, 0, len(thresholds))
+	for status, d := range thresholds {
+		or = append(or, bson.M{
+			"status":        status,
+			"statusChanged": bson.M{"$lte": now.Add(-d)},
 		})
+	}
+
+	dbResult, err := m.collection.Find(ctx, bson.M{"$or": or})
 	if err != nil {
 		return nil, err
 	}

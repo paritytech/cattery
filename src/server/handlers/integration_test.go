@@ -163,14 +163,23 @@ func (th *testHarness) createTray(t *testing.T) *trays.Tray {
 	require.NoError(t, err)
 	require.Equal(t, 1, active)
 
-	// Get it by listing stale with very long duration (returns all)
-	allTrays, err := th.trayRepo.GetStale(context.Background(), 999*time.Hour)
+	// Get it by listing stale with a tiny threshold (matches everything in those statuses).
+	allTrays, err := th.trayRepo.GetStale(context.Background(), allStatusesThresholds(time.Nanosecond))
 	if err != nil || len(allTrays) == 0 {
-		// GetStale might not return Creating trays; use a direct approach
-		// Create tray directly
 		t.Fatal("Could not retrieve created tray")
 	}
 	return allTrays[0]
+}
+
+// allStatusesThresholds builds a thresholds map covering every non-running
+// status with the same duration. Used in tests to fetch trays regardless of status.
+func allStatusesThresholds(d time.Duration) map[trays.TrayStatus]time.Duration {
+	return map[trays.TrayStatus]time.Duration{
+		trays.TrayStatusCreating:    d,
+		trays.TrayStatusRegistering: d,
+		trays.TrayStatusRegistered:  d,
+		trays.TrayStatusDeleting:    d,
+	}
 }
 
 // insertTray inserts a tray directly into MongoDB, preserving the StatusChanged value.
@@ -389,7 +398,9 @@ func TestIntegration_StaleTrayCleanup(t *testing.T) {
 	th.insertTray(t, tray)
 
 	// Verify tray appears in stale query
-	stale, err := th.trayRepo.GetStale(context.Background(), 2*time.Minute)
+	stale, err := th.trayRepo.GetStale(context.Background(), map[trays.TrayStatus]time.Duration{
+		trays.TrayStatusRegistering: 2 * time.Minute,
+	})
 	require.NoError(t, err)
 	require.Len(t, stale, 1)
 	assert.Equal(t, "test-type-stale-cleanup", stale[0].Id)
