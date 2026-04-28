@@ -9,6 +9,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -352,4 +353,223 @@ func TestCountTrays(t *testing.T) {
 	count, err := tm.CountTrays(context.Background(), "test-type")
 	assert.NoError(t, err)
 	assert.Equal(t, 7, count)
+}
+
+func TestResolveStaleThresholds(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]time.Duration
+		want map[trays.TrayStatus]time.Duration
+	}{
+		{
+			name: "valid statuses pass through",
+			in: map[string]time.Duration{
+				"creating":    5 * time.Minute,
+				"registering": 5 * time.Minute,
+				"registered":  15 * time.Minute,
+				"deleting":    10 * time.Minute,
+			},
+			want: map[trays.TrayStatus]time.Duration{
+				trays.TrayStatusCreating:    5 * time.Minute,
+				trays.TrayStatusRegistering: 5 * time.Minute,
+				trays.TrayStatusRegistered:  15 * time.Minute,
+				trays.TrayStatusDeleting:    10 * time.Minute,
+			},
+		},
+		{
+			name: "case-insensitive status names",
+			in: map[string]time.Duration{
+				"Creating":   1 * time.Minute,
+				"REGISTERED": 2 * time.Minute,
+			},
+			want: map[trays.TrayStatus]time.Duration{
+				trays.TrayStatusCreating:   1 * time.Minute,
+				trays.TrayStatusRegistered: 2 * time.Minute,
+			},
+		},
+		{
+			name: "unknown status is skipped",
+			in: map[string]time.Duration{
+				"creating": 5 * time.Minute,
+				"bogus":    1 * time.Minute,
+			},
+			want: map[trays.TrayStatus]time.Duration{
+				trays.TrayStatusCreating: 5 * time.Minute,
+			},
+		},
+		{
+			name: "running is rejected (running trays are never stale)",
+			in: map[string]time.Duration{
+				"creating": 5 * time.Minute,
+				"running":  1 * time.Minute,
+			},
+			want: map[trays.TrayStatus]time.Duration{
+				trays.TrayStatusCreating: 5 * time.Minute,
+			},
+		},
+		{
+			name: "non-positive duration is rejected",
+			in: map[string]time.Duration{
+				"creating":    5 * time.Minute,
+				"registering": 0,
+				"registered":  -1 * time.Minute,
+			},
+			want: map[trays.TrayStatus]time.Duration{
+				trays.TrayStatusCreating: 5 * time.Minute,
+			},
+		},
+		{
+			name: "empty input yields empty output",
+			in:   map[string]time.Duration{},
+			want: map[trays.TrayStatus]time.Duration{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveStaleThresholds(tc.in)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestHandleStale_DeletesStaleTrays(t *testing.T) {
+	// Override config so the loop polls fast.
+	config.SetForTest(t, &config.CatteryConfig{
+		Server: config.ServerConfig{
+			ListenAddress: ":8080",
+			AdvertiseUrl:  "http://localhost",
+		},
+		Database: config.DatabaseConfig{Uri: "x", Database: "y"},
+		Stale: config.StaleConfig{
+			PollInterval: 10 * time.Millisecond,
+			Thresholds:   map[string]time.Duration{"creating": time.Second},
+		},
+	})
+
+	repo := testutil.NewMockTrayRepository()
+	repo.SetStale([]*trays.Tray{
+		{Id: "stale-1", TrayTypeName: "t1", ProviderName: "docker", Status: trays.TrayStatusCreating},
+		{Id: "stale-2", TrayTypeName: "t1", ProviderName: "docker", Status: trays.TrayStatusCreating},
+	}, nil)
+
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tm.HandleStale(ctx)
+
+	// Expect both stale trays to be cleaned within a few poll cycles.
+	assert.Eventually(t, func() bool {
+		prov.mu.Lock()
+		defer prov.mu.Unlock()
+		seen := map[string]bool{}
+		for _, id := range prov.cleaned {
+			seen[id] = true
+		}
+		return seen["stale-1"] && seen["stale-2"]
+	}, 500*time.Millisecond, 10*time.Millisecond, "expected both stale trays to be cleaned")
+}
+
+func TestHandleStale_GetStaleErrorDoesNotCrashLoop(t *testing.T) {
+	config.SetForTest(t, &config.CatteryConfig{
+		Server:   config.ServerConfig{ListenAddress: ":8080", AdvertiseUrl: "http://localhost"},
+		Database: config.DatabaseConfig{Uri: "x", Database: "y"},
+		Stale: config.StaleConfig{
+			PollInterval: 10 * time.Millisecond,
+			Thresholds:   map[string]time.Duration{"creating": time.Second},
+		},
+	})
+
+	repo := testutil.NewMockTrayRepository()
+	repo.SetStale(nil, errors.New("transient db error"))
+
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tm.HandleStale(ctx)
+
+	// Let it tick a few times under error condition.
+	time.Sleep(50 * time.Millisecond)
+
+	// Recover: clear error, populate a stale tray.
+	tray := &trays.Tray{Id: "recovered", ProviderName: "docker", Status: trays.TrayStatusCreating}
+	repo.SetStale([]*trays.Tray{tray}, nil)
+
+	assert.Eventually(t, func() bool {
+		prov.mu.Lock()
+		defer prov.mu.Unlock()
+		for _, id := range prov.cleaned {
+			if id == "recovered" {
+				return true
+			}
+		}
+		return false
+	}, 500*time.Millisecond, 10*time.Millisecond, "loop did not recover after transient error")
+
+	cancel()
+}
+
+func TestHandleStale_ContextCancellationStopsLoop(t *testing.T) {
+	config.SetForTest(t, &config.CatteryConfig{
+		Server:   config.ServerConfig{ListenAddress: ":8080", AdvertiseUrl: "http://localhost"},
+		Database: config.DatabaseConfig{Uri: "x", Database: "y"},
+		Stale: config.StaleConfig{
+			PollInterval: 10 * time.Millisecond,
+			Thresholds:   map[string]time.Duration{"creating": time.Second},
+		},
+	})
+
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tm.HandleStale(ctx)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+
+	// After cancel, no further GetStale-driven activity should occur.
+	// Capture provider.cleaned snapshot, wait, verify unchanged.
+	prov.mu.Lock()
+	before := len(prov.cleaned)
+	prov.mu.Unlock()
+
+	time.Sleep(50 * time.Millisecond)
+
+	prov.mu.Lock()
+	after := len(prov.cleaned)
+	prov.mu.Unlock()
+
+	assert.Equal(t, before, after, "loop kept running after context cancellation")
+}
+
+func TestStaleConfigWithDefaults(t *testing.T) {
+	t.Run("zero values populate from defaults", func(t *testing.T) {
+		out := config.StaleConfig{}.WithDefaults()
+		assert.Equal(t, config.DefaultStalePollInterval, out.PollInterval)
+		assert.Equal(t, config.DefaultStaleThresholds, out.Thresholds)
+	})
+
+	t.Run("set values are preserved", func(t *testing.T) {
+		in := config.StaleConfig{
+			PollInterval: 30 * time.Second,
+			Thresholds: map[string]time.Duration{
+				"creating": 2 * time.Minute,
+			},
+		}
+		out := in.WithDefaults()
+		assert.Equal(t, 30*time.Second, out.PollInterval)
+		assert.Equal(t, map[string]time.Duration{"creating": 2 * time.Minute}, out.Thresholds)
+	})
+
+	t.Run("partial: only PollInterval set", func(t *testing.T) {
+		in := config.StaleConfig{PollInterval: 30 * time.Second}
+		out := in.WithDefaults()
+		assert.Equal(t, 30*time.Second, out.PollInterval)
+		assert.Equal(t, config.DefaultStaleThresholds, out.Thresholds)
+	})
 }
