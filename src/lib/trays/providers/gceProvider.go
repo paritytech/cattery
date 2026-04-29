@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -21,7 +22,14 @@ type GceProvider struct {
 	providerConfig config.ProviderConfig
 
 	instanceClient *compute.InstancesClient
-	logger         *logrus.Entry
+
+	// pendingOps tracks insert operations between StartDeploy and WaitDeploy.
+	// Lost on process restart, which is acceptable: the row in the repository
+	// has zone+name, so the stale handler can still clean up the VM if the
+	// agent never registers.
+	pendingOps sync.Map // map[trayId]*compute.Operation
+
+	logger *logrus.Entry
 }
 
 func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvider {
@@ -51,17 +59,26 @@ func (g *GceProvider) Close() error {
 	return nil
 }
 
-func (g *GceProvider) RunTray(tray *trays.Tray) error {
-	ctx := context.Background()
-
+// StartDeploy submits the Insert request to GCE. The chosen zone is written to
+// ProviderData *before* the API call so that even an Insert failure leaves
+// enough data to attempt cleanup (which may no-op against a 404). The returned
+// operation handle is stashed for WaitDeploy.
+func (g *GceProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error {
 	trayConfig, ok := tray.TrayConfig().(config.GoogleTrayConfig)
 	if !ok {
 		return fmt.Errorf("unexpected tray config type for gce provider, tray %s", tray.Id)
 	}
 
+	zones := trayConfig.Zones
+	if len(zones) == 0 {
+		return fmt.Errorf("no zones configured for tray %s", tray.Id)
+	}
+	zone := zones[rand.Intn(len(zones))]
+
+	tray.ProviderData["zone"] = zone
+
 	project := g.providerConfig.Get("project")
 	instanceTemplate := trayConfig.InstanceTemplate
-	zones := trayConfig.Zones
 	machineType := trayConfig.MachineType
 
 	var extraMetadata config.TrayExtraMetadata
@@ -77,12 +94,6 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		extraMetadata,
 	)
 
-	if len(zones) == 0 {
-		return fmt.Errorf("no zones configured for tray %s", tray.Id)
-	}
-
-	var zone = zones[rand.Intn(len(zones))]
-
 	op, err := g.instanceClient.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project:                project,
 		Zone:                   zone,
@@ -94,30 +105,49 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 		},
 	})
 	if err != nil {
-		g.logger.Errorf("Failed to create tray: %v", err)
+		g.logger.Errorf("Failed to start tray creation: %v", err)
 		return err
 	}
 
+	g.pendingOps.Store(tray.Id, op)
+	return nil
+}
+
+// WaitDeploy blocks until the create operation completes. If no operation is
+// tracked locally (e.g. process restart between StartDeploy and WaitDeploy),
+// it returns nil — the agent registration path or the stale handler will
+// resolve the eventual outcome.
+func (g *GceProvider) WaitDeploy(ctx context.Context, tray *trays.Tray) error {
+	v, ok := g.pendingOps.LoadAndDelete(tray.Id)
+	if !ok {
+		g.logger.Tracef("No pending operation for tray %s; skipping wait", tray.Id)
+		return nil
+	}
+	op := v.(*compute.Operation)
 	if err := op.Wait(ctx); err != nil {
 		g.logger.Errorf("Failed waiting for tray creation to complete: %v", err)
 		return err
 	}
-
-	tray.ProviderData["zone"] = zone
-
 	return nil
 }
 
-func (g *GceProvider) CleanTray(tray *trays.Tray) error {
+func (g *GceProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
+	g.pendingOps.Delete(tray.Id)
+
+	zone := tray.ProviderData["zone"]
+	if zone == "" {
+		g.logger.Warnf("CleanTray called without zone for tray %s; nothing to delete", tray.Id)
+		return nil
+	}
+
 	client, err := g.createInstancesClient()
 	if err != nil {
 		return err
 	}
 
-	zone := tray.ProviderData["zone"]
 	project := g.providerConfig.Get("project")
 
-	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
+	_, err = client.Delete(ctx, &computepb.DeleteInstanceRequest{
 		Instance: tray.Id,
 		Project:  project,
 		Zone:     zone,

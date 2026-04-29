@@ -81,6 +81,18 @@ func (tm *TrayManager) logCreationResults(trayTypeName string, results []error) 
 	return nil
 }
 
+// CreateTray reserves a tray row before any provider call so that an agent
+// booting on the new VM can register against an existing record. The deploy
+// runs in two phases:
+//
+//  1. StartDeploy submits the create request and populates tray.ProviderData
+//     with cleanup-relevant fields. We persist that data immediately so a
+//     crash during WaitDeploy still leaves enough info for cleanup.
+//
+//  2. WaitDeploy blocks until the resource is ready. Concurrent unregisters
+//     during either phase flip the row to TrayStatusDeleting; we observe
+//     that on the post-WaitDeploy persist and trigger cleanup. We don't
+//     check status mid-deploy — at worst we waste the wait phase.
 func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType) error {
 	provider, err := tm.providerFactory.GetProvider(trayType.Provider)
 	if err != nil {
@@ -92,21 +104,40 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 		return err
 	}
 
-	err = provider.RunTray(tray)
-	if err != nil {
-		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.Id, err)
+	if err := tm.trayRepository.Save(ctx, tray); err != nil {
+		return fmt.Errorf("failed to save tray %s: %w", tray.Id, err)
+	}
+
+	if err := provider.StartDeploy(ctx, tray); err != nil {
+		log.Errorf("Failed start deploy for tray %s: %v", tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
+		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+			log.Errorf("Failed to delete tray %s after start deploy error: %v", tray.Id, dErr)
+		}
 		return err
 	}
 
-	err = tm.trayRepository.Save(ctx, tray)
-	if err != nil {
-		log.Errorf("Failed to save tray %s: %v — cleaning up provider resource", trayType.Name, err)
-		if cleanErr := provider.CleanTray(tray); cleanErr != nil {
-			log.Errorf("Failed to clean up tray %s after save failure: %v", tray.Id, cleanErr)
-			metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
+	if _, err := tm.trayRepository.SetProviderData(ctx, tray.Id, tray.ProviderData); err != nil {
+		log.Errorf("Failed to persist provider data for tray %s: %v", tray.Id, err)
+	}
+
+	waitErr := provider.WaitDeploy(ctx, tray)
+	merged, _ := tm.trayRepository.SetProviderData(ctx, tray.Id, tray.ProviderData)
+
+	if waitErr != nil {
+		log.Errorf("Failed wait deploy for tray %s: %v", tray.Id, waitErr)
+		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
+		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+			log.Errorf("Failed to delete tray %s after wait deploy error: %v", tray.Id, dErr)
 		}
-		return fmt.Errorf("failed to save tray %s: %w", trayType.Name, err)
+		return waitErr
+	}
+
+	if merged != nil && merged.Status == trays.TrayStatusDeleting {
+		log.Infof("Tray %s marked for deletion during deploy; cleaning up", tray.Id)
+		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+			log.Errorf("Failed to delete tray %s after concurrent unregister: %v", tray.Id, dErr)
+		}
 	}
 
 	return nil
@@ -154,6 +185,11 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 	return tray, nil
 }
 
+// DeleteTray marks the tray as deleting and attempts to clean up the
+// upstream resource. On cleanup failure the row is left in deleting state for
+// the stale handler to retry; only repository-level failures propagate to the
+// caller. Callers (unregister handler, stale loop) should treat a non-error
+// return as "deletion was requested," not "the upstream resource is gone."
 func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
 	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
 	if err != nil {
@@ -165,19 +201,18 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 
 	provider, err := tm.providerFactory.GetProviderForTray(tray)
 	if err != nil {
-		return nil, err
+		log.Errorf("Failed to get provider for tray %s: %v; leaving for stale handler", tray.Id, err)
+		return tray, nil
 	}
 
-	err = provider.CleanTray(tray)
-	if err != nil {
-		log.Errorf("Failed to delete tray for provider %s, tray %s: %v", provider.GetProviderName(), tray.Id, err)
+	if err := provider.CleanTray(ctx, tray); err != nil {
+		log.Errorf("Failed to clean tray %s; leaving for stale handler: %v", tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
-		return nil, err
+		return tray, nil
 	}
 
-	err = tm.trayRepository.Delete(ctx, trayId)
-	if err != nil {
-		return nil, err
+	if err := tm.trayRepository.Delete(ctx, trayId); err != nil {
+		return tray, err
 	}
 
 	return tray, nil

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,9 +53,10 @@ var _ scaleSetClient.JitConfigGenerator = (*mockJitConfigGenerator)(nil)
 // mockProviderFactory implements providers.TrayProviderFactory
 type integrationMockProvider struct{}
 
-func (m *integrationMockProvider) GetProviderName() string       { return "mock" }
-func (m *integrationMockProvider) RunTray(_ *trays.Tray) error   { return nil }
-func (m *integrationMockProvider) CleanTray(_ *trays.Tray) error { return nil }
+func (m *integrationMockProvider) GetProviderName() string                             { return "mock" }
+func (m *integrationMockProvider) StartDeploy(_ context.Context, _ *trays.Tray) error { return nil }
+func (m *integrationMockProvider) WaitDeploy(_ context.Context, _ *trays.Tray) error  { return nil }
+func (m *integrationMockProvider) CleanTray(_ context.Context, _ *trays.Tray) error   { return nil }
 
 type integrationMockProviderFactory struct{}
 
@@ -76,6 +78,10 @@ type testHarness struct {
 }
 
 func setupIntegrationTest(t *testing.T) *testHarness {
+	return setupIntegrationTestWithFactory(t, &integrationMockProviderFactory{})
+}
+
+func setupIntegrationTestWithFactory(t *testing.T, factory providers.TrayProviderFactory) *testHarness {
 	t.Helper()
 
 	// Set up config
@@ -120,7 +126,7 @@ func setupIntegrationTest(t *testing.T) *testHarness {
 	restartRepo.Connect(db.Collection("restarters"))
 
 	// Set up managers
-	tm := trayManager.NewTrayManager(trayRepo, &integrationMockProviderFactory{})
+	tm := trayManager.NewTrayManager(trayRepo, factory)
 	rm := restarter.NewWorkflowRestarter(restartRepo)
 
 	// Set up scale set manager with mock JIT client
@@ -497,4 +503,161 @@ func TestIntegration_DoubleUnregister(t *testing.T) {
 	w = httptest.NewRecorder()
 	th.mux.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// --- CreateTray lifecycle tests ---
+
+// observingProvider populates ProviderData during StartDeploy and reports
+// what it saw to the test. Used to verify the row is queryable from Mongo
+// at the moment StartDeploy runs (the original race fix) and that the data
+// it populates is persisted via SetProviderData afterward.
+type observingProvider struct {
+	repo            *repositories.MongodbTrayRepository
+	observedTrayId  string
+	rowVisibleInDB  bool
+	providerDataSet map[string]string
+}
+
+func (p *observingProvider) GetProviderName() string { return "mock" }
+func (p *observingProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error {
+	p.observedTrayId = tray.Id
+	got, err := p.repo.GetById(ctx, tray.Id)
+	if err == nil && got != nil {
+		p.rowVisibleInDB = true
+	}
+	tray.ProviderData["zone"] = "us-east-1"
+	tray.ProviderData["instanceId"] = "i-test-12345"
+	p.providerDataSet = map[string]string{
+		"zone":       tray.ProviderData["zone"],
+		"instanceId": tray.ProviderData["instanceId"],
+	}
+	return nil
+}
+func (p *observingProvider) WaitDeploy(_ context.Context, _ *trays.Tray) error { return nil }
+func (p *observingProvider) CleanTray(_ context.Context, _ *trays.Tray) error  { return nil }
+
+type observingProviderFactory struct {
+	provider *observingProvider
+}
+
+func (f *observingProviderFactory) GetProvider(_ string) (providers.TrayProvider, error) {
+	return f.provider, nil
+}
+func (f *observingProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.TrayProvider, error) {
+	return f.provider, nil
+}
+
+func TestIntegration_CreateTray_RowSavedBeforeStartDeploy(t *testing.T) {
+	// The original bug: agent boots and registers before CreateTray finishes.
+	// Verify that with save-before-deploy, the row is queryable from Mongo by
+	// the time StartDeploy runs — and that ProviderData populated inside
+	// StartDeploy survives the round-trip via SetProviderData.
+	prov := &observingProvider{}
+	factory := &observingProviderFactory{provider: prov}
+	th := setupIntegrationTestWithFactory(t, factory)
+	prov.repo = th.trayRepo
+
+	err := th.tm.CreateTray(context.Background(), config.Get().TrayTypes[0])
+	require.NoError(t, err)
+
+	require.NotEmpty(t, prov.observedTrayId, "provider must have run")
+	assert.True(t, prov.rowVisibleInDB,
+		"row must be present in Mongo when StartDeploy runs (original race fix)")
+
+	// ProviderData populated inside StartDeploy must round-trip via Mongo.
+	final, err := th.trayRepo.GetById(context.Background(), prov.observedTrayId)
+	require.NoError(t, err)
+	require.NotNil(t, final, "row must still exist after CreateTray completes")
+	assert.Equal(t, trays.TrayStatusCreating, final.Status,
+		"CreateTray itself doesn't change status — agent register does")
+	assert.Equal(t, "us-east-1", final.ProviderData["zone"])
+	assert.Equal(t, "i-test-12345", final.ProviderData["instanceId"])
+}
+
+// gatedProvider blocks StartDeploy on a release channel so the test can
+// orchestrate concurrent operations during deploy.
+type gatedProvider struct {
+	startEntered chan struct{}
+	startRelease chan struct{}
+
+	mu      sync.Mutex
+	cleaned []string
+}
+
+func (p *gatedProvider) GetProviderName() string { return "mock" }
+func (p *gatedProvider) StartDeploy(_ context.Context, tray *trays.Tray) error {
+	close(p.startEntered)
+	<-p.startRelease
+	tray.ProviderData["zone"] = "us-east-1"
+	return nil
+}
+func (p *gatedProvider) WaitDeploy(_ context.Context, _ *trays.Tray) error { return nil }
+func (p *gatedProvider) CleanTray(_ context.Context, tray *trays.Tray) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cleaned = append(p.cleaned, tray.Id)
+	return nil
+}
+
+type gatedProviderFactory struct {
+	provider *gatedProvider
+}
+
+func (f *gatedProviderFactory) GetProvider(_ string) (providers.TrayProvider, error) {
+	return f.provider, nil
+}
+func (f *gatedProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.TrayProvider, error) {
+	return f.provider, nil
+}
+
+func TestIntegration_CreateTray_ConcurrentUnregister(t *testing.T) {
+	// Concurrency at integration level: while StartDeploy is in flight, an
+	// unregister HTTP request fires. The unregister handler marks the row
+	// as deleting, runs CleanTray, and removes the row. CreateTray then
+	// proceeds, finds the row gone on its post-StartDeploy SetProviderData,
+	// and exits cleanly. End state: no row, no leaked provider resources.
+	prov := &gatedProvider{
+		startEntered: make(chan struct{}),
+		startRelease: make(chan struct{}),
+	}
+	th := setupIntegrationTestWithFactory(t, &gatedProviderFactory{provider: prov})
+
+	createDone := make(chan error, 1)
+	go func() {
+		createDone <- th.tm.CreateTray(context.Background(), config.Get().TrayTypes[0])
+	}()
+
+	// Wait for StartDeploy to be entered — at this point the row is in Mongo.
+	<-prov.startEntered
+
+	// Find the trayId via the repo (it was Saved before StartDeploy).
+	list, err := th.trayRepo.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	trayId := list[0].Id
+
+	// Fire the unregister HTTP request from the agent.
+	unregBody, _ := json.Marshal(messages.UnregisterRequest{
+		Reason: messages.UnregisterReasonDone,
+	})
+	req := httptest.NewRequest("POST", "/agent/unregister/"+trayId, bytes.NewReader(unregBody))
+	w := httptest.NewRecorder()
+	th.mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "unregister must succeed even mid-deploy")
+
+	// Release StartDeploy. CreateTray completes its post-deploy bookkeeping.
+	close(prov.startRelease)
+	require.NoError(t, <-createDone, "CreateTray must not error after concurrent unregister")
+
+	// Final state: row gone (cleaned up by the unregister path).
+	final, err := th.trayRepo.GetById(context.Background(), trayId)
+	require.NoError(t, err)
+	assert.Nil(t, final, "row must be cleaned up after unregister")
+
+	// CleanTray ran exactly once — the unregister path. CreateTray's
+	// post-WaitDeploy SetProviderData saw the row was missing and skipped
+	// its own cleanup attempt. No double-clean.
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	assert.Equal(t, []string{trayId}, prov.cleaned, "exactly one CleanTray call expected")
 }
