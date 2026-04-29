@@ -134,6 +134,33 @@ func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string,
 	return &result, nil
 }
 
+func (m *MongodbTrayRepository) SetProviderData(ctx context.Context, trayId string, data map[string]string) (*trays.Tray, error) {
+	if len(data) == 0 {
+		return m.GetById(ctx, trayId)
+	}
+
+	setQuery := bson.M{}
+	for k, v := range data {
+		setQuery["providerData."+k] = v
+	}
+
+	dbResult := m.collection.FindOneAndUpdate(
+		ctx,
+		bson.M{"id": trayId},
+		bson.M{"$set": setQuery},
+		options.FindOneAndUpdate().SetReturnDocument(options.After))
+
+	var result trays.Tray
+	err := dbResult.Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (m *MongodbTrayRepository) Delete(ctx context.Context, trayId string) error {
 	_, err := m.collection.DeleteOne(ctx, bson.M{"id": trayId})
 	return err
