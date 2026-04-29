@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"cattery/lib/bootstrap"
 	"cattery/lib/config"
 	"cattery/lib/trays"
 	"fmt"
@@ -45,6 +46,15 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	image := trayConfig.Image
 	serverUrl := config.Get().Server.AdvertiseUrl
 
+	var bootstrapCfg config.BootstrapConfig
+	if tt := tray.TrayType(); tt != nil {
+		bootstrapCfg = tt.Bootstrap
+	}
+
+	if bootstrapCfg.Enabled {
+		return d.runWithBootstrap(tray, containerName, image, serverUrl, bootstrapCfg)
+	}
+
 	dockerCommand := exec.Command("docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
 		"--name", containerName,
@@ -59,6 +69,40 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 		return err
 	}
 
+	return nil
+}
+
+// runWithBootstrap launches a container that bootstraps the cattery agent at
+// startup instead of relying on a pre-baked binary in the image. The script is
+// piped to the container's shell via stdin, which avoids quote-escaping
+// headaches with `-c "..."` for multiline scripts.
+func (d *DockerProvider) runWithBootstrap(tray *trays.Tray, containerName, image, serverUrl string, cfg config.BootstrapConfig) error {
+	// Background=false: the script is the container entrypoint; /bin/sh is
+	// PID 1 and `exec`ing the agent makes it the long-running container
+	// process. If the script exited, the container would terminate.
+	script, err := bootstrap.Generate(cfg, bootstrap.Params{
+		ServerURL:  serverUrl,
+		AgentID:    tray.Id,
+		Background: false,
+	})
+	if err != nil {
+		return fmt.Errorf("generate bootstrap script: %w", err)
+	}
+
+	dockerCommand := exec.Command("docker", "run", "-d", "--rm", "-i",
+		"--add-host=host.docker.internal:host-gateway",
+		"--name", containerName,
+		"--entrypoint", "/bin/sh",
+		image,
+		"-s",
+	)
+	dockerCommand.Stdin = strings.NewReader(script)
+
+	d.logger.Info("Running docker bootstrap command: ", dockerCommand.String())
+	if err := dockerCommand.Run(); err != nil {
+		d.logger.Error("Failed to run docker bootstrap command: ", err)
+		return err
+	}
 	return nil
 }
 

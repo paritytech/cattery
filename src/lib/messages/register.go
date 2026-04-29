@@ -5,8 +5,9 @@ import (
 )
 
 type RegisterResponse struct {
-	Agent     agents.Agent `json:"agent"`
-	JitConfig string       `json:"jit_config"`
+	Agent         agents.Agent `json:"agent"`
+	JitConfig     string       `json:"jit_config"`
+	RunnerVersion string       `json:"runner_version,omitempty"`
 }
 
 type UnregisterRequest struct {

@@ -3,6 +3,7 @@ package agent
 import (
 	"cattery/agent/catteryClient"
 	"cattery/agent/githubListener"
+	"cattery/agent/runner"
 	"cattery/agent/tools"
 	"cattery/lib/agents"
 	"cattery/lib/messages"
@@ -41,6 +42,7 @@ type CatteryAgent struct {
 	agent         *agents.Agent
 	agentId       string
 
+	runnerFolder     string
 	listenerExecPath string
 }
 
@@ -48,6 +50,7 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 	return &CatteryAgent{
 		logger:           log.WithFields(log.Fields{"name": "agent", "agentId": agentId}),
 		catteryClient:    catteryClient.NewCatteryClient(catteryServerUrl, agentId),
+		runnerFolder:     runnerFolder,
 		listenerExecPath: path.Join(runnerFolder, "bin", "Runner.Listener"),
 		agentId:          agentId,
 	}
@@ -56,12 +59,20 @@ func NewCatteryAgent(runnerFolder string, catteryServerUrl string, agentId strin
 func (a *CatteryAgent) Start() {
 	a.logger.Info("Starting Cattery Agent")
 
-	agent, jitConfig, err := a.catteryClient.RegisterAgent(a.agentId)
+	resp, err := a.catteryClient.RegisterAgent(a.agentId)
 	if err != nil {
 		a.logger.Errorf("Failed to register agent: %v", err)
 		return
 	}
-	a.agent = agent
+	a.agent = &resp.Agent
+	jitConfig := &resp.JitConfig
+
+	// Ensure the GH Actions runner distribution is present on disk before we
+	// try to launch Runner.Listener. No-op when the runner is pre-baked.
+	if err := runner.EnsureRunner(a.runnerFolder, resp.RunnerVersion); err != nil {
+		a.logger.Errorf("Failed to ensure runner: %v", err)
+		return
+	}
 
 	a.logger.Info("Agent registered, starting Listener")
 
