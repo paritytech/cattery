@@ -26,9 +26,10 @@ import (
 
 type mockProvider struct{}
 
-func (m *mockProvider) GetProviderName() string       { return "mock" }
-func (m *mockProvider) RunTray(_ *trays.Tray) error   { return nil }
-func (m *mockProvider) CleanTray(_ *trays.Tray) error { return nil }
+func (m *mockProvider) GetProviderName() string                              { return "mock" }
+func (m *mockProvider) StartDeploy(_ context.Context, _ *trays.Tray) error  { return nil }
+func (m *mockProvider) WaitDeploy(_ context.Context, _ *trays.Tray) error   { return nil }
+func (m *mockProvider) CleanTray(_ context.Context, _ *trays.Tray) error    { return nil }
 
 type mockProviderFactory struct{}
 

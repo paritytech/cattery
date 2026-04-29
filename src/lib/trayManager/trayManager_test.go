@@ -17,22 +17,47 @@ import (
 // --- Mock provider ---
 
 type mockProvider struct {
-	mu       sync.Mutex
-	name     string
-	runErr   error
-	cleanErr error
-	runCalls int
-	cleaned  []string
+	mu         sync.Mutex
+	name       string
+	startErr   error
+	waitErr    error
+	cleanErr   error
+	startCalls int
+	waitCalls  int
+	cleaned    []string
+	// onStart, if set, is called inside StartDeploy so tests can mutate state
+	// (e.g. simulate a concurrent unregister) before the manager persists
+	// provider data.
+	onStart func(*trays.Tray)
+	// onWait, if set, is called inside WaitDeploy. Useful for asserting on
+	// state observed between StartDeploy and WaitDeploy from the manager's
+	// point of view.
+	onWait func(*trays.Tray)
 }
 
 func (m *mockProvider) GetProviderName() string { return m.name }
-func (m *mockProvider) RunTray(_ *trays.Tray) error {
+func (m *mockProvider) StartDeploy(_ context.Context, tray *trays.Tray) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.runCalls++
-	return m.runErr
+	m.startCalls++
+	cb := m.onStart
+	m.mu.Unlock()
+	if cb != nil {
+		cb(tray)
+	}
+	return m.startErr
 }
-func (m *mockProvider) CleanTray(tray *trays.Tray) error {
+func (m *mockProvider) WaitDeploy(_ context.Context, tray *trays.Tray) error {
+	m.mu.Lock()
+	m.waitCalls++
+	cb := m.onWait
+	err := m.waitErr
+	m.mu.Unlock()
+	if cb != nil {
+		cb(tray)
+	}
+	return err
+}
+func (m *mockProvider) CleanTray(_ context.Context, tray *trays.Tray) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cleaned = append(m.cleaned, tray.Id)
@@ -139,7 +164,7 @@ func TestScaleForDemand_ScalesUp(t *testing.T) {
 
 	err := tm.ScaleForDemand(context.Background(), trayType, 5)
 	assert.NoError(t, err)
-	assert.Equal(t, 3, prov.runCalls)
+	assert.Equal(t, 3, prov.startCalls)
 }
 
 func TestScaleForDemand_CappedByMaxTrays(t *testing.T) {
@@ -156,7 +181,7 @@ func TestScaleForDemand_CappedByMaxTrays(t *testing.T) {
 
 	err := tm.ScaleForDemand(context.Background(), trayType, 20)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, prov.runCalls)
+	assert.Equal(t, 2, prov.startCalls)
 }
 
 func TestCreateTray_Success(t *testing.T) {
@@ -172,13 +197,35 @@ func TestCreateTray_Success(t *testing.T) {
 
 	err := tm.CreateTray(context.Background(), trayType)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, prov.runCalls)
+	assert.Equal(t, 1, prov.startCalls)
+	assert.Equal(t, 1, prov.waitCalls)
 	assert.Equal(t, 1, len(repo.Trays))
 }
 
-func TestCreateTray_ProviderError(t *testing.T) {
+func TestCreateTray_RowExistsBeforeProviderCall(t *testing.T) {
+	// The whole point of save-before-deploy: when StartDeploy runs, the row
+	// must already be in the repository, so an agent registering against a
+	// fast-booting VM finds something.
 	repo := testutil.NewMockTrayRepository()
-	prov := &mockProvider{name: "docker", runErr: errors.New("docker failed")}
+	prov := &mockProvider{
+		name: "docker",
+		onStart: func(tray *trays.Tray) {
+			// Simulate the agent's registration handler running while StartDeploy
+			// is still in flight. It must see the row.
+			got, _ := repo.GetById(context.Background(), tray.Id)
+			assert.NotNil(t, got, "tray row must exist before StartDeploy completes")
+		},
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{Name: "test-type", Provider: "docker", GitHubOrg: "test-org"}
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.NoError(t, err)
+}
+
+func TestCreateTray_StartDeployError_CleansUp(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{name: "docker", startErr: errors.New("docker failed")}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
 	trayType := &config.TrayType{
@@ -189,10 +236,128 @@ func TestCreateTray_ProviderError(t *testing.T) {
 
 	err := tm.CreateTray(context.Background(), trayType)
 	assert.Error(t, err)
+	// StartDeploy failure triggers cleanup; on successful clean the row is
+	// deleted. WaitDeploy should not run after a StartDeploy error.
+	assert.Equal(t, 0, prov.waitCalls)
+	assert.Equal(t, 1, len(prov.cleaned))
 	assert.Equal(t, 0, len(repo.Trays))
 }
 
-func TestCreateTray_SaveError_CleansUp(t *testing.T) {
+func TestCreateTray_StartDeployError_CleanupFails_RowStays(t *testing.T) {
+	// When the deploy fails AND cleanup also fails, the row must remain in
+	// "deleting" status so the stale handler retries it.
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{
+		name:     "docker",
+		startErr: errors.New("docker failed"),
+		cleanErr: errors.New("clean also failed"),
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{
+		Name:      "test-type",
+		Provider:  "docker",
+		GitHubOrg: "test-org",
+	}
+
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.Error(t, err)
+	assert.Equal(t, 1, len(repo.Trays))
+	for _, tr := range repo.Trays {
+		assert.Equal(t, trays.TrayStatusDeleting, tr.Status, "row should be left in deleting state for the stale handler")
+	}
+}
+
+func TestCreateTray_ConcurrentDelete_TriggersCleanup(t *testing.T) {
+	// If an unregister arrives while a deploy is running, the persist that
+	// follows WaitDeploy observes status=deleting and cleanup runs without
+	// waiting for the stale handler. WaitDeploy itself is still allowed to
+	// run — we accept that wasted wait in exchange for a simpler flow.
+	repo := testutil.NewMockTrayRepository()
+	var trayId string
+	prov := &mockProvider{name: "docker"}
+	prov.onStart = func(tray *trays.Tray) {
+		trayId = tray.Id
+		// Simulate a concurrent unregister flipping status to deleting.
+		_, _ = repo.UpdateStatus(context.Background(), tray.Id, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{Name: "test-type", Provider: "docker", GitHubOrg: "test-org"}
+	err := tm.CreateTray(context.Background(), trayType)
+
+	assert.NoError(t, err, "concurrent delete handled inline is not an error to the caller")
+	assert.NotEmpty(t, trayId)
+	assert.Equal(t, 1, len(prov.cleaned))
+	assert.Equal(t, 0, len(repo.Trays))
+}
+
+func TestCreateTray_WaitDeployError_CleansUp(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{name: "docker", waitErr: errors.New("vm never ready")}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{Name: "test-type", Provider: "docker", GitHubOrg: "test-org"}
+	err := tm.CreateTray(context.Background(), trayType)
+
+	assert.Error(t, err)
+	assert.Equal(t, 1, prov.startCalls)
+	assert.Equal(t, 1, prov.waitCalls)
+	assert.Equal(t, 1, len(prov.cleaned))
+	assert.Equal(t, 0, len(repo.Trays))
+}
+
+func TestCreateTray_WaitDeployError_CleanupFails_RowStays(t *testing.T) {
+	// Symmetric to TestCreateTray_StartDeployError_CleanupFails_RowStays:
+	// a wait-phase failure with cleanup also failing must leave the row in
+	// "deleting" state for the stale handler to retry.
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{
+		name:     "docker",
+		waitErr:  errors.New("vm never ready"),
+		cleanErr: errors.New("clean also failed"),
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{Name: "test-type", Provider: "docker", GitHubOrg: "test-org"}
+	err := tm.CreateTray(context.Background(), trayType)
+
+	assert.Error(t, err)
+	assert.Equal(t, 1, len(repo.Trays))
+	for _, tr := range repo.Trays {
+		assert.Equal(t, trays.TrayStatusDeleting, tr.Status)
+	}
+}
+
+func TestCreateTray_StartDeployData_PersistedBeforeWait(t *testing.T) {
+	// Crash-safety guarantee: anything StartDeploy puts in tray.ProviderData
+	// must be persisted to the repository before WaitDeploy starts blocking.
+	// Otherwise a server crash mid-wait leaves a real VM running with no
+	// cleanup handle in the database.
+	repo := testutil.NewMockTrayRepository()
+	prov := &mockProvider{name: "docker"}
+	prov.onStart = func(tray *trays.Tray) {
+		tray.ProviderData["zone"] = "us-east-1"
+		tray.ProviderData["instanceId"] = "i-12345"
+	}
+	prov.onWait = func(tray *trays.Tray) {
+		// By the time WaitDeploy runs, the provider data populated in
+		// StartDeploy must be visible in the repository.
+		got, _ := repo.GetById(context.Background(), tray.Id)
+		assert.NotNil(t, got)
+		assert.Equal(t, "us-east-1", got.ProviderData["zone"])
+		assert.Equal(t, "i-12345", got.ProviderData["instanceId"])
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	trayType := &config.TrayType{Name: "test-type", Provider: "docker", GitHubOrg: "test-org"}
+	err := tm.CreateTray(context.Background(), trayType)
+	assert.NoError(t, err)
+}
+
+func TestCreateTray_InitialSaveError(t *testing.T) {
+	// With save-before-deploy, an initial Save failure means no provider
+	// resource was ever requested — nothing to clean up.
 	repo := testutil.NewMockTrayRepository()
 	repo.SaveErr = errors.New("db error")
 	prov := &mockProvider{name: "docker"}
@@ -206,7 +371,8 @@ func TestCreateTray_SaveError_CleansUp(t *testing.T) {
 
 	err := tm.CreateTray(context.Background(), trayType)
 	assert.Error(t, err)
-	assert.Equal(t, 1, len(prov.cleaned))
+	assert.Equal(t, 0, prov.startCalls)
+	assert.Equal(t, 0, len(prov.cleaned))
 }
 
 func TestCreateTray_FactoryError(t *testing.T) {
@@ -250,26 +416,36 @@ func TestDeleteTray_NotFound(t *testing.T) {
 }
 
 func TestDeleteTray_ProviderCleanError(t *testing.T) {
+	// Cleanup failure is logged and swallowed: the row stays in "deleting"
+	// state so the stale handler can retry, and the caller (typically the
+	// unregister HTTP handler) gets a soft success.
 	repo := testutil.NewMockTrayRepository()
 	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
 	prov := &mockProvider{name: "docker", cleanErr: errors.New("clean failed")}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
 	tray, err := tm.DeleteTray(context.Background(), "tray-1")
-	assert.Error(t, err)
-	assert.Nil(t, tray)
+	assert.NoError(t, err)
+	assert.NotNil(t, tray)
 	assert.Equal(t, 1, len(repo.Trays))
+	assert.Equal(t, trays.TrayStatusDeleting, repo.Trays["tray-1"].Status)
 }
 
 func TestDeleteTray_FactoryError(t *testing.T) {
+	// Provider config missing for this tray's type — log it, leave the row
+	// in deleting for the stale handler to keep trying. Don't fail the
+	// caller; an unregister request shouldn't return 500 to an agent that's
+	// already shutting down.
 	repo := testutil.NewMockTrayRepository()
 	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
 	factory := &mockProviderFactory{forTrayErr: errors.New("no provider")}
 	tm := newTestManager(repo, factory)
 
 	tray, err := tm.DeleteTray(context.Background(), "tray-1")
-	assert.Error(t, err)
-	assert.Nil(t, tray)
+	assert.NoError(t, err)
+	assert.NotNil(t, tray)
+	assert.Equal(t, 1, len(repo.Trays))
+	assert.Equal(t, trays.TrayStatusDeleting, repo.Trays["tray-1"].Status)
 }
 
 func TestGetTrayById_Found(t *testing.T) {

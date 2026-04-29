@@ -19,6 +19,7 @@ type MockTrayRepository struct {
 	CountErr    error
 	SaveErr     error
 	UpdateErr   error
+	SetErr      error
 	DeleteErr   error
 	GetErr      error
 	StaleTrays  []*trays.Tray
@@ -90,6 +91,25 @@ func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, stat
 		tray.WorkflowName = workflowName
 	}
 	tray.StatusChanged = time.Now()
+	return tray, nil
+}
+
+func (m *MockTrayRepository) SetProviderData(_ context.Context, trayId string, data map[string]string) (*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.SetErr != nil {
+		return nil, m.SetErr
+	}
+	tray, ok := m.Trays[trayId]
+	if !ok {
+		return nil, nil
+	}
+	if tray.ProviderData == nil {
+		tray.ProviderData = make(map[string]string)
+	}
+	for k, v := range data {
+		tray.ProviderData[k] = v
+	}
 	return tray, nil
 }
 
