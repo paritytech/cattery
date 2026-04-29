@@ -9,8 +9,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+// Default retry policy. Tunable via fields on CatteryClient for tests.
+const (
+	defaultMaxAttempts = 10
+	defaultRetryDelay  = 3 * time.Second
 )
 
 type CatteryClient struct {
@@ -18,60 +25,46 @@ type CatteryClient struct {
 	baseURL    string
 	logger     *logrus.Entry
 	agentId    string
+
+	// maxAttempts and retryDelay control the retry policy applied to every
+	// request. Transient failures (network errors, 5xx, 404) retry up to
+	// maxAttempts times with retryDelay between each. Permanent client
+	// errors (other 4xx) fail fast.
+	maxAttempts int
+	retryDelay  time.Duration
 }
 
 func NewCatteryClient(baseURL string, agentId string) *CatteryClient {
 	return &CatteryClient{
-		httpClient: &http.Client{},
-		baseURL:    baseURL,
-		logger:     logrus.WithField("name", "catteryClient"),
-		agentId:    agentId,
+		httpClient:  &http.Client{},
+		baseURL:     baseURL,
+		logger:      logrus.WithField("name", "catteryClient"),
+		agentId:     agentId,
+		maxAttempts: defaultMaxAttempts,
+		retryDelay:  defaultRetryDelay,
 	}
 }
 
-// RegisterAgent request just-in-time runner configuration from the Cattery server
-// and returns the configuration as a base64 encoded string
+// RegisterAgent requests just-in-time runner configuration from the Cattery
+// server. 404 retries cover the race where the agent boots before the server
+// has finished persisting the tray row.
 //
 // https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-configuration-for-a-just-in-time-runner-for-an-organization
 func (c *CatteryClient) RegisterAgent(id string) (*agents.Agent, *string, error) {
-
-	client := c.httpClient
-
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "register/", id)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	request, err := http.NewRequest("GET", requestUrl, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	response, err := client.Do(request)
-	if err != nil {
+	var resp messages.RegisterResponse
+	if err := c.doRequest("GET", requestUrl, nil, &resp); err != nil {
 		return nil, nil, err
 	}
-
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
-	}
-
-	registerResponse := &messages.RegisterResponse{}
-	err = json.NewDecoder(response.Body).Decode(registerResponse)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return &registerResponse.Agent, &registerResponse.JitConfig, nil
+	return &resp.Agent, &resp.JitConfig, nil
 }
 
-// UnregisterAgent sends a POST request to the Cattery server to unregister the agent
+// UnregisterAgent tells the server the agent is shutting down.
 func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.UnregisterReason, message string) error {
-
-	client := c.httpClient
-
 	requestJson, err := json.Marshal(messages.UnregisterRequest{
 		Agent:   *agent,
 		Reason:  reason,
@@ -86,53 +79,81 @@ func (c *CatteryClient) UnregisterAgent(agent *agents.Agent, reason messages.Unr
 		return err
 	}
 
-	request, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestJson))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
-	}
-
-	return nil
+	return c.doRequest("POST", requestUrl, requestJson, nil)
 }
 
 func (c *CatteryClient) Ping() (*messages.PingResponse, error) {
-
 	requestUrl, err := url.JoinPath(c.baseURL, "/agent", "ping", c.agentId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to join path: %w", err)
 	}
 
-	request, err := http.NewRequest("POST", requestUrl, nil)
+	pingResponse := &messages.PingResponse{}
+	if err := c.doRequest("POST", requestUrl, nil, pingResponse); err != nil {
+		return nil, err
+	}
+	return pingResponse, nil
+}
+
+// doRequest sends an HTTP request and decodes a 200 response body into dest
+// (if non-nil), retrying transient failures.
+//
+// Retryable conditions: network errors, 5xx responses, and 404 — which can
+// indicate a race against tray-row creation rather than a true "not found."
+// Permanent client errors (other 4xx) fail immediately.
+func (c *CatteryClient) doRequest(method, requestUrl string, body []byte, dest any) error {
+	var lastErr error
+	for attempt := 1; attempt <= c.maxAttempts; attempt++ {
+		err, retryable := c.try(method, requestUrl, body, dest)
+		if err == nil {
+			return nil
+		}
+		if !retryable {
+			return err
+		}
+		lastErr = err
+		if attempt < c.maxAttempts {
+			c.logger.Warnf("%s %s attempt %d/%d failed (retrying in %s): %v", method, requestUrl, attempt, c.maxAttempts, c.retryDelay, err)
+			time.Sleep(c.retryDelay)
+		}
+	}
+	return fmt.Errorf("%s %s failed after %d attempts: %w", method, requestUrl, c.maxAttempts, lastErr)
+}
+
+// try performs a single request. The retryable flag is true when the failure
+// looks transient: network errors at any stage (including a connection drop
+// mid-body), 5xx responses, and 404. Permanent client errors (other 4xx) and
+// programming errors (bad URL/method, malformed JSON) are not retryable.
+func (c *CatteryClient) try(method, requestUrl string, body []byte, dest any) (error, bool) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	request, err := http.NewRequest(method, requestUrl, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err), false
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("post error: %w", err)
+		return err, true
 	}
-
 	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return nil, fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
-	}
-
-	pingResponse := &messages.PingResponse{}
-	err = json.NewDecoder(response.Body).Decode(pingResponse)
+	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding ping response: %w", err)
+		return fmt.Errorf("read response body: %w", err), true
 	}
 
-	return pingResponse, nil
+	if response.StatusCode == http.StatusOK {
+		if dest != nil {
+			if err := json.Unmarshal(bodyBytes, dest); err != nil {
+				return fmt.Errorf("decode response body: %w", err), false
+			}
+		}
+		return nil, false
+	}
+
+	httpErr := fmt.Errorf("response status code: %s body: %s", response.Status, string(bodyBytes))
+	retryable := response.StatusCode == http.StatusNotFound || response.StatusCode >= 500
+	return httpErr, retryable
 }

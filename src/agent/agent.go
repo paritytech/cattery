@@ -58,7 +58,13 @@ func (a *CatteryAgent) Start() {
 
 	agent, jitConfig, err := a.catteryClient.RegisterAgent(a.agentId)
 	if err != nil {
-		a.logger.Errorf("Failed to register agent: %v", err)
+		// The agent never managed to register. The VM is stranded — the
+		// server has no record of it (or has marked it for deletion), and
+		// nothing will pick the work up. Power off so we don't keep a spot
+		// VM running indefinitely. Stale handler cleanup on the server side
+		// will reconcile the row state.
+		a.logger.Errorf("Failed to register agent; shutting down VM: %v", err)
+		tools.Shutdown()
 		return
 	}
 	a.agent = agent
