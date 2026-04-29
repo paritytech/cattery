@@ -2,16 +2,17 @@ package providers
 
 import (
 	"cattery/lib/trays"
+	"context"
 )
 
 type TrayProvider interface {
 	GetProviderName() string
 
 	// RunTray spawns a new tray.
-	RunTray(tray *trays.Tray) error
+	RunTray(ctx context.Context, tray *trays.Tray) error
 
 	// CleanTray deletes the tray with the given ID.
-	CleanTray(tray *trays.Tray) error
+	CleanTray(ctx context.Context, tray *trays.Tray) error
 }
 
 // TrayProviderFactory resolves providers by name or by tray.

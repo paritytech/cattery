@@ -52,9 +52,9 @@ var _ scaleSetClient.JitConfigGenerator = (*mockJitConfigGenerator)(nil)
 // mockProviderFactory implements providers.TrayProviderFactory
 type integrationMockProvider struct{}
 
-func (m *integrationMockProvider) GetProviderName() string       { return "mock" }
-func (m *integrationMockProvider) RunTray(_ *trays.Tray) error   { return nil }
-func (m *integrationMockProvider) CleanTray(_ *trays.Tray) error { return nil }
+func (m *integrationMockProvider) GetProviderName() string                          { return "mock" }
+func (m *integrationMockProvider) RunTray(_ context.Context, _ *trays.Tray) error   { return nil }
+func (m *integrationMockProvider) CleanTray(_ context.Context, _ *trays.Tray) error { return nil }
 
 type integrationMockProviderFactory struct{}
 

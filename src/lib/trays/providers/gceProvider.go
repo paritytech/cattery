@@ -24,7 +24,7 @@ type GceProvider struct {
 	logger         *logrus.Entry
 }
 
-func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvider {
+func NewGceProvider(name string, providerConfig config.ProviderConfig) (*GceProvider, error) {
 	provider := &GceProvider{
 		Name:           name,
 		providerConfig: providerConfig,
@@ -33,11 +33,11 @@ func NewGceProvider(name string, providerConfig config.ProviderConfig) *GceProvi
 
 	client, err := provider.createInstancesClient()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("create GCE instances client: %w", err)
 	}
 	provider.instanceClient = client
 
-	return provider
+	return provider, nil
 }
 
 func (g *GceProvider) GetProviderName() string {
@@ -51,9 +51,7 @@ func (g *GceProvider) Close() error {
 	return nil
 }
 
-func (g *GceProvider) RunTray(tray *trays.Tray) error {
-	ctx := context.Background()
-
+func (g *GceProvider) RunTray(ctx context.Context, tray *trays.Tray) error {
 	trayConfig, ok := tray.TrayConfig().(config.GoogleTrayConfig)
 	if !ok {
 		return fmt.Errorf("unexpected tray config type for gce provider, tray %s", tray.Id)
@@ -108,16 +106,11 @@ func (g *GceProvider) RunTray(tray *trays.Tray) error {
 	return nil
 }
 
-func (g *GceProvider) CleanTray(tray *trays.Tray) error {
-	client, err := g.createInstancesClient()
-	if err != nil {
-		return err
-	}
-
+func (g *GceProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
 	zone := tray.ProviderData["zone"]
 	project := g.providerConfig.Get("project")
 
-	_, err = client.Delete(context.Background(), &computepb.DeleteInstanceRequest{
+	_, err := g.instanceClient.Delete(ctx, &computepb.DeleteInstanceRequest{
 		Instance: tray.Id,
 		Project:  project,
 		Zone:     zone,
@@ -139,30 +132,12 @@ func (g *GceProvider) CleanTray(tray *trays.Tray) error {
 }
 
 func (g *GceProvider) createInstancesClient() (*compute.InstancesClient, error) {
-
-	if g.instanceClient != nil {
-		return g.instanceClient, nil
-	}
-
 	ctx := context.Background()
 
-	var (
-		instancesClient *compute.InstancesClient
-		err             error
-	)
-
 	if credFile := g.providerConfig.Get("credentialsFile"); credFile != "" {
-		instancesClient, err = compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile(g.providerConfig.Get("credentialsFile")))
-	} else {
-		instancesClient, err = compute.NewInstancesRESTClient(ctx)
+		return compute.NewInstancesRESTClient(ctx, option.WithCredentialsFile(credFile))
 	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	g.instanceClient = instancesClient
-	return instancesClient, nil
+	return compute.NewInstancesRESTClient(ctx)
 }
 
 func createGcpMetadata(fieldMaps ...map[string]string) *computepb.Metadata {

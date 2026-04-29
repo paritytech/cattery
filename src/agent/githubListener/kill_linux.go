@@ -2,22 +2,15 @@ package githubListener
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 )
 
-func kill(l *GithubListener) error {
-	var commandInterruptRun = exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener")
-	err := commandInterruptRun.Run()
-	if err != nil {
-		return fmt.Errorf("failed to interrupt runner: %w", err)
+// interrupt asks the runner to exit gracefully. Direct SIGINT to the process
+// doesn't behave as expected (TODO: investigate), so we pkill by name.
+func interrupt(_ *os.Process) error {
+	if err := exec.Command("pkill", "--signal", "SIGINT", "Runner.Listener").Run(); err != nil {
+		return fmt.Errorf("pkill Runner.Listener: %w", err)
 	}
-
 	return nil
-
-	// TODO: debug why SIGINT does not work correctly
-	// err := runnerProcess.Signal(syscall.SIGINT)
-	// if err != nil {
-	// 	var errMsg = "Failed to interrupt runner: " + err.Error()
-	// 	a.logger.Error(errMsg)
-	// }
 }

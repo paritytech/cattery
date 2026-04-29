@@ -3,6 +3,7 @@ package providers
 import (
 	"cattery/lib/config"
 	"cattery/lib/trays"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -33,7 +34,7 @@ func (d *DockerProvider) GetProviderName() string {
 	return d.name
 }
 
-func (d *DockerProvider) RunTray(tray *trays.Tray) error {
+func (d *DockerProvider) RunTray(ctx context.Context, tray *trays.Tray) error {
 
 	containerName := tray.Id
 
@@ -45,7 +46,7 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	image := trayConfig.Image
 	serverUrl := config.Get().Server.AdvertiseUrl
 
-	dockerCommand := exec.Command("docker", "run", "-d", "--rm",
+	dockerCommand := exec.CommandContext(ctx, "docker", "run", "-d", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
 		"--name", containerName,
 		image,
@@ -62,8 +63,8 @@ func (d *DockerProvider) RunTray(tray *trays.Tray) error {
 	return nil
 }
 
-func (d *DockerProvider) CleanTray(tray *trays.Tray) error {
-	dockerCommand := exec.Command("docker", "container", "stop", tray.Id)
+func (d *DockerProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
+	dockerCommand := exec.CommandContext(ctx, "docker", "container", "stop", tray.Id)
 	dockerCommandOutput, err := dockerCommand.CombinedOutput()
 	if err != nil {
 		output := string(dockerCommandOutput)

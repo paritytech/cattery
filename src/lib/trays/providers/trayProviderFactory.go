@@ -65,9 +65,11 @@ func GetProvider(providerName string) (TrayProvider, error) {
 			result = p
 		}
 	case "google":
-		if p := NewGceProvider(providerName, provider); p != nil {
-			result = p
+		p, err := NewGceProvider(providerName, provider)
+		if err != nil {
+			return nil, err
 		}
+		result = p
 	default:
 		return nil, errors.New("unknown provider type: " + provider["type"])
 	}

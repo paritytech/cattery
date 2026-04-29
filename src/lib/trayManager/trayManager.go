@@ -92,7 +92,7 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 		return err
 	}
 
-	err = provider.RunTray(tray)
+	err = provider.RunTray(ctx, tray)
 	if err != nil {
 		log.Errorf("Failed to run tray for provider '%s', tray '%s': %v", trayType.Provider, tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
@@ -102,7 +102,7 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 	err = tm.trayRepository.Save(ctx, tray)
 	if err != nil {
 		log.Errorf("Failed to save tray %s: %v — cleaning up provider resource", trayType.Name, err)
-		if cleanErr := provider.CleanTray(tray); cleanErr != nil {
+		if cleanErr := provider.CleanTray(ctx, tray); cleanErr != nil {
 			log.Errorf("Failed to clean up tray %s after save failure: %v", tray.Id, cleanErr)
 			metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
 		}
@@ -168,7 +168,7 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 		return nil, err
 	}
 
-	err = provider.CleanTray(tray)
+	err = provider.CleanTray(ctx, tray)
 	if err != nil {
 		log.Errorf("Failed to delete tray for provider %s, tray %s: %v", provider.GetProviderName(), tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "delete")
