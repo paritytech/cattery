@@ -431,6 +431,39 @@ func TestDeleteTray_ProviderCleanError(t *testing.T) {
 	assert.Equal(t, trays.TrayStatusDeleting, repo.Trays["tray-1"].Status)
 }
 
+func TestDeleteTray_RepoDeleteFails_Propagates(t *testing.T) {
+	// Cleanup succeeded, but the repository's Delete call failed. This is a
+	// genuine repo-level failure (DB blip) and must propagate to the caller
+	// so the upstream layer can react. The row remains in deleting status —
+	// the stale handler will try again next tick.
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
+	repo.DeleteErr = errors.New("db transient error")
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.Error(t, err)
+	assert.NotNil(t, tray, "tray returned even when row delete fails so callers can log the id")
+	assert.Equal(t, 1, len(prov.cleaned), "cleanup ran successfully")
+	assert.Equal(t, 1, len(repo.Trays), "row remains for stale handler retry")
+}
+
+func TestDeleteTray_UpdateStatusFails_Propagates(t *testing.T) {
+	// If we can't even mark the row as deleting, propagate immediately —
+	// there's no way to make progress. CleanTray should not run.
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "test-type"}
+	repo.UpdateErr = errors.New("db error")
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.Error(t, err)
+	assert.Nil(t, tray)
+	assert.Equal(t, 0, len(prov.cleaned), "must not attempt cleanup if status couldn't be marked")
+}
+
 func TestDeleteTray_FactoryError(t *testing.T) {
 	// Provider config missing for this tray's type — log it, leave the row
 	// in deleting for the stale handler to keep trying. Don't fail the

@@ -536,6 +536,214 @@ func keysOf(m map[string]bool) []string {
 	return out
 }
 
+// TestSetProviderData_AddsKeysToEmptyMap verifies that SetProviderData
+// inserts new keys when the row's providerData was empty.
+func TestSetProviderData_AddsKeysToEmptyMap(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	trayType := config.TrayType{
+		Name:          "test-type",
+		Provider:      "google",
+		RunnerGroupId: 1,
+		GitHubOrg:     "test-org",
+		Config:        &config.DockerTrayConfig{Image: "alpine", NamePrefix: "x"},
+	}
+	tray, err := trays.NewTray(trayType)
+	if err != nil {
+		t.Fatalf("NewTray failed: %v", err)
+	}
+	if err := repo.Save(context.Background(), tray); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	updated, err := repo.SetProviderData(context.Background(), tray.Id, map[string]string{
+		"zone":       "us-east-1",
+		"instanceId": "i-12345",
+	})
+	if err != nil {
+		t.Fatalf("SetProviderData failed: %v", err)
+	}
+	if updated == nil {
+		t.Fatal("SetProviderData returned nil tray")
+	}
+	if updated.ProviderData["zone"] != "us-east-1" {
+		t.Errorf("Expected zone=us-east-1, got %q", updated.ProviderData["zone"])
+	}
+	if updated.ProviderData["instanceId"] != "i-12345" {
+		t.Errorf("Expected instanceId=i-12345, got %q", updated.ProviderData["instanceId"])
+	}
+}
+
+// TestSetProviderData_MergesWithoutClobbering verifies that calling
+// SetProviderData twice with overlapping keys preserves untouched keys and
+// updates only the supplied ones.
+func TestSetProviderData_MergesWithoutClobbering(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	trayType := config.TrayType{
+		Name:          "test-type",
+		Provider:      "google",
+		RunnerGroupId: 1,
+		GitHubOrg:     "test-org",
+		Config:        &config.DockerTrayConfig{Image: "alpine", NamePrefix: "x"},
+	}
+	tray, err := trays.NewTray(trayType)
+	if err != nil {
+		t.Fatalf("NewTray failed: %v", err)
+	}
+	if err := repo.Save(context.Background(), tray); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	if _, err := repo.SetProviderData(context.Background(), tray.Id, map[string]string{
+		"zone":       "us-east-1",
+		"instanceId": "i-original",
+	}); err != nil {
+		t.Fatalf("first SetProviderData failed: %v", err)
+	}
+
+	updated, err := repo.SetProviderData(context.Background(), tray.Id, map[string]string{
+		"instanceId": "i-overwritten",
+		"region":     "us-east",
+	})
+	if err != nil {
+		t.Fatalf("second SetProviderData failed: %v", err)
+	}
+
+	if updated.ProviderData["zone"] != "us-east-1" {
+		t.Errorf("Expected zone untouched (us-east-1), got %q", updated.ProviderData["zone"])
+	}
+	if updated.ProviderData["instanceId"] != "i-overwritten" {
+		t.Errorf("Expected instanceId=i-overwritten, got %q", updated.ProviderData["instanceId"])
+	}
+	if updated.ProviderData["region"] != "us-east" {
+		t.Errorf("Expected region=us-east, got %q", updated.ProviderData["region"])
+	}
+}
+
+// TestSetProviderData_DoesNotChangeStatus is the load-bearing invariant:
+// a concurrent unregister flips status to deleting; a SetProviderData call
+// from the deploy path must NOT revert that. The post-deploy status check
+// in CreateTray relies on this.
+func TestSetProviderData_DoesNotChangeStatus(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	tray := createTestTray("test-tray-1", "test-type", trays.TrayStatusCreating, 0)
+	insertTestTrays(t, collection, []*TestTray{tray})
+
+	// Simulate a concurrent unregister flipping status to deleting.
+	if _, err := repo.UpdateStatus(context.Background(), "test-tray-1", trays.TrayStatusDeleting, 0, 0, 0, "", "", ""); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+
+	// Now the deploy goroutine, oblivious to the unregister, persists
+	// provider data. SetProviderData must not revert the status.
+	updated, err := repo.SetProviderData(context.Background(), "test-tray-1", map[string]string{
+		"zone": "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("SetProviderData failed: %v", err)
+	}
+	if updated == nil {
+		t.Fatal("SetProviderData returned nil tray")
+	}
+	if updated.Status != trays.TrayStatusDeleting {
+		t.Errorf("Expected status=deleting (untouched), got %v", updated.Status)
+	}
+	if updated.ProviderData["zone"] != "us-east-1" {
+		t.Errorf("Expected zone=us-east-1 to be set, got %q", updated.ProviderData["zone"])
+	}
+}
+
+// TestSetProviderData_DoesNotBumpStatusChanged verifies that a merge call
+// does not refresh statusChanged. The stale handler relies on the timestamp
+// to age trays; if every deploy-time merge bumped it, stale cleanup would
+// effectively never fire.
+func TestSetProviderData_DoesNotBumpStatusChanged(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	originalChanged := time.Now().UTC().Add(-10 * time.Minute)
+	tray := createTestTray("test-tray-1", "test-type", trays.TrayStatusCreating, 0)
+	tray.StatusChanged = originalChanged
+	insertTestTrays(t, collection, []*TestTray{tray})
+
+	updated, err := repo.SetProviderData(context.Background(), "test-tray-1", map[string]string{
+		"zone": "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("SetProviderData failed: %v", err)
+	}
+
+	// Allow a small skew for clock granularity. Anything within a few seconds
+	// of the original timestamp means SetProviderData didn't refresh it.
+	delta := updated.StatusChanged.Sub(originalChanged)
+	if delta < -time.Second || delta > time.Second {
+		t.Errorf("Expected statusChanged unchanged (≈%v), got %v (delta %v)",
+			originalChanged, updated.StatusChanged, delta)
+	}
+}
+
+// TestSetProviderData_ReturnsNilForMissingTray verifies the (nil, nil)
+// contract for missing rows. CreateTray's post-deploy handling relies on
+// this to detect a row that vanished concurrently.
+func TestSetProviderData_ReturnsNilForMissingTray(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	updated, err := repo.SetProviderData(context.Background(), "no-such-tray", map[string]string{
+		"zone": "us-east-1",
+	})
+	if err != nil {
+		t.Errorf("Expected no error for missing tray, got: %v", err)
+	}
+	if updated != nil {
+		t.Errorf("Expected nil tray for missing id, got %v", updated)
+	}
+}
+
+// TestSetProviderData_EmptyDataIsRead verifies that calling with no keys is
+// a read of the current state, not a no-op or error.
+func TestSetProviderData_EmptyDataIsRead(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	tray := createTestTray("test-tray-1", "test-type", trays.TrayStatusRegistered, 0)
+	insertTestTrays(t, collection, []*TestTray{tray})
+
+	updated, err := repo.SetProviderData(context.Background(), "test-tray-1", nil)
+	if err != nil {
+		t.Fatalf("SetProviderData with nil data failed: %v", err)
+	}
+	if updated == nil {
+		t.Fatal("Expected current row to be returned")
+	}
+	if updated.Status != trays.TrayStatusRegistered {
+		t.Errorf("Expected status=registered, got %v", updated.Status)
+	}
+}
+
 // TestNewMongodbTrayRepository tests the NewMongodbTrayRepository constructor
 func TestNewMongodbTrayRepository(t *testing.T) {
 	// Create a new repository
