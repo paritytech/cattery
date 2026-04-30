@@ -184,6 +184,7 @@
 
 <header>
   <h1>Cattery</h1>
+  <span class="meta">{{.Version}}</span>
   <span class="meta" id="timestamp">{{.Now.Format "2006-01-02 15:04:05 UTC"}} &mdash; refreshes every 5s</span>
 </header>
 
@@ -202,7 +203,7 @@
     <details id="trays-details" open>
       <summary><h2>Trays (<span id="tray-count">{{len .Trays}}</span>)</h2></summary>
       <div class="section-body">
-        <div class="filters" id="tray-filters">
+        <div class="filters" id="tray-filters" data-configured-types="{{range $i, $t := .TrayTypes}}{{if $i}},{{end}}{{$t.Name}}{{end}}">
           <button class="active" data-filter="*">All</button>
         </div>
         <div class="table-wrap">
@@ -440,12 +441,13 @@
   }
 
   function buildFilterButtons(trays) {
-    const types = [...new Set(trays.map(t => t.type))].sort();
+    const bar = document.getElementById('tray-filters');
+    const configured = (bar.dataset.configuredTypes || '').split(',').filter(Boolean);
+    const types = [...new Set([...configured, ...trays.map(t => t.type)])].sort();
     // If the selected type no longer exists, fall back to All.
     if (activeFilter !== '*' && !types.includes(activeFilter)) {
       activeFilter = '*';
     }
-    const bar = document.getElementById('tray-filters');
     // Rebuild: the "All" button is the first child and stays; rest are re-created.
     while (bar.children.length > 1) bar.removeChild(bar.lastChild);
     types.forEach(type => {

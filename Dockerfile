@@ -16,7 +16,7 @@ ENV CGO_ENABLED=0 GOOS=linux
 
 RUN go build \
       -trimpath \
-      -ldflags="-s -w -X cattery/cmd.Version=${CATTERY_VERSION}" \
+      -ldflags="-s -w -X cattery/lib/version.Version=${CATTERY_VERSION}" \
       -o /out/cattery \
     && /out/cattery --version
 

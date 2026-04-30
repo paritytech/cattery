@@ -59,6 +59,7 @@ func NewPollerWithJitClient(
 		jitClient:   jitClient,
 		trayType:    trayType,
 		trayManager: tm,
+		history:     &History{},
 		logger: log.WithFields(log.Fields{
 			"component": "scaleSetPoller",
 			"trayType":  trayType.Name,
@@ -153,12 +154,18 @@ func (cs *catteryScaler) RecordJobCompleted(msg *scaleset.JobCompleted) {}
 func (cs *catteryScaler) RecordDesiredRunners(count int)                {}
 
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
+	cs.recordScaleMessage(count)
+
 	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to scale for demand (%d): %v", count, err)
 		return 0, err
 	}
 
+	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
+}
+
+func (cs *catteryScaler) recordScaleMessage(count int) {
 	msg := &Message{
 		Time:         time.Now(),
 		Kind:         MessageKindScale,
@@ -176,8 +183,6 @@ func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int
 		}
 	}
 	cs.poller.history.Add(msg)
-
-	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
 }
 
 func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset.JobStarted) error {

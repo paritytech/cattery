@@ -14,5 +14,5 @@ type Handlers struct {
 }
 
 func (h *Handlers) Index(responseWriter http.ResponseWriter, r *http.Request) {
-	return
+	http.Redirect(responseWriter, r, "/status", http.StatusFound)
 }
