@@ -153,6 +153,8 @@ func Start() {
 
 func agentMux(h *handlers.Handlers) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", h.Index)
+	mux.HandleFunc("GET /healthcheck", h.Healthcheck)
 	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
 	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
 	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
@@ -162,7 +164,6 @@ func agentMux(h *handlers.Handlers) *http.ServeMux {
 }
 
 func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
-	mux.HandleFunc("/{$}", h.Index)
 	mux.HandleFunc("/status", h.Status)
 	mux.HandleFunc("GET /status/data", h.StatusData)
 	mux.Handle("/metrics", promhttp.Handler())
@@ -195,6 +196,8 @@ func startServers(logger *log.Logger, cancel context.CancelFunc, h *handlers.Han
 	}
 
 	sMux := http.NewServeMux()
+	sMux.HandleFunc("/{$}", h.StatusIndex)
+	sMux.HandleFunc("GET /healthcheck", h.Healthcheck)
 	registerStatusRoutes(sMux, h)
 	return []*http.Server{
 		listenAndServe(logger, cancel, mainAddr, aMux),

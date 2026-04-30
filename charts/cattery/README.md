@@ -128,8 +128,9 @@ the path `config.github[*].privateKeyPath` expects. Two modes per entry:
 
 `config.server.statusListenAddress` can be set to serve `/status` and
 `/metrics` on a separate port. When set, the chart opens a second Service
-port and the `ServiceMonitor` scrapes that port. Probes always target
-whichever port `/status` is on.
+port and the `ServiceMonitor` scrapes that port. Probes hit `/healthcheck`,
+which is registered on both ports; they target the status port when set,
+otherwise the main http port.
 
 ### ServiceMonitor
 
