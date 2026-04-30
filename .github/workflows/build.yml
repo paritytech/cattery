@@ -10,6 +10,8 @@ on:
       tag_name:
           description: 'Tag name'
           required: true
+  release:
+    types: [created]
   push:
     branches:
       - main
@@ -20,13 +22,52 @@ concurrency:
 
 jobs:
 
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      ref: ${{ steps.compute.outputs.ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Compute version and ref
+        id: compute
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch)
+              TAG="${{ github.event.inputs.tag_name }}"
+              if ! gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                echo "::error::Release for tag '${TAG}' does not exist. Create the release first."
+                exit 1
+              fi
+              echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "ref=refs/tags/${TAG}" >> "$GITHUB_OUTPUT"
+              ;;
+            release)
+              TAG="${{ github.event.release.tag_name }}"
+              echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "ref=refs/tags/${TAG}" >> "$GITHUB_OUTPUT"
+              ;;
+            pull_request)
+              echo "version=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+              echo "ref=" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "version=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+              echo "ref=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
   tests:
+    needs: [setup]
     runs-on: ubuntu-latest
     env:
       DOCKER_API_VERSION: '1.44'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
 
       - name: Start MongoDB
         uses: supercharge/mongodb-github-action@1.12.0
@@ -51,16 +92,18 @@ jobs:
         run: go tool cover -func=coverage.out
 
   release:
-    needs: [tests]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [tests, setup]
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     permissions:
       contents: write
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.sha }}
+      VERSION: ${{ needs.setup.outputs.version }}
     steps:
      - name: Checkout code
        uses: actions/checkout@v4
+       with:
+         ref: ${{ needs.setup.outputs.ref }}
 
      - name: Set up Go
        uses: actions/setup-go@v5
@@ -75,28 +118,25 @@ jobs:
 
      - run: ls -la bin/
 
-     - name: create-release
-       uses: softprops/action-gh-release@v2
-       with:
-         tag_name: ${{ github.event.inputs.tag_name }}
-         name: v${{ github.event.inputs.tag_name }}
-         draft: true
-         token: ${{ github.token }}
-         target_commitish: ${{ github.sha }}
-         files: |
-           bin/cattery*
+     - name: Upload artifacts to release
+       env:
+         GH_TOKEN: ${{ github.token }}
+       run: |
+         gh release upload "${VERSION}" bin/cattery* --repo "${{ github.repository }}" --clobber
 
   docker-build:
-    needs: [tests]
+    needs: [tests, setup]
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && 'main' || null }}
+    environment: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'release') && 'main' || null }}
     env:
-      REGISTRY_PATH: docker.io/${{ github.event_name == 'workflow_dispatch' && 'paritytech' || 'paritypr' }}/cattery
-      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || (github.event.pull_request.head.sha || github.sha) }}
-      EXTRA_TAG: ${{ github.event_name == 'workflow_dispatch' && 'latest' || 'main' }}
-      PUSH: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'image-push') || github.event_name == 'push' }}
+      REGISTRY_PATH: docker.io/${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'release') && 'paritytech' || 'paritypr' }}/cattery
+      VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'release') && 'latest' || 'main' }}
+      PUSH: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'release' || contains(github.event.pull_request.labels.*.name, 'image-push') || github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
 
       - name: Docker login
         if: env.PUSH == 'true'
