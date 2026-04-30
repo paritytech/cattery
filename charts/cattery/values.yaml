@@ -153,8 +153,9 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
-# Probes hit /status. They target the status port when
+# Probes hit /healthcheck. They target the status port when
 # config.server.statusListenAddress is set, otherwise the main http port.
+# /healthcheck is registered on both ports.
 livenessProbe:
   enabled: true
   initialDelaySeconds: 15
