@@ -4,6 +4,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trays"
+	"cattery/lib/version"
 	"cattery/ui"
 	"encoding/json"
 	"fmt"
@@ -47,6 +48,7 @@ func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := struct {
 		Now       time.Time
+		Version   string
 		Trays     []*trays.Tray
 		Messages  []*scaleSetPoller.Message
 		Orgs      []*config.GitHubOrganization
@@ -54,6 +56,7 @@ func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
 		TrayTypes []*config.TrayType
 	}{
 		Now:       time.Now().UTC(),
+		Version:   version.Get(),
 		Trays:     trayList,
 		Messages:  h.ScaleSetManager.MessageHistory(),
 		Orgs:      cfg.Github,

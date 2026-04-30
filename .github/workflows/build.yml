@@ -71,7 +71,7 @@ jobs:
        run: go mod download -C src
 
      - name: Build
-       run: go build -C src -o ../bin/cattery_linux_x86_${{ env.VERSION }} -ldflags="-X cattery/cmd.Version=${{ env.VERSION }}"
+       run: go build -C src -o ../bin/cattery_linux_x86_${{ env.VERSION }} -ldflags="-X cattery/lib/version.Version=${{ env.VERSION }}"
 
      - run: ls -la bin/
 

@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"cattery/agent"
+	"cattery/lib/version"
 	"fmt"
 	"github.com/spf13/cobra"
 	"os"
 )
 
-var Version = "0.0.0"
 var configPath string
 
 var rootCmd = &cobra.Command{
@@ -16,7 +16,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.Version = Version
+	rootCmd.Version = version.Get()
 
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(serverCmd)
