@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-playground/validator"
+	"github.com/go-playground/validator/v10"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
