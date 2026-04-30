@@ -118,6 +118,10 @@ func (sc *ScaleSetClient) Ack(ctx context.Context, messageID int) error {
 	return sc.session.DeleteMessage(ctx, messageID)
 }
 
+func (sc *ScaleSetClient) AcquireJobs(ctx context.Context, requestIDs []int64) ([]int64, error) {
+	return sc.session.AcquireJobs(ctx, requestIDs)
+}
+
 func (sc *ScaleSetClient) GenerateJitRunnerConfig(ctx context.Context, runnerName string) (*scaleset.RunnerScaleSetJitRunnerConfig, error) {
 	return sc.client.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{
 		Name:       runnerName,

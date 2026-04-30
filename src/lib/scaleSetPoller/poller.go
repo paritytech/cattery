@@ -125,6 +125,10 @@ func (s *sessionAdapter) DeleteMessage(ctx context.Context, messageID int) error
 	return s.client.Ack(ctx, messageID)
 }
 
+func (s *sessionAdapter) AcquireJobs(ctx context.Context, requestIDs []int64) ([]int64, error) {
+	return s.client.AcquireJobs(ctx, requestIDs)
+}
+
 func (s *sessionAdapter) Session() scaleset.RunnerScaleSetSession {
 	return s.client.Session()
 }
