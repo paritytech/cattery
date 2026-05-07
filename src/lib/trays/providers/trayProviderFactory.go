@@ -68,6 +68,10 @@ func GetProvider(providerName string) (TrayProvider, error) {
 		if p := NewGceProvider(providerName, provider); p != nil {
 			result = p
 		}
+	case "nomad":
+		if p := NewNomadProvider(providerName, provider); p != nil {
+			result = p
+		}
 	default:
 		return nil, errors.New("unknown provider type: " + provider["type"])
 	}

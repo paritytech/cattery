@@ -32,6 +32,12 @@ providers:
     project: my-gcp-project
     credentialsFile: my-gcp-creds.json
 
+  - name: nomad-scw
+    type: nomad
+    address: https://nomad.internal:4646
+    token: <nomad-acl-token>
+    namespace: runners
+
 trayTypes:
   - name: cattery-docker-local
     provider: docker-local
@@ -59,6 +65,17 @@ trayTypes:
         - europe-west1-d
       machineType: e2-standard-4
       instanceTemplate: global/instanceTemplates/cattery-default
+
+  - name: cattery-nomad
+    provider: nomad-scw
+    githubOrg: my-org
+    runnerGroupId: 3
+    maxTrays: 5
+    shutdown: true
+    config:
+      jobId: scw-cattery-runner-tray
+      script: |
+        echo "extra setup for $TRAY_NAME"
 ```
 
 ### Config sections
@@ -98,7 +115,7 @@ Common fields for all providers:
 | Key  | Type   | Required | Description                                         |
 |------|--------|----------|-----------------------------------------------------|
 | name | string | yes      | Provider name to reference from trayTypes.          |
-| type | enum   | yes      | Provider type. Currently implemented: docker, google (GCE). |
+| type | enum   | yes      | Provider type. Currently implemented: docker, google (GCE), nomad. |
 
 Provider-specific fields:
 
@@ -112,6 +129,19 @@ Provider-specific fields:
   |-----------------|--------|----------|----------------------------------------------|
   | project         | string | yes      | GCP project ID                               |
   | credentialsFile | string | no       | Path to GCP service account JSON credentials. If omitted, uses Application Default Credentials. |
+
+- nomad
+
+  Cattery dispatches each tray as a child of a **parameterized parent job** that must already be registered in your Nomad cluster. The provider supplies `tray_name`, `bootstrap_token` and `cattery_url` as dispatch meta plus a generated bash payload that downloads and execs the cattery agent. Resources, driver and constraints come from the parent job spec — Nomad does not allow overriding them at dispatch time, so use distinct parameterized jobs for distinct resource shapes.
+
+  | Key       | Type   | Required | Description                                                                                       |
+  |-----------|--------|----------|---------------------------------------------------------------------------------------------------|
+  | address   | string | yes      | Nomad agent HTTP(S) address, e.g. `https://nomad.internal:4646`.                                  |
+  | token     | string | no       | Nomad ACL token. Should be scoped to `dispatch-job` on the parameterized parent job(s).           |
+  | namespace | string | no       | Nomad namespace to dispatch into. Defaults to `default`.                                          |
+  | region    | string | no       | Nomad region. Defaults to the agent's region.                                                     |
+  | tlsCaFile | string | no       | Path to a PEM CA bundle for verifying the Nomad agent's TLS certificate.                          |
+  | insecure  | bool   | no       | Skip TLS verification. Dev-only.                                                                  |
 
 #### trayTypes
 Defines one or more tray "profiles" that the Tray Manager can maintain.
@@ -146,6 +176,32 @@ Provider-specific config under trayType.config:
   | machineType      | string   | yes      | Instance machine type (e.g. `e2-standard-4`)                                    |
   | instanceTemplate | string   | yes      | Template to base instances on (e.g. `global/instanceTemplates/cattery-default`) |
   | namePrefix       | string   | no       | Prefix for VM names                                                             |
+
+- nomad config
+
+  | Key    | Type   | Required | Description                                                                                          |
+  |--------|--------|----------|------------------------------------------------------------------------------------------------------|
+  | jobId  | string | yes      | ID of a parameterized parent job already registered in Nomad. Cattery dispatches one child per tray. |
+  | script | string | no       | Inline bash, executed after the agent binary is downloaded and before the agent is exec'd. Use YAML's `\|` block scalar for multi-line. |
+
+  **Parent-job contract.** The parameterized parent job must declare:
+
+  ```hcl
+  parameterized {
+    payload       = "required"
+    meta_required = ["tray_name", "bootstrap_token", "cattery_url"]
+  }
+  ```
+
+  Inside the alloc, the dispatched payload is the bash script the provider generated. Before exec'ing it, your parent job is responsible for exporting the meta values as `TRAY_NAME`, `BOOTSTRAP_TOKEN` and `CATTERY_URL` (e.g. via cloud-init writing `/etc/cattery/bootstrap.env` and sourcing it). The default payload assumes those env vars are present.
+
+  **Lifecycle.**
+
+  - Cattery dispatches the parent job, stores `dispatchedJobId` + `evalId` in the tray's provider data.
+  - Cattery blocks until the dispatch evaluation leaves `pending`. `complete` → success; `blocked` → returned as `ErrCapacityBlocked` (Nomad has no capacity for this alloc); `failed`/`canceled` → error.
+  - On tray cleanup, the dispatched child job is deregistered with `purge=true`.
+
+  **Resource shapes.** Resources, driver, constraints and reschedule policy are baked into the parent job spec — they cannot be set per-dispatch. To run trays at different sizes, register multiple parameterized parent jobs and reference them by `jobId` from different trayTypes.
 
 
 Notes:

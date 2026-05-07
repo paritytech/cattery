@@ -42,6 +42,16 @@ providers:
     project: my-gcp-project
     credentialsFile: path/to/credentials.json
 
+  - name: nomad-scw
+    type: nomad
+    address: https://nomad.internal:4646
+    # ACL token scoped to dispatch-job on the parameterized parent job(s).
+    token: <nomad-acl-token>
+    namespace: runners       # optional
+    region: global           # optional
+    tlsCaFile: path/to/nomad-ca.pem  # optional
+    insecure: false          # optional, skip TLS verification (dev only)
+
 trayTypes:
   - name: cattery-tiny
     provider: docker-local
@@ -68,3 +78,22 @@ trayTypes:
     provider: gce
     runnerGroupId: 3 # check in github org settings -> Runner groups
     shutdown: true
+
+  - name: cattery-nomad
+    provider: nomad-scw
+    githubOrg: My-Github-Org
+    runnerGroupId: 3
+    maxTrays: 5
+    shutdown: true
+    config:
+      # ID of a parameterized parent job already registered in Nomad. Resources,
+      # driver and constraints come from that job spec — Nomad does not allow
+      # overriding them at dispatch time. Use distinct parent jobs for distinct
+      # resource shapes.
+      jobId: scw-cattery-runner-tray
+      # Optional inline bash, executed after the agent binary is downloaded
+      # and before the agent is exec'd. The provider's default bootstrap
+      # exports TRAY_NAME, BOOTSTRAP_TOKEN and CATTERY_URL from meta.
+      script: |
+        echo "extra setup for $TRAY_NAME"
+        # mkfs / mount scratch volume, install build tools, etc.
