@@ -26,23 +26,27 @@ const (
 	nomadProviderDataNamespace       = "namespace"
 )
 
-// defaultBootstrapTemplate is the payload script the provider synthesizes per
-// dispatch. The {{USER_SCRIPT}} marker is replaced with NomadTrayConfig.Script
-// (empty string if not configured). The script assumes that meta values
-// TRAY_NAME, BOOTSTRAP_TOKEN, CATTERY_URL are already exported in the
-// environment (the parameterized parent job is responsible for sourcing them
-// from /etc/cattery/bootstrap.env before exec'ing this script — see
-// scw-cattery-runner-tray.nomad.hcl for the canonical setup).
-const defaultBootstrapTemplate = `#!/bin/bash
-set -euo pipefail
+// defaultRunnerFolder is used when NomadTrayConfig.RunnerFolder is empty.
+// It is the path inside the guest where the GitHub Actions runner
+// distribution is expected to live and is passed as `--runner-folder` to
+// `cattery agent` (which is required by the agent CLI). To take over the
+// agent invocation (e.g. when the image starts the agent itself), put your
+// own `exec ...` at the end of NomadTrayConfig.Script — the default exec
+// emitted afterwards becomes unreachable.
+const defaultRunnerFolder = "/cattery"
 
-curl -fsSL "$CATTERY_URL/agent/binary" -o /usr/local/bin/cattery
-chmod +x /usr/local/bin/cattery
-
-{{USER_SCRIPT}}
-
-exec /usr/local/bin/cattery agent -i "$TRAY_NAME" -s "$CATTERY_URL"
-`
+// The provider synthesizes the dispatched payload from three pieces:
+//
+//  1. A fixed prelude that downloads the cattery agent binary.
+//  2. The user's optional Script, executed as a pre-agent hook.
+//  3. An exec of `cattery agent ... --runner-folder <RunnerFolder>`, using
+//     defaultRunnerFolder when RunnerFolder is empty.
+//
+// The script assumes meta values TRAY_NAME, BOOTSTRAP_TOKEN, CATTERY_URL are
+// exported in the environment. The parameterized parent job is responsible
+// for sourcing them from /etc/cattery/bootstrap.env (or equivalent) before
+// exec'ing this script — see scw-cattery-runner-tray.nomad.hcl for the
+// canonical setup.
 
 type NomadProvider struct {
 	name           string
@@ -128,7 +132,7 @@ func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error
 		return fmt.Errorf("failed to generate bootstrap token: %w", err)
 	}
 
-	payload := buildBootstrapPayload(trayConfig.Script)
+	payload := buildBootstrapPayload(trayConfig.Script, trayConfig.RunnerFolder)
 
 	meta := map[string]string{
 		"tray_name":       tray.Id,
@@ -254,8 +258,26 @@ func generateBootstrapToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func buildBootstrapPayload(userScript string) []byte {
-	return []byte(strings.Replace(defaultBootstrapTemplate, "{{USER_SCRIPT}}", userScript, 1))
+// buildBootstrapPayload composes the dispatched bash payload. runnerFolder
+// defaults to defaultRunnerFolder when empty.
+func buildBootstrapPayload(userScript, runnerFolder string) []byte {
+	if runnerFolder == "" {
+		runnerFolder = defaultRunnerFolder
+	}
+	var sb strings.Builder
+	sb.WriteString("#!/bin/bash\n")
+	sb.WriteString("set -euo pipefail\n\n")
+	sb.WriteString(`curl -fsSL "$CATTERY_URL/agent/binary" -o /usr/local/bin/cattery` + "\n")
+	sb.WriteString("chmod +x /usr/local/bin/cattery\n\n")
+	if userScript != "" {
+		sb.WriteString(userScript)
+		if !strings.HasSuffix(userScript, "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+	fmt.Fprintf(&sb, "exec /usr/local/bin/cattery agent -i \"$TRAY_NAME\" -s \"$CATTERY_URL\" --runner-folder %q\n", runnerFolder)
+	return []byte(sb.String())
 }
 
 // formatBlockedReason summarizes the first FailedTGAllocs entry into something

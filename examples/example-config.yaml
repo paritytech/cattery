@@ -45,7 +45,9 @@ providers:
   - name: nomad-scw
     type: nomad
     address: https://nomad.internal:4646
-    # ACL token scoped to dispatch-job on the parameterized parent job(s).
+    # ACL token. Needs dispatch-job (StartDeploy), read-job (WaitDeploy reads
+    # the evaluation), and deregister-job/purge-job (CleanTray purges the
+    # dispatched child) on the parent job's namespace.
     token: <nomad-acl-token>
     namespace: runners       # optional
     region: global           # optional
@@ -91,9 +93,13 @@ trayTypes:
       # overriding them at dispatch time. Use distinct parent jobs for distinct
       # resource shapes.
       jobId: scw-cattery-runner-tray
+      # Path inside the guest where the GitHub Actions runner distribution
+      # lives. Passed as --runner-folder to `cattery agent`. Defaults to
+      # /cattery if omitted.
+      runnerFolder: /cattery
       # Optional inline bash, executed after the agent binary is downloaded
-      # and before the agent is exec'd. The provider's default bootstrap
-      # exports TRAY_NAME, BOOTSTRAP_TOKEN and CATTERY_URL from meta.
+      # and before the agent is exec'd. The parent job is expected to have
+      # exported TRAY_NAME, BOOTSTRAP_TOKEN and CATTERY_URL from meta.
       script: |
         echo "extra setup for $TRAY_NAME"
         # mkfs / mount scratch volume, install build tools, etc.

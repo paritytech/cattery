@@ -74,6 +74,7 @@ trayTypes:
     shutdown: true
     config:
       jobId: scw-cattery-runner-tray
+      runnerFolder: /cattery
       script: |
         echo "extra setup for $TRAY_NAME"
 ```
@@ -137,7 +138,7 @@ Provider-specific fields:
   | Key       | Type   | Required | Description                                                                                       |
   |-----------|--------|----------|---------------------------------------------------------------------------------------------------|
   | address   | string | yes      | Nomad agent HTTP(S) address, e.g. `https://nomad.internal:4646`.                                  |
-  | token     | string | no       | Nomad ACL token. Should be scoped to `dispatch-job` on the parameterized parent job(s).           |
+  | token     | string | no       | Nomad ACL token. Needs `dispatch-job` (StartDeploy), `read-job` (WaitDeploy reads the evaluation), and `deregister-job`/`purge-job` (CleanTray purges the dispatched child) on the parent job's namespace. See [Nomad ACL policies](https://developer.hashicorp.com/nomad/docs/secure/acl/policies) for the exact capability names in your Nomad version. |
   | namespace | string | no       | Nomad namespace to dispatch into. Defaults to `default`.                                          |
   | region    | string | no       | Nomad region. Defaults to the agent's region.                                                     |
   | tlsCaFile | string | no       | Path to a PEM CA bundle for verifying the Nomad agent's TLS certificate.                          |
@@ -179,10 +180,19 @@ Provider-specific config under trayType.config:
 
 - nomad config
 
-  | Key    | Type   | Required | Description                                                                                          |
-  |--------|--------|----------|------------------------------------------------------------------------------------------------------|
-  | jobId  | string | yes      | ID of a parameterized parent job already registered in Nomad. Cattery dispatches one child per tray. |
-  | script | string | no       | Inline bash, executed after the agent binary is downloaded and before the agent is exec'd. Use YAML's `\|` block scalar for multi-line. |
+  | Key          | Type   | Required | Description                                                                                          |
+  |--------------|--------|----------|------------------------------------------------------------------------------------------------------|
+  | jobId        | string | yes      | ID of a parameterized parent job already registered in Nomad. Cattery dispatches one child per tray. |
+  | runnerFolder | string | no       | Path inside the guest where the GitHub Actions runner distribution lives. Passed as `--runner-folder` to `cattery agent`. Defaults to `/cattery`. |
+  | script       | string | no       | Inline bash, executed after the agent binary is downloaded and before the agent is exec'd. Use YAML's `\|` block scalar for multi-line. |
+
+  **Bootstrap composition.** The provider builds the dispatched payload from three pieces:
+
+  1. A fixed prelude that downloads the cattery agent binary from `$CATTERY_URL/agent/binary` to `/usr/local/bin/cattery`.
+  2. The optional `script` field, executed as a pre-agent hook.
+  3. An `exec /usr/local/bin/cattery agent -i "$TRAY_NAME" -s "$CATTERY_URL" --runner-folder <runnerFolder>`, where `<runnerFolder>` defaults to `/cattery`.
+
+  To take over the agent invocation entirely (e.g. when the image starts the agent itself via systemd), put your own `exec ...` at the end of `script` — the default exec emitted afterwards becomes unreachable.
 
   **Parent-job contract.** The parameterized parent job must declare:
 
@@ -202,6 +212,8 @@ Provider-specific config under trayType.config:
   - On tray cleanup, the dispatched child job is deregistered with `purge=true`.
 
   **Resource shapes.** Resources, driver, constraints and reschedule policy are baked into the parent job spec — they cannot be set per-dispatch. To run trays at different sizes, register multiple parameterized parent jobs and reference them by `jobId` from different trayTypes.
+
+  **`extraMetadata` and Nomad meta.** Any keys in the trayType's `extraMetadata` are forwarded as Nomad dispatch meta alongside `tray_name` / `bootstrap_token` / `cattery_url`. Nomad rejects dispatch meta keys that are not declared in the parent job's `meta_required` or `meta_optional`, so any keys you add via `extraMetadata` must also be declared `meta_optional` in the parameterized parent job.
 
 
 Notes:
