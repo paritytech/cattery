@@ -24,6 +24,7 @@ const (
 	nomadProviderDataDispatchedJobID = "dispatchedJobId"
 	nomadProviderDataEvalID          = "evalId"
 	nomadProviderDataNamespace       = "namespace"
+	nomadProviderDataParentJobID     = "parentJobId"
 )
 
 // defaultRunnerFolder is used when NomadTrayConfig.RunnerFolder is empty.
@@ -45,8 +46,8 @@ const defaultRunnerFolder = "/cattery"
 // The script assumes meta values TRAY_NAME, BOOTSTRAP_TOKEN, CATTERY_URL are
 // exported in the environment. The parameterized parent job is responsible
 // for sourcing them from /etc/cattery/bootstrap.env (or equivalent) before
-// exec'ing this script — see scw-cattery-runner-tray.nomad.hcl for the
-// canonical setup.
+// exec'ing this script — see the "Parent-job contract" section in
+// docs/configuration.md for the wiring patterns.
 
 type NomadProvider struct {
 	name           string
@@ -117,7 +118,16 @@ func (n *NomadProvider) GetProviderName() string {
 // StartDeploy submits a parameterized-job dispatch to Nomad. ProviderData is
 // populated *before* the call returns so a partial failure (or a process
 // restart between StartDeploy and CleanTray) still leaves enough context for
-// CleanTray to attempt cleanup.
+// CleanTray to attempt cleanup — even when the dispatch HTTP response was
+// lost in transit, the persisted parentJobId + tray.Id let CleanTray scan
+// for leaked children via Nomad's job ID prefix and purge them.
+//
+// To make this safe under retry, the dispatch sets:
+//
+//   - idPrefixTemplate = tray.Id, so the child job's ID always contains
+//     tray.Id and can be located by prefix scan.
+//   - IdempotencyToken = tray.Id, so a retried Dispatch with the same token
+//     does not create a duplicate child.
 func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error {
 	trayConfig, ok := tray.TrayConfig().(config.NomadTrayConfig)
 	if !ok {
@@ -134,25 +144,32 @@ func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error
 
 	payload := buildBootstrapPayload(trayConfig.Script, trayConfig.RunnerFolder)
 
-	meta := map[string]string{
-		"tray_name":       tray.Id,
-		"bootstrap_token": bootstrapToken,
-		"cattery_url":     config.Get().Server.AdvertiseUrl,
-	}
+	// Provider-owned keys are written *last* so that user-supplied
+	// extraMetadata cannot accidentally clobber the bootstrap contract.
+	meta := map[string]string{}
 	if tt := tray.TrayType(); tt != nil {
 		for k, v := range tt.ExtraMetadata {
 			meta[k] = v
 		}
 	}
+	meta["tray_name"] = tray.Id
+	meta["bootstrap_token"] = bootstrapToken
+	meta["cattery_url"] = config.Get().Server.AdvertiseUrl
 
+	// Persisted *before* the dispatch call so cleanup can recover from a
+	// lost response.
 	tray.ProviderData[nomadProviderDataNamespace] = n.namespace
+	tray.ProviderData[nomadProviderDataParentJobID] = trayConfig.JobId
 
 	resp, _, err := n.client.Jobs().Dispatch(
 		trayConfig.JobId,
 		meta,
 		payload,
-		"",
-		(&api.WriteOptions{Namespace: n.namespace}).WithContext(ctx),
+		tray.Id,
+		(&api.WriteOptions{
+			Namespace:        n.namespace,
+			IdempotencyToken: tray.Id,
+		}).WithContext(ctx),
 	)
 	if err != nil {
 		n.logger.Errorf("Failed to dispatch nomad job %s for tray %s: %v", trayConfig.JobId, tray.Id, err)
@@ -221,33 +238,96 @@ func (n *NomadProvider) WaitDeploy(ctx context.Context, tray *trays.Tray) error 
 	}
 }
 
-// CleanTray deregisters the dispatched child job. Safe to call on a tray that
-// StartDeploy never finished — missing DispatchedJobID is treated as a no-op.
+// CleanTray deregisters the dispatched child job. Safe to call on a tray
+// that StartDeploy never finished:
+//
+//   - If dispatchedJobId is stored, deregister it directly (fast path).
+//   - Otherwise, if parentJobId is stored, scan the parent's dispatched
+//     children for any whose ID contains tray.Id and deregister them.
+//     This recovers the leaked-child scenario where Dispatch succeeded on
+//     the server but the response was lost (network error / timeout) and
+//     dispatchedJobId never made it into ProviderData.
+//   - If neither is stored, nothing to do.
 func (n *NomadProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
-	dispatchedJobID := tray.ProviderData[nomadProviderDataDispatchedJobID]
-	if dispatchedJobID == "" {
-		n.logger.Warnf("CleanTray called without dispatchedJobId for tray %s; nothing to deregister", tray.Id)
-		return nil
-	}
-
 	ns := tray.ProviderData[nomadProviderDataNamespace]
 	if ns == "" {
 		ns = n.namespace
 	}
 
+	dispatchedJobID := tray.ProviderData[nomadProviderDataDispatchedJobID]
+	if dispatchedJobID != "" {
+		return n.deregister(ctx, ns, dispatchedJobID)
+	}
+
+	parentJobID := tray.ProviderData[nomadProviderDataParentJobID]
+	if parentJobID == "" {
+		n.logger.Warnf("CleanTray called without dispatchedJobId or parentJobId for tray %s; nothing to do", tray.Id)
+		return nil
+	}
+
+	return n.cleanupLeakedDispatch(ctx, ns, parentJobID, tray.Id)
+}
+
+func (n *NomadProvider) deregister(ctx context.Context, ns, jobID string) error {
 	_, _, err := n.client.Jobs().Deregister(
-		dispatchedJobID,
+		jobID,
 		true,
 		(&api.WriteOptions{Namespace: ns}).WithContext(ctx),
 	)
 	if err != nil {
 		if isNomad404(err) {
-			n.logger.Tracef("Dispatched job %s already gone; nothing to do", dispatchedJobID)
+			n.logger.Tracef("Dispatched job %s already gone; nothing to do", jobID)
 			return nil
 		}
 		return err
 	}
 	return nil
+}
+
+// cleanupLeakedDispatch finds child jobs of parentJobID that were dispatched
+// for trayID and deregisters each. Used when StartDeploy could not persist
+// the returned DispatchedJobID. The provider always dispatches with
+// idPrefixTemplate = tray.Id, so a leaked child's ID has the shape
+// "<parentJobID>/dispatch-<trayID>-<timestamp>-<uuid>" — matched by prefix.
+func (n *NomadProvider) cleanupLeakedDispatch(ctx context.Context, ns, parentJobID, trayID string) error {
+	expectedPrefix := parentJobID + "/dispatch-" + trayID + "-"
+
+	q := (&api.QueryOptions{
+		Namespace: ns,
+		Prefix:    parentJobID + "/dispatch-",
+	}).WithContext(ctx)
+
+	stubs, _, err := n.client.Jobs().List(q)
+	if err != nil {
+		if isNomad404(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to list nomad jobs for cleanup recovery: %w", err)
+	}
+
+	matched := 0
+	var firstErr error
+	for _, stub := range stubs {
+		if stub.ParentID != parentJobID {
+			continue
+		}
+		if !strings.HasPrefix(stub.ID, expectedPrefix) {
+			continue
+		}
+		matched++
+		if err := n.deregister(ctx, ns, stub.ID); err != nil {
+			n.logger.Errorf("Failed to deregister leaked dispatched job %s for tray %s: %v", stub.ID, trayID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		n.logger.Infof("Deregistered leaked dispatched job %s for tray %s", stub.ID, trayID)
+	}
+	if matched == 0 {
+		n.logger.Tracef("No leaked dispatched children found for tray %s under parent %s", trayID, parentJobID)
+	}
+	return firstErr
 }
 
 func generateBootstrapToken() (string, error) {

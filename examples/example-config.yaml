@@ -46,8 +46,9 @@ providers:
     type: nomad
     address: https://nomad.internal:4646
     # ACL token. Needs dispatch-job (StartDeploy), read-job (WaitDeploy reads
-    # the evaluation), and deregister-job/purge-job (CleanTray purges the
-    # dispatched child) on the parent job's namespace.
+    # the evaluation), list-jobs (CleanTray's leaked-child recovery scan),
+    # and deregister-job/purge-job (CleanTray purges the dispatched child)
+    # on the parent job's namespace.
     token: <nomad-acl-token>
     namespace: runners       # optional
     region: global           # optional

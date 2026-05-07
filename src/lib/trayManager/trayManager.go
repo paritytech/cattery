@@ -111,6 +111,12 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 	if err := provider.StartDeploy(ctx, tray); err != nil {
 		log.Errorf("Failed start deploy for tray %s: %v", tray.Id, err)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
+		// Persist any provider data the failed StartDeploy populated (e.g.,
+		// nomad's parentJobId for leaked-child recovery) before DeleteTray
+		// reloads the row and dispatches CleanTray on it.
+		if _, pErr := tm.trayRepository.SetProviderData(ctx, tray.Id, tray.ProviderData); pErr != nil {
+			log.Errorf("Failed to persist provider data after start deploy error for tray %s: %v", tray.Id, pErr)
+		}
 		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
 			log.Errorf("Failed to delete tray %s after start deploy error: %v", tray.Id, dErr)
 		}
