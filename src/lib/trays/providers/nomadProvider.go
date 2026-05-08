@@ -50,8 +50,7 @@ const defaultRunnerFolder = "/cattery"
 // docs/configuration.md for the wiring patterns.
 
 type NomadProvider struct {
-	name           string
-	providerConfig config.ProviderConfig
+	name string
 
 	client    *api.Client
 	namespace string
@@ -103,11 +102,10 @@ func NewNomadProvider(name string, providerConfig config.ProviderConfig) *NomadP
 	}
 
 	return &NomadProvider{
-		name:           name,
-		providerConfig: providerConfig,
-		client:         client,
-		namespace:      cfg.Namespace,
-		logger:         logger,
+		name:      name,
+		client:    client,
+		namespace: cfg.Namespace,
+		logger:    logger,
 	}
 }
 
@@ -115,17 +113,25 @@ func (n *NomadProvider) GetProviderName() string {
 	return n.name
 }
 
-// StartDeploy submits a parameterized-job dispatch to Nomad. ProviderData is
-// populated *before* the call returns so a partial failure (or a process
-// restart between StartDeploy and CleanTray) still leaves enough context for
-// CleanTray to attempt cleanup — even when the dispatch HTTP response was
-// lost in transit, the persisted parentJobId + tray.Id let CleanTray scan
-// for leaked children via Nomad's job ID prefix and purge them.
+// StartDeploy submits a parameterized-job dispatch to Nomad.
+//
+// ProviderData ordering matters for cleanup recovery:
+//
+//   - parentJobId and namespace are staged on tray.ProviderData *before* the
+//     Dispatch call, so that when trayManager persists ProviderData (after
+//     StartDeploy returns, on either the success or error path) those keys
+//     are durable. CleanTray uses them to scan for leaked children when
+//     dispatchedJobId is missing — recovering the case where Dispatch
+//     created the child but the HTTP response was lost. This does NOT
+//     recover a process crash *during* the in-flight Dispatch, since
+//     ProviderData hasn't been persisted yet at that point.
+//   - dispatchedJobId and evalId are written from the Dispatch response.
 //
 // To make this safe under retry, the dispatch sets:
 //
-//   - idPrefixTemplate = tray.Id, so the child job's ID always contains
-//     tray.Id and can be located by prefix scan.
+//   - idPrefixTemplate = tray.Id, so the child job's ID has the shape
+//     "<parent>/dispatch-<tray.Id>-<timestamp>-<uuid>" and can be located
+//     by prefix scan.
 //   - IdempotencyToken = tray.Id, so a retried Dispatch with the same token
 //     does not create a duplicate child.
 func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error {
@@ -137,6 +143,10 @@ func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error
 		return fmt.Errorf("nomad tray config missing jobId, tray %s", tray.Id)
 	}
 
+	// bootstrapToken is forwarded as a meta value and surfaces inside the
+	// guest as $BOOTSTRAP_TOKEN. It is not validated by the cattery server
+	// today; the field is plumbed through so a future change can adopt
+	// per-dispatch token validation without touching the parent-job contract.
 	bootstrapToken, err := generateBootstrapToken()
 	if err != nil {
 		return fmt.Errorf("failed to generate bootstrap token: %w", err)
@@ -156,8 +166,10 @@ func (n *NomadProvider) StartDeploy(ctx context.Context, tray *trays.Tray) error
 	meta["bootstrap_token"] = bootstrapToken
 	meta["cattery_url"] = config.Get().Server.AdvertiseUrl
 
-	// Persisted *before* the dispatch call so cleanup can recover from a
-	// lost response.
+	// Staged on tray.ProviderData before the Dispatch call so that when
+	// trayManager persists ProviderData after StartDeploy returns, cleanup
+	// can recover a leaked child via the parent-job prefix scan. See the
+	// StartDeploy doc comment above for the recovery model and its limits.
 	tray.ProviderData[nomadProviderDataNamespace] = n.namespace
 	tray.ProviderData[nomadProviderDataParentJobID] = trayConfig.JobId
 
@@ -243,9 +255,10 @@ func (n *NomadProvider) WaitDeploy(ctx context.Context, tray *trays.Tray) error 
 //
 //   - If dispatchedJobId is stored, deregister it directly (fast path).
 //   - Otherwise, if parentJobId is stored, scan the parent's dispatched
-//     children for any whose ID contains tray.Id and deregister them.
-//     This recovers the leaked-child scenario where Dispatch succeeded on
-//     the server but the response was lost (network error / timeout) and
+//     children for any whose ID matches the prefix
+//     "<parentJobId>/dispatch-<tray.Id>-" and deregister them. This
+//     recovers the leaked-child scenario where Dispatch succeeded on the
+//     server but the response was lost (network error / timeout) and
 //     dispatchedJobId never made it into ProviderData.
 //   - If neither is stored, nothing to do.
 func (n *NomadProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
