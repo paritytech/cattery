@@ -126,6 +126,10 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 			var dc DockerTrayConfig
 			decodeError = mapstructure.Decode(trayType.Config, &dc)
 			trayType.Config = dc
+		case "nomad":
+			var nc NomadTrayConfig
+			decodeError = mapstructure.Decode(trayType.Config, &nc)
+			trayType.Config = nc
 		//case "scaleway":
 		default:
 
