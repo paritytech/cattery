@@ -40,7 +40,10 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 			InstallationID: org.InstallationId,
 			PrivateKey:     string(privateKey),
 		},
-	}, scaleset.WithLogger(newSlogLogger(logger)))
+	},
+		scaleset.WithLogger(newSlogLogger(logger)),
+		scaleset.WithRetryableHTTPClint(newRetryableClient(logger)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scale set client: %w", err)
 	}
@@ -88,7 +91,10 @@ func (sc *ScaleSetClient) CreateSession(ctx context.Context) error {
 	const retryDelay = 30 * time.Second
 
 	for attempt := range maxRetries {
-		session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname, scaleset.WithLogger(newSlogLogger(sc.logger)))
+		session, err := sc.client.MessageSessionClient(ctx, sc.scaleSet.ID, hostname,
+			scaleset.WithLogger(newSlogLogger(sc.logger)),
+			scaleset.WithRetryableHTTPClint(newRetryableClient(sc.logger)),
+		)
 		if err == nil {
 			sc.session = session
 			sc.logger.Info("Message session created")

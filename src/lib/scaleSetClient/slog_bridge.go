@@ -4,8 +4,28 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/hashicorp/go-retryablehttp"
 	log "github.com/sirupsen/logrus"
 )
+
+// newRetryableClient builds a retryablehttp.Client whose Logger is our slog
+// bridge so that retry/debug HTTP lines flow through logrus instead of the
+// stdlib stderr default.
+//
+// Why this exists: actions/scaleset@v0.3.0/common_client.go:123 only sets the
+// retry client's Logger if it is nil — but retryablehttp.NewClient() always
+// populates Logger with a default `log.New(os.Stderr, "", log.LstdFlags)`.
+// Result: scaleset.WithLogger(...) is silently dropped for the inner retry
+// client, and you see lines like `2026/05/09 23:04:30 [DEBUG] GET ...`
+// bypassing logrus formatting.
+//
+// Pre-setting Logger here makes scaleset's nil guard a no-op and our bridge
+// stays in place. *slog.Logger satisfies retryablehttp.LeveledLogger.
+func newRetryableClient(entry *log.Entry) *retryablehttp.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = newSlogLogger(entry)
+	return rc
+}
 
 // logrusHandler bridges slog into logrus so that third-party libraries using
 // slog (e.g. actions/scaleset / go-retryablehttp) respect cattery's log level

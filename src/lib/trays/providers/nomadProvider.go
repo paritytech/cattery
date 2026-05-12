@@ -360,7 +360,7 @@ func buildBootstrapPayload(userScript, runnerFolder string) []byte {
 	var sb strings.Builder
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
-	sb.WriteString(`curl -fsSL "$CATTERY_URL/agent/binary" -o /usr/local/bin/cattery` + "\n")
+	sb.WriteString(`curl -fsSL "$CATTERY_URL/agent/download" -o /usr/local/bin/cattery` + "\n")
 	sb.WriteString("chmod +x /usr/local/bin/cattery\n\n")
 	if userScript != "" {
 		sb.WriteString(userScript)
