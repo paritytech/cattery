@@ -41,7 +41,7 @@ func TestBuildBootstrapPayload(t *testing.T) {
 
 	t.Run("prelude downloads cattery agent and chmods it", func(t *testing.T) {
 		out := string(buildBootstrapPayload("", ""))
-		assert.Contains(t, out, `curl -fsSL "$CATTERY_URL/agent/binary" -o /usr/local/bin/cattery`)
+		assert.Contains(t, out, `curl -fsSL "$CATTERY_URL/agent/download" -o /usr/local/bin/cattery`)
 		assert.Contains(t, out, "chmod +x /usr/local/bin/cattery")
 	})
 
