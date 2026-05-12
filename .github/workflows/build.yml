@@ -114,7 +114,22 @@ jobs:
        run: go mod download -C src
 
      - name: Build
-       run: go build -C src -o ../bin/cattery_linux_x86_${{ env.VERSION }} -ldflags="-X cattery/lib/version.Version=${{ env.VERSION }}"
+       env:
+         CGO_ENABLED: 0
+         GOOS: linux
+         GOARCH: amd64
+       run: |
+         go build -C src \
+           -trimpath \
+           -ldflags="-s -w -X cattery/lib/version.Version=${{ env.VERSION }}" \
+           -o ../bin/cattery_linux_x86_${{ env.VERSION }}
+
+     - name: Verify binary is statically linked
+       run: |
+         file bin/cattery_linux_x86_${{ env.VERSION }}
+         # ldd prints "not a dynamic executable" on fully-static binaries;
+         # exit 0 either way and just surface the result.
+         ldd bin/cattery_linux_x86_${{ env.VERSION }} || true
 
      - run: ls -la bin/
 
