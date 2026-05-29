@@ -11,9 +11,15 @@ on:
     paths:
       - 'charts/**'
       - '.github/workflows/chart-release.yml'
+  workflow_dispatch: {}   # manual "publish current version now"
 
 permissions:
-  contents: write   # chart-releaser creates releases & pushes to gh-pages
+  contents: write   # push packaged charts + index.yaml to the gh-pages branch
+
+# serialize writers to gh-pages
+concurrency:
+  group: chart-gh-pages
+  cancel-in-progress: false
 
 env:
   CHART_PATH: charts/cattery
@@ -40,46 +46,111 @@ jobs:
       - name: helm template (smoke values)
         run: helm template smoke "${CHART_PATH}" -f "${CHART_PATH}/ci/smoke-values.yaml" > /dev/null
 
-  publish:
-    name: package & publish to GitHub Pages
-    # only on pushes to main; chart-releaser skips versions already released
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  check-version:
+    name: check for version bump
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: lint
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.v.outputs.publish }}
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # chart-releaser needs full history to diff tags
+          fetch-depth: 2
 
       - uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: configure git identity
+      - name: compare Chart.yaml version with previous commit
+        id: v
         run: |
+          set -euo pipefail
+          CURRENT=$(helm show chart "${CHART_PATH}" | awk '/^version:/ {print $2}')
+          PREVIOUS=$(git show "HEAD^:${CHART_PATH}/Chart.yaml" 2>/dev/null | awk '/^version:/ {print $2}' || true)
+
+          echo "current=${CURRENT}"
+          echo "previous=${PREVIOUS:-<none>}"
+
+          if [ -z "${CURRENT}" ]; then
+            echo "::error::Could not read version from ${CHART_PATH}/Chart.yaml"
+            exit 1
+          fi
+
+          # workflow_dispatch forces a (re)publish of the current version
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch: publishing ${CURRENT}."
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${CURRENT}" = "${PREVIOUS}" ]; then
+            echo "Chart version unchanged (${CURRENT}); skipping publish."
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Chart version bumped: ${PREVIOUS:-<none>} -> ${CURRENT}"
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          fi
+          echo "version=${CURRENT}" >> "${GITHUB_OUTPUT}"
+
+  publish:
+    name: package & push to gh-pages
+    needs: check-version
+    if: needs.check-version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+      PAGES_BRANCH: gh-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: package chart
+        run: |
+          mkdir -p dist
+          helm package "${CHART_PATH}" --destination dist/
+
+      - name: publish package + index to gh-pages
+        run: |
+          set -euo pipefail
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
 
-      - name: run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
-        with:
-          charts_dir: charts
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # check out the chart-repo branch in an isolated worktree (create if absent)
+          if git ls-remote --exit-code --heads origin "${PAGES_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${PAGES_BRANCH}"
+            git worktree add repo "origin/${PAGES_BRANCH}"
+            git -C repo switch -c "${PAGES_BRANCH}"
+          else
+            git worktree add --orphan -b "${PAGES_BRANCH}" repo
+          fi
+
+          # add the new package alongside existing ones (older versions are kept)
+          cp dist/*.tgz repo/
+
+          # rebuild the index, preserving metadata for already-published entries
+          if [ -f repo/index.yaml ]; then
+            helm repo index repo --url "${PAGES_URL}" --merge repo/index.yaml
+          else
+            helm repo index repo --url "${PAGES_URL}"
+          fi
+
+          git -C repo add .
+          if git -C repo diff --cached --quiet; then
+            echo "nothing to publish (package already present)"
+          else
+            git -C repo commit -m "publish ${CHART_NAME} ${VERSION}"
+            git -C repo push origin "${PAGES_BRANCH}"
+          fi
 
       - name: summary
         run: |
           cat <<EOF >> "${GITHUB_STEP_SUMMARY}"
-          Published charts under \`charts/\` to GitHub Pages.
+          Published \`${CHART_NAME}\` \`${VERSION}\` to ${PAGES_URL}
 
-          Add the repo:
-
-              helm repo add cattery https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+              helm repo add cattery ${PAGES_URL}
               helm repo update
-              helm install ${CHART_NAME} cattery/${CHART_NAME}
-
-          ArgoCD source:
-
-              repoURL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-              chart: ${CHART_NAME}
+              helm install ${CHART_NAME} cattery/${CHART_NAME} --version ${VERSION}
           EOF
