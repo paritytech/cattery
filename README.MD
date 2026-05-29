@@ -110,6 +110,24 @@ trayTypes:
   --agent-id <tray-id>
 ```
 
+## Install with Helm
+
+The chart is published to a Helm repository hosted on GitHub Pages:
+
+```bash
+helm repo add cattery https://paritytech.github.io/cattery
+helm repo update
+helm install cattery cattery/cattery
+```
+
+Override defaults with your own values:
+
+```bash
+helm install cattery cattery/cattery -f my-values.yaml
+```
+
+See [charts/cattery/values.yaml](charts/cattery/values.yaml) for the available values.
+
 ## Configuration
 
 See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering server, database, GitHub App, providers, and tray types.
