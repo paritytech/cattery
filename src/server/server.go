@@ -71,8 +71,12 @@ func Start() {
 	restartManagerRepository.Connect(database.Collection("restarters"))
 	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
 
-	// Initialize scale set pollers — one per TrayType
+	// Initialize scale set pollers — one per TrayType.
+	// The JIT registry is populated alongside, so the agent register handler can
+	// generate JIT configs on any replica without depending on the (leader-only)
+	// poller for that tray type.
 	ssm := scaleSetPoller.NewManager()
+	jitRegistry := scaleSetClient.NewJitRegistry()
 	for _, trayType := range config.Get().TrayTypes {
 		org := config.Get().GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
@@ -83,6 +87,7 @@ func Start() {
 		if err != nil {
 			logger.Fatalf("Failed to create scale set client for tray type '%s': %v", trayType.Name, err)
 		}
+		jitRegistry.Register(trayType.Name, ssClient)
 
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
@@ -119,6 +124,7 @@ func Start() {
 		TrayManager:     tm,
 		RestartManager:  rm,
 		ScaleSetManager: ssm,
+		JitRegistry:     jitRegistry,
 	}
 
 	servers := startServers(logger, cancel, h)

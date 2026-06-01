@@ -129,16 +129,17 @@ func setupIntegrationTestWithFactory(t *testing.T, factory providers.TrayProvide
 	tm := trayManager.NewTrayManager(trayRepo, factory)
 	rm := restarter.NewWorkflowRestarter(restartRepo)
 
-	// Set up scale set manager with mock JIT client
+	// Scale set manager holds no pollers here; the agent register handler gets
+	// its JIT generator from the registry, decoupled from the poller.
 	ssm := scaleSetPoller.NewManager()
-	mockJit := &mockJitConfigGenerator{runnerID: 42}
-	poller := scaleSetPoller.NewPollerWithJitClient(mockJit, config.Get().TrayTypes[0], tm)
-	ssm.Register("test-type", poller)
+	jitRegistry := scaleSetClient.NewJitRegistry()
+	jitRegistry.Register("test-type", &mockJitConfigGenerator{runnerID: 42})
 
 	h := &Handlers{
 		TrayManager:     tm,
 		RestartManager:  rm,
 		ScaleSetManager: ssm,
+		JitRegistry:     jitRegistry,
 	}
 
 	mux := http.NewServeMux()
