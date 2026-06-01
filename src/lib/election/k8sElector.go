@@ -41,8 +41,6 @@ type K8sElector struct {
 // namespace/prefix may be empty (resolved to sensible defaults). identity must
 // be unique per replica (see HolderID).
 func NewK8sElector(namespace, prefix, identity string, cfg LeaseConfig) (Elector, error) {
-	cfg = cfg.withDefaults()
-
 	restCfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("k8s election requires running in-cluster: %w", err)
@@ -51,6 +49,14 @@ func NewK8sElector(namespace, prefix, identity string, cfg LeaseConfig) (Elector
 	if err != nil {
 		return nil, fmt.Errorf("failed to build k8s coordination client: %w", err)
 	}
+	return newK8sElector(client, namespace, prefix, identity, cfg), nil
+}
+
+// newK8sElector builds the elector from an already-constructed coordination
+// client. Split from NewK8sElector so tests can inject an out-of-cluster client
+// (built from a kubeconfig) instead of requiring in-cluster credentials.
+func newK8sElector(client coordinationv1.CoordinationV1Interface, namespace, prefix, identity string, cfg LeaseConfig) *K8sElector {
+	cfg = cfg.withDefaults()
 
 	if prefix == "" {
 		prefix = "cattery-"
@@ -77,7 +83,7 @@ func NewK8sElector(namespace, prefix, identity string, cfg LeaseConfig) (Elector
 		renewDeadline: renewDeadline,
 		retryPeriod:   retryPeriod,
 		logger:        log.WithField("component", "election"),
-	}, nil
+	}
 }
 
 func (e *K8sElector) Run(ctx context.Context, key string, onElected OnElected) error {
