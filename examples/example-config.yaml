@@ -17,6 +17,32 @@ stale:
     registered: 15m
     deleting: 15m
 
+# Optional. Leader election for running multiple cattery replicas. Each tray
+# type's scale set poller (the GitHub session) runs on exactly one replica — the
+# leader for that tray type — while every replica keeps serving the tray HTTP
+# API, so trays stay served across rollouts and failovers.
+#
+# backend "memory" (default) is a no-op that always leads — correct ONLY for a
+# single replica. Running multiple replicas on "memory" makes every replica
+# fight for every tray type's session. For multiple replicas pick a shared
+# backend:
+#   - mongo: leases stored in the configured database (no extra setup)
+#   - k8s:   native coordination.k8s.io Leases (must run in-cluster, with RBAC
+#            to get/create/update leases in its namespace)
+coordination:
+  backend: memory          # memory | mongo | k8s
+  # Lease cadence (ignored by the memory backend). Defaults shown below.
+  # ttl bounds worst-case failover: a dead leader's tray type is reclaimable
+  # after ~ttl.
+  lease:
+    ttl: 30s               # lease validity
+    renewInterval: 10s     # leader renews this often (defaults to ttl/3)
+    retryInterval: 5s      # non-leaders retry acquisition this often
+  # k8s backend only; both optional:
+  # kubernetes:
+  #   namespace: cattery          # defaults to the pod's namespace
+  #   leaseNamePrefix: "cattery-" # prepended to the sanitized tray type name
+
 github:
   - name: paritytech-stg
     appId: 123456
