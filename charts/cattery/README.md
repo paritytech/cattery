@@ -141,7 +141,8 @@ CRDs installed in the cluster).
 
 | Key                                   | Default                        | Description                                     |
 | ------------------------------------- | ------------------------------ | ----------------------------------------------- |
-| `replicaCount`                        | `1`                            | Runs as a singleton; don't raise without care.  |
+| `replicaCount`                        | `1`                            | >1 requires `config.coordination.backend` mongo/k8s. |
+| `updateStrategy`                      | `{type: Recreate}`             | Use RollingUpdate for multiple replicas.        |
 | `image.repository`                    | `docker.io/paritytech/cattery` | Container image.                                |
 | `image.tag`                           | `""` (uses `.Chart.AppVersion`)| Image tag.                                      |
 | `image.pullPolicy`                    | `IfNotPresent`                 |                                                 |
@@ -152,6 +153,7 @@ CRDs installed in the cluster).
 | `config.github`                       | `[]`                           | List of GitHub App configs.                     |
 | `config.providers`                    | `[]`                           | List of provider configs.                       |
 | `config.trayTypes`                    | `[]`                           | List of tray type configs.                      |
+| `config.coordination.backend`         | `memory`                       | Leader election: `memory` / `mongo` / `k8s`.    |
 | `secretFiles`                         | `{}`                           | Files mounted into the container from Secrets.  |
 | `env` / `envFrom`                     | `[]` / `[]`                    | Extra env vars on the container.                |
 | `extraVolumes` / `extraVolumeMounts`  | `[]` / `[]`                    | Escape hatch for arbitrary volume mounts.       |
@@ -162,7 +164,8 @@ CRDs installed in the cluster).
 | `serviceMonitor.enabled`              | `false`                        | Requires Prometheus Operator.                   |
 | `serviceAccount.create`               | `true`                         |                                                 |
 | `serviceAccount.annotations`          | `{}`                           | e.g. GKE Workload Identity binding.             |
-| `serviceAccount.automountServiceAccountToken` | `false`                | Cattery doesn't call the k8s API.               |
+| `serviceAccount.automountServiceAccountToken` | `false`                | Forced on for the `k8s` coordination backend.   |
+| `rbac.create`                         | `true`                         | Lease RBAC, created for the `k8s` backend.      |
 | `resources`                           | `{}`                           |                                                 |
 | `livenessProbe.enabled`               | `true`                         |                                                 |
 | `readinessProbe.enabled`              | `true`                         |                                                 |
@@ -173,9 +176,14 @@ CRDs installed in the cluster).
 
 ## Upgrading
 
-The Deployment uses `strategy: Recreate` — cattery is a singleton and the
-pod holds long-running leases against GitHub, so rolling updates would
-produce a double-poll window.
+The Deployment defaults to `strategy: Recreate` with a single replica: each tray
+type's poller holds a long-running GitHub session, so two overlapping pods would
+double-poll. To run multiple replicas, set `config.coordination.backend` to
+`mongo` or `k8s` — which leases each tray type's session to one replica at a
+time — and switch `updateStrategy` to RollingUpdate. The tray API is served by
+every replica regardless, so trays stay served throughout rollouts and
+failovers. The `k8s` backend additionally needs `rbac.create` (default `true`)
+for Lease access and mounts the service account token automatically.
 
 Config changes are picked up automatically: the pod template carries a
 checksum of the rendered `config` and restarts when it changes.

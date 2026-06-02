@@ -281,8 +281,6 @@ const (
 
 	DefaultLeaseTTL           = 30 * time.Second
 	DefaultLeaseRetryInterval = 5 * time.Second
-
-	DefaultLeaseNamePrefix = "cattery-"
 )
 
 // WithDefaults returns a copy with zero/empty fields populated from defaults:
