@@ -1,7 +1,8 @@
 {{- if and (eq (include "cattery.coordinationBackend" .) "k8s") .Values.rbac.create }}
 # Leader election for the "k8s" coordination backend. cattery leases one
 # coordination.k8s.io Lease per tray type (see lib/election). LeaseLock needs
-# get/create/update; ReleaseOnCancel updates the holder, it does not delete.
+# get/create/update for the lease itself; delete is allowed so orphaned Leases
+# can be cleaned up (e.g. on uninstall or when a tray type is removed).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -11,7 +12,7 @@ metadata:
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
-    verbs: ["get", "create", "update"]
+    verbs: ["get", "create", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

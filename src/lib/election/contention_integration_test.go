@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration_mongo || integration_k8s
 
 package election
 
@@ -10,8 +10,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// Shared contention harness used by both backend-specific failover tests
+// (TestMongoElector_SingleLeaderAndFailover, TestK8sElector_SingleLeaderAndFailover).
+// It is backend-agnostic — it only drives the Elector interface — so it compiles
+// under either integration tag.
 
 type electorInstance struct {
 	identity string
@@ -94,52 +98,4 @@ func assertSingleLeaderAndFailover(t *testing.T, instances []electorInstance, ke
 	assert.NotEqual(t, leader1, leader2, "a different instance took over")
 
 	assert.Equal(t, int32(1), atomic.LoadInt32(&maxLeading), "never more than one leader at a time")
-}
-
-func TestMongoElector_SingleLeaderAndFailover(t *testing.T) {
-	coll := setupLeaseCollection(t)
-	cfg := LeaseConfig{
-		TTL:           1 * time.Second,
-		RenewInterval: 300 * time.Millisecond,
-		RetryInterval: 200 * time.Millisecond,
-	}
-
-	var instances []electorInstance
-	for i := 0; i < 3; i++ {
-		store := NewMongoLeaseStore()
-		store.Connect(coll) // all share one collection → real contention
-		id := HolderID()
-		instances = append(instances, electorInstance{id, NewLeaseElector(store, id, cfg)})
-	}
-
-	assertSingleLeaderAndFailover(t, instances, "contention")
-}
-
-func TestK8sElector_SingleLeaderAndFailover(t *testing.T) {
-	client := k8sCoordinationClient(t)
-
-	const ns = "default"
-	const prefix = "cattery-test-"
-	const key = "contention"
-	leaseName := prefix + sanitizeName(key)
-
-	leases := client.Leases(ns)
-	_ = leases.Delete(context.Background(), leaseName, metav1.DeleteOptions{})
-	t.Cleanup(func() {
-		_ = leases.Delete(context.Background(), leaseName, metav1.DeleteOptions{})
-	})
-
-	cfg := LeaseConfig{
-		TTL:           4 * time.Second,
-		RenewInterval: 1 * time.Second,
-		RetryInterval: 500 * time.Millisecond,
-	}
-
-	var instances []electorInstance
-	for i := 0; i < 3; i++ {
-		id := HolderID()
-		instances = append(instances, electorInstance{id, newK8sElector(client, ns, prefix, id, cfg)})
-	}
-
-	assertSingleLeaderAndFailover(t, instances, key)
 }
