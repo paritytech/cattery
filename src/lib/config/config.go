@@ -39,12 +39,13 @@ func SetForTest(t *testing.T, cfg *CatteryConfig) {
 
 
 type CatteryConfig struct {
-	Server    ServerConfig          `yaml:"server" validate:"required"`
-	Database  DatabaseConfig        `yaml:"database" validate:"required"`
-	Stale     StaleConfig           `yaml:"stale"`
-	Github    []*GitHubOrganization `yaml:"github" validate:"required,dive,required"`
-	Providers []*ProviderConfig     `yaml:"providers" validate:"required,dive,required"`
-	TrayTypes []*TrayType           `yaml:"trayTypes" validate:"required,dive,required"`
+	Server       ServerConfig          `yaml:"server" validate:"required"`
+	Database     DatabaseConfig        `yaml:"database" validate:"required"`
+	Stale        StaleConfig           `yaml:"stale"`
+	Coordination CoordinationConfig    `yaml:"coordination"`
+	Github       []*GitHubOrganization `yaml:"github" validate:"required,dive,required"`
+	Providers    []*ProviderConfig     `yaml:"providers" validate:"required,dive,required"`
+	TrayTypes    []*TrayType           `yaml:"trayTypes" validate:"required,dive,required"`
 
 	githubMap    map[string]*GitHubOrganization
 	providerMap  map[string]*ProviderConfig
@@ -231,6 +232,72 @@ func (s StaleConfig) WithDefaults() StaleConfig {
 	}
 	if len(out.Thresholds) == 0 {
 		out.Thresholds = DefaultStaleThresholds
+	}
+	return out
+}
+
+// CoordinationConfig selects the leader-election backend and tunes the lease
+// cadence. Leader election decides which replica runs each tray type's scale
+// set poller; every replica serves the tray HTTP plane regardless.
+//
+// Backend "memory" (the default) is a no-op elector that always leads — correct
+// and zero-overhead for SINGLE-replica deployments. Run more than one replica
+// on "memory" and every replica will try to hold the GitHub session for every
+// tray type, which conflicts. To run multiple replicas, pick a shared backend
+// (e.g. "mongo"), which leases each tray type to one replica at a time.
+type CoordinationConfig struct {
+	// Backend is the election backend: "memory" (single replica), "mongo", or
+	// "k8s" (native coordination.k8s.io Leases; requires running in-cluster).
+	Backend    string                `yaml:"backend" validate:"omitempty,oneof=memory mongo k8s"`
+	Lease      LeaseConfig           `yaml:"lease"`
+	Kubernetes KubernetesCoordConfig `yaml:"kubernetes"`
+}
+
+// KubernetesCoordConfig configures the "k8s" election backend. Both fields are
+// optional. Namespace defaults to the pod's namespace (POD_NAMESPACE env, then
+// the service-account namespace file, then "default"). LeaseNamePrefix is
+// prepended to the sanitized tray type name to form each Lease object's name.
+type KubernetesCoordConfig struct {
+	Namespace       string `yaml:"namespace"`
+	LeaseNamePrefix string `yaml:"leaseNamePrefix"`
+}
+
+// LeaseConfig tunes the lease-based electors. Ignored by the "memory" backend.
+//
+// TTL bounds worst-case failover: a dead leader's tray type is reclaimable
+// after ~TTL. RenewInterval is how often the leader renews (default TTL/3 —
+// keep it well below TTL so a missed renew or two does not drop leadership).
+// RetryInterval is how often a non-leader retries acquisition.
+type LeaseConfig struct {
+	TTL           time.Duration `yaml:"ttl"`
+	RenewInterval time.Duration `yaml:"renewInterval"`
+	RetryInterval time.Duration `yaml:"retryInterval"`
+}
+
+const (
+	CoordinationBackendMemory = "memory"
+	CoordinationBackendMongo  = "mongo"
+	CoordinationBackendK8s    = "k8s"
+
+	DefaultLeaseTTL           = 30 * time.Second
+	DefaultLeaseRetryInterval = 5 * time.Second
+)
+
+// WithDefaults returns a copy with zero/empty fields populated from defaults:
+// the "memory" backend and the standard lease cadence (TTL, TTL/3 renew, 5s retry).
+func (c CoordinationConfig) WithDefaults() CoordinationConfig {
+	out := c
+	if out.Backend == "" {
+		out.Backend = CoordinationBackendMemory
+	}
+	if out.Lease.TTL <= 0 {
+		out.Lease.TTL = DefaultLeaseTTL
+	}
+	if out.Lease.RenewInterval <= 0 {
+		out.Lease.RenewInterval = out.Lease.TTL / 3
+	}
+	if out.Lease.RetryInterval <= 0 {
+		out.Lease.RetryInterval = DefaultLeaseRetryInterval
 	}
 	return out
 }

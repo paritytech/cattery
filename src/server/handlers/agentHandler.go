@@ -60,15 +60,15 @@ func (h *Handlers) AgentRegister(responseWriter http.ResponseWriter, r *http.Req
 
 	logger.Debugf("Found tray %s for agent %s, with organization %s", tray.Id, agentId, tray.GitHubOrgName)
 
-	poller := h.ScaleSetManager.GetPoller(trayType.Name)
-	if poller == nil {
-		errMsg := fmt.Sprintf("No scale set poller found for tray type '%s'", trayType.Name)
+	jitGenerator := h.JitRegistry.Get(trayType.Name)
+	if jitGenerator == nil {
+		errMsg := fmt.Sprintf("No JIT generator found for tray type '%s'", trayType.Name)
 		logger.Error(errMsg)
 		http.Error(responseWriter, errMsg, http.StatusInternalServerError)
 		return
 	}
 
-	jitRunnerConfig, err := poller.Client().GenerateJitRunnerConfig(r.Context(), tray.Id)
+	jitRunnerConfig, err := jitGenerator.GenerateJitRunnerConfig(r.Context(), tray.Id)
 	if err != nil {
 		logger.Errorf("Failed to generate jitRunnerConfig: %v", err)
 		http.Error(responseWriter, "Failed to generate jitRunnerConfig", http.StatusInternalServerError)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/actions/scaleset"
@@ -19,6 +20,10 @@ type ScaleSetClient struct {
 	org      *config.GitHubOrganization
 	trayType *config.TrayType
 	logger   *log.Entry
+
+	// mu guards the one-time resolution of scaleSet in EnsureScaleSet. Once set,
+	// scaleSet is never mutated again, so reads after EnsureScaleSet need no lock.
+	mu sync.Mutex
 }
 
 func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType) (*ScaleSetClient, error) {
@@ -56,7 +61,18 @@ func NewScaleSetClient(org *config.GitHubOrganization, trayType *config.TrayType
 	}, nil
 }
 
+// EnsureScaleSet resolves (or creates) the runner scale set and caches it. It
+// is idempotent and safe for concurrent callers: the first caller resolves the
+// scale set, the rest return immediately. This lets the sessionless JIT path
+// and the leader's poller share one client without racing on scaleSet.
 func (sc *ScaleSetClient) EnsureScaleSet(ctx context.Context) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	if sc.scaleSet != nil {
+		return nil
+	}
+
 	existing, err := sc.client.GetRunnerScaleSet(ctx, int(sc.trayType.RunnerGroupId), sc.trayType.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get scale set: %w", err)
@@ -129,6 +145,11 @@ func (sc *ScaleSetClient) AcquireJobs(ctx context.Context, requestIDs []int64) (
 }
 
 func (sc *ScaleSetClient) GenerateJitRunnerConfig(ctx context.Context, runnerName string) (*scaleset.RunnerScaleSetJitRunnerConfig, error) {
+	// Ensure the scale set is resolved lazily, so any replica can generate JIT
+	// configs without running this tray type's poller/session.
+	if err := sc.EnsureScaleSet(ctx); err != nil {
+		return nil, fmt.Errorf("failed to ensure scale set: %w", err)
+	}
 	return sc.client.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{
 		Name:       runnerName,
 		WorkFolder: "_work",

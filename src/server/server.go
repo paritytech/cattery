@@ -2,6 +2,7 @@ package server
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/election"
 	"cattery/lib/metrics"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
@@ -71,8 +72,21 @@ func Start() {
 	restartManagerRepository.Connect(database.Collection("restarters"))
 	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
 
-	// Initialize scale set pollers — one per TrayType
+	// Initialize scale set pollers — one per TrayType.
+	// The JIT registry is populated alongside, so the agent register handler can
+	// generate JIT configs on any replica without depending on the (leader-only)
+	// poller for that tray type.
 	ssm := scaleSetPoller.NewManager()
+	jitRegistry := scaleSetClient.NewJitRegistry()
+
+	// Leader election decides which replica runs each tray type's poller. The
+	// tray HTTP plane (served via jitRegistry above) runs on every replica
+	// regardless, so trays stay served during rollouts and failovers.
+	elector, err := election.NewFromConfig(config.Get().Coordination.WithDefaults(), database.Collection("leases"))
+	if err != nil {
+		logger.Fatalf("Failed to initialize leader election: %v", err)
+	}
+
 	for _, trayType := range config.Get().TrayTypes {
 		org := config.Get().GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
@@ -83,6 +97,7 @@ func Start() {
 		if err != nil {
 			logger.Fatalf("Failed to create scale set client for tray type '%s': %v", trayType.Name, err)
 		}
+		jitRegistry.Register(trayType.Name, ssClient)
 
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
@@ -90,21 +105,13 @@ func Start() {
 		ssm.Add(1)
 		go func(p *scaleSetPoller.Poller, name string) {
 			defer ssm.Done()
-			for {
-				if err := p.Run(ctx); err != nil {
-					if ctx.Err() != nil {
-						logger.Infof("Scale set poller for '%s' stopped: %v", name, err)
-						return
-					}
-					logger.Errorf("Scale set poller for '%s' exited with error: %v — restarting in 30s", name, err)
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(30 * time.Second):
-					}
-					continue
-				}
-				return
+			// Run the poller only while this replica holds the lease for this
+			// tray type; leaderCtx is cancelled the moment leadership is lost.
+			err := elector.Run(ctx, name, func(leaderCtx context.Context) {
+				runPoller(leaderCtx, p, name, logger)
+			})
+			if err != nil && ctx.Err() == nil {
+				logger.Errorf("Leader election for '%s' exited: %v", name, err)
 			}
 		}(poller, trayType.Name)
 	}
@@ -119,6 +126,7 @@ func Start() {
 		TrayManager:     tm,
 		RestartManager:  rm,
 		ScaleSetManager: ssm,
+		JitRegistry:     jitRegistry,
 	}
 
 	servers := startServers(logger, cancel, h)
@@ -149,6 +157,28 @@ func Start() {
 		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
 	}
 	logger.Info("MongoDB connection closed")
+}
+
+// runPoller runs a tray type's scale set listener until ctx is cancelled —
+// either leadership was lost (leaderCtx) or the process is shutting down —
+// restarting the listener after transient errors.
+func runPoller(ctx context.Context, p *scaleSetPoller.Poller, name string, logger *log.Logger) {
+	for {
+		if err := p.Run(ctx); err != nil {
+			if ctx.Err() != nil {
+				logger.Infof("Scale set poller for '%s' stopped: %v", name, err)
+				return
+			}
+			logger.Errorf("Scale set poller for '%s' exited with error: %v — restarting in 30s", name, err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+			continue
+		}
+		return
+	}
 }
 
 func agentMux(h *handlers.Handlers) *http.ServeMux {

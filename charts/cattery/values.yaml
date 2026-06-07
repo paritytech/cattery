@@ -1,5 +1,20 @@
-# Cattery is a singleton — do not raise replicaCount.
+# Number of cattery replicas.
+#
+# >1 requires a shared coordination backend (config.coordination.backend set to
+# mongo or k8s) so each tray type's GitHub session runs on a single replica.
+# With the default "memory" backend cattery is a singleton — keep this at 1.
 replicaCount: 1
+
+# Deployment update strategy. Recreate suits a single replica (the GitHub
+# session must not overlap across pods). For multiple replicas with a shared
+# coordination backend, switch to RollingUpdate so trays stay served during
+# rollouts, e.g.:
+#   updateStrategy:
+#     type: RollingUpdate
+#     rollingUpdate:
+#       maxUnavailable: 0
+updateStrategy:
+  type: Recreate
 
 image:
   repository: docker.io/paritytech/cattery
@@ -29,6 +44,22 @@ config:
   database:
     uri: mongodb://mongodb:27017/
     database: cattery
+
+  # Leader election for running multiple replicas. With the default "memory"
+  # backend cattery is a singleton (replicaCount 1). For >1 replica pick a shared
+  # backend so each tray type's poller runs on one replica at a time:
+  #   - mongo: leases in the configured database (no extra setup)
+  #   - k8s:   native coordination.k8s.io Leases (this chart provisions the RBAC
+  #            and mounts the SA token; see rbac.create)
+  coordination:
+    backend: memory          # memory | mongo | k8s
+    # lease:                 # cadence for mongo/k8s; defaults: ttl 30s, renew ttl/3, retry 5s
+    #   ttl: 30s
+    #   renewInterval: 10s
+    #   retryInterval: 5s
+    # kubernetes:            # k8s backend only
+    #   namespace: ""        # defaults to the release namespace (via POD_NAMESPACE)
+    #   leaseNamePrefix: "cattery-"
 
   # One entry per GitHub App / organization.
   github: []
@@ -82,8 +113,16 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
-  # Cattery does not call the Kubernetes API. Keep disabled unless you need it.
+  # Cattery only calls the Kubernetes API for the "k8s" coordination backend,
+  # which forces the token on regardless of this setting. Otherwise keep it off.
   automountServiceAccountToken: false
+
+# RBAC for the "k8s" coordination backend. When config.coordination.backend is
+# "k8s", this chart creates a Role + RoleBinding granting get/create/update on
+# coordination.k8s.io Leases in the release namespace. Set false to manage that
+# RBAC yourself. Ignored by the memory and mongo backends.
+rbac:
+  create: true
 
 deploymentAnnotations: {}
 podAnnotations: {}

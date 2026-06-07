@@ -49,6 +49,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Coordination (leader-election) backend: memory (default), mongo, or k8s.
+Safe when config.coordination is unset.
+*/}}
+{{- define "cattery.coordinationBackend" -}}
+{{- $coord := .Values.config.coordination | default dict -}}
+{{- $coord.backend | default "memory" -}}
+{{- end }}
+
+{{/*
 Probe target port: status port if configured separately, otherwise http.
 */}}
 {{- define "cattery.probePort" -}}

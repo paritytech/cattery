@@ -58,7 +58,11 @@ jobs:
               ;;
           esac
 
-  tests:
+  # Integration tests are split by backend so a flake in one infra (Mongo vs a
+  # kind cluster) can't mask a real failure in the other. Each job also runs the
+  # untagged unit tests — the `_mongo` / `_k8s` build tags only gate the
+  # integration files (see //go:build lines under src/lib/election).
+  integration-mongo:
     needs: [setup]
     runs-on: ubuntu-latest
     env:
@@ -75,12 +79,45 @@ jobs:
           mongodb-replica-set: rs0
           mongodb-port: 27017
 
-      - name: run tests
+      - name: run mongo integration + unit tests
         working-directory: src
         env:
           CGO_ENABLED: 1   # required for -race
         run: |
-          go test -tags=integration -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
+          go test -tags=integration_mongo -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
+          # go 1.25 covdata bug causes exit code 1 for packages without tests
+          # fail only if actual test failures exist
+          if grep -q "^FAIL" test-output.txt; then
+            exit 1
+          fi
+
+      - name: show coverage
+        working-directory: src
+        run: go tool cover -func=coverage.out
+
+  integration-k8s:
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      # A bare kind cluster is enough: the election tests only use the built-in
+      # coordination.k8s.io Lease API and connect out-of-cluster via the
+      # kubeconfig kind-action writes to ~/.kube/config.
+      - name: Start kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: cattery-test
+
+      - name: run k8s integration + unit tests
+        working-directory: src
+        env:
+          CGO_ENABLED: 1   # required for -race
+        run: |
+          go test -tags=integration_k8s -race -coverprofile=coverage.out ./... 2>&1 | tee test-output.txt
           # go 1.25 covdata bug causes exit code 1 for packages without tests
           # fail only if actual test failures exist
           if grep -q "^FAIL" test-output.txt; then
@@ -92,7 +129,7 @@ jobs:
         run: go tool cover -func=coverage.out
 
   release:
-    needs: [tests, setup]
+    needs: [integration-mongo, integration-k8s, setup]
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     permissions:
       contents: write
@@ -140,7 +177,7 @@ jobs:
          gh release upload "${VERSION}" bin/cattery* --repo "${{ github.repository }}" --clobber
 
   docker-build:
-    needs: [tests, setup]
+    needs: [integration-mongo, integration-k8s, setup]
     runs-on: ubuntu-latest
     environment: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'release') && 'main' || null }}
     env:

@@ -116,7 +116,7 @@ func TestHandleDesiredRunnerCount_RecordsScaleBeforeProviderWaitCompletes(t *tes
 	}
 }
 
-func TestNewPollerWithJitClientInitializesHistory(t *testing.T) {
-	poller := NewPollerWithJitClient(nil, &config.TrayType{Name: "test-type"}, nil)
+func TestNewPollerInitializesHistory(t *testing.T) {
+	poller := NewPoller(nil, &config.TrayType{Name: "test-type"}, nil)
 	require.NotNil(t, poller.History())
 }

@@ -2,15 +2,19 @@ package handlers
 
 import (
 	"cattery/lib/restarter"
+	"cattery/lib/scaleSetClient"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/trayManager"
 	"net/http"
 )
 
 type Handlers struct {
-	TrayManager    *trayManager.TrayManager
-	RestartManager *restarter.WorkflowRestarter
+	TrayManager     *trayManager.TrayManager
+	RestartManager  *restarter.WorkflowRestarter
 	ScaleSetManager *scaleSetPoller.Manager
+	// JitRegistry serves JIT runner configs per tray type, independent of which
+	// replica holds the scale set session (see scaleSetClient.JitRegistry).
+	JitRegistry *scaleSetClient.JitRegistry
 }
 
 func (h *Handlers) Index(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"cattery/lib/messages"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
+	"cattery/lib/scaleSetClient"
 	"cattery/lib/scaleSetPoller"
 	"cattery/lib/testutil"
 	"cattery/lib/trays"
@@ -89,6 +90,7 @@ func setupHandlers(repo *testutil.MockTrayRepository) *Handlers {
 		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
 		ScaleSetManager: scaleSetPoller.NewManager(),
+		JitRegistry:     scaleSetClient.NewJitRegistry(),
 	}
 }
 
@@ -97,6 +99,7 @@ func setupHandlersWithRestarter(repo *testutil.MockTrayRepository, restarterRepo
 		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
 		RestartManager:  restarter.NewWorkflowRestarter(restarterRepo),
 		ScaleSetManager: scaleSetPoller.NewManager(),
+		JitRegistry:     scaleSetClient.NewJitRegistry(),
 	}
 }
 
@@ -105,6 +108,7 @@ func setupHandlersWithProvider(repo *testutil.MockTrayRepository, prov *mockProv
 		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{provider: prov}),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
 		ScaleSetManager: scaleSetPoller.NewManager(),
+		JitRegistry:     scaleSetClient.NewJitRegistry(),
 	}
 }
 

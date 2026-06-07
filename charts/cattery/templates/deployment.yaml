@@ -12,7 +12,7 @@ spec:
   replicas: {{ .Values.replicaCount }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
-    type: Recreate
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "cattery.selectorLabels" . | nindent 6 }}
@@ -30,7 +30,12 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "cattery.serviceAccountName" . }}
+      {{- if eq (include "cattery.coordinationBackend" .) "k8s" }}
+      # The k8s coordination backend calls the Kubernetes API (Leases).
+      automountServiceAccountToken: true
+      {{- else }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
@@ -51,9 +56,19 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.env }}
+          {{- $k8sCoord := eq (include "cattery.coordinationBackend" .) "k8s" }}
+          {{- if or .Values.env $k8sCoord }}
           env:
+            {{- if $k8sCoord }}
+            # Lease namespace for the k8s coordination backend.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
+            {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.envFrom }}
           envFrom:
