@@ -19,6 +19,13 @@ import (
 // Set STATUS_RENDER_OUT to a file path to dump the rendered HTML for a visual check.
 func TestStatusTemplateRenders(t *testing.T) {
 	now := time.Now().UTC()
+	config.SetForTest(t, &config.CatteryConfig{
+		Providers: []*config.ProviderConfig{
+			{"name": "gce", "type": "google"},
+			{"name": "docker", "type": "docker"},
+			{"name": "nomad", "type": "nomad"},
+		},
+	})
 	data := struct {
 		Now       time.Time
 		Version   string
@@ -98,7 +105,7 @@ func TestStatusTemplateRenders(t *testing.T) {
 				RunnerName:     "tray-1",
 			},
 		},
-		Orgs:      []*config.GitHubOrganization{{Name: "test-org"}},
+		Orgs:      []*config.GitHubOrganization{{Name: "test-org", AppId: 123456, InstallationId: 654321}},
 		Providers: []*config.ProviderConfig{{"name": "gce", "type": "gce"}},
 		TrayTypes: []*config.TrayType{
 			{Name: "gce-large", Provider: "gce", GitHubOrg: "test-org", RunnerGroupId: 1, MaxTrays: 5,
@@ -116,6 +123,8 @@ func TestStatusTemplateRenders(t *testing.T) {
 	assert.Contains(t, out, `data-max="5"`)
 	assert.Contains(t, out, "gce-large")
 	assert.Contains(t, out, "GCE e2-standard-8 spot VM for heavy builds")
+	assert.Contains(t, out, "(google)") // provider type next to provider name
+	assert.Contains(t, out, "123456")   // org app id
 	assert.Contains(t, out, `data-id="tray-1"`)
 	assert.Contains(t, out, "https://github.com/test-org/repo/actions/runs/42/job/7")
 

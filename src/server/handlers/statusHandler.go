@@ -33,6 +33,12 @@ var statusTmpl = template.Must(
 				return jobURL(t)
 			},
 			"msgJobURL": messageJobURL,
+			"providerType": func(name string) string {
+				if p := config.Get().GetProvider(name); p != nil {
+					return p.Get("type")
+				}
+				return ""
+			},
 		}).
 		ParseFS(ui.Templates, "status.html"),
 )

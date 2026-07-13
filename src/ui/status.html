@@ -198,28 +198,6 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: flex; flex-direction: column; gap: 36px; }
 
-    .kv-grid {
-      display: grid;
-      grid-template-columns: 160px 1fr;
-      gap: 4px 16px;
-      font-size: 13px;
-    }
-    .kv-grid .k { color: #666; }
-    .kv-grid .v { color: #ccc; word-break: break-all; }
-
-    .card {
-      background: #161616;
-      border: 1px solid #222;
-      border-radius: 6px;
-      padding: 14px 18px;
-      margin-bottom: 12px;
-    }
-    .card .name {
-      color: #fff;
-      font-weight: 600;
-      font-size: 14px;
-      margin-bottom: 10px;
-    }
   </style>
 </head>
 <body>
@@ -333,11 +311,24 @@
 
   <div class="tab-panel" id="tab-orgs">
     {{if .Orgs}}
-      {{range .Orgs}}
-      <div class="card">
-        <div class="name">{{.Name}}</div>
+      <div class="table-wrap">
+        <table id="org-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">App ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Orgs}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td>{{.AppId}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
-      {{end}}
     {{else}}
       <p class="empty">No GitHub orgs configured.</p>
     {{end}}
@@ -345,11 +336,24 @@
 
   <div class="tab-panel" id="tab-providers">
     {{if .Providers}}
-      {{range .Providers}}
-      <div class="card">
-        <div class="name">{{.Get "name"}} <span class="dim" style="font-weight:400;font-size:12px;">({{.Get "type"}})</span></div>
+      <div class="table-wrap">
+        <table id="provider-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Providers}}
+            <tr>
+              <td>{{.Get "name"}}</td>
+              <td>{{.Get "type"}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
-      {{end}}
     {{else}}
       <p class="empty">No providers configured.</p>
     {{end}}
@@ -374,7 +378,7 @@
             {{range .TrayTypes}}
             <tr data-type="{{.Name}}" data-max="{{.MaxTrays}}">
               <td>{{.Name}}</td>
-              <td>{{.Provider}}</td>
+              <td>{{.Provider}}{{with providerType .Provider}} <span class="dim">({{.}})</span>{{end}}</td>
               <td>{{.GitHubOrg}}</td>
               <td>{{.RunnerGroupId}}</td>
               <td class="usage"><span class="val"><span class="dim">&mdash; / {{if .MaxTrays}}{{.MaxTrays}}{{else}}&infin;{{end}}</span></span><span class="meter" style="visibility:hidden"><span class="fill"></span></span><div class="status-detail"></div></td>
