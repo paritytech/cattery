@@ -83,11 +83,18 @@
     td.usage .meter { margin-left: 8px; }
     td.usage .status-detail { font-size: 11px; margin-top: 3px; }
 
+    /* Tray type description: free text, allowed to wrap */
+    td.desc { white-space: normal; min-width: 240px; max-width: 480px; color: #999; }
+
+    /* Numeric columns whose header is wider than the data: wrap the header */
+    th.narrow { white-space: normal; max-width: 110px; }
+
     /* Per-status counts, matching the badge colours */
-    .st-running  { color: #66bb6a; }
-    .st-idle     { color: #4fc3f7; }
-    .st-starting { color: #e6b800; }
-    .st-deleting { color: #e57373; }
+    .st-creating    { color: #777; }
+    .st-registering { color: #e6b800; }
+    .st-registered  { color: #4fc3f7; }
+    .st-running     { color: #66bb6a; }
+    .st-deleting    { color: #e57373; }
 
     /* Filter toolbar */
     .toolbar {
@@ -357,10 +364,10 @@
               <th data-col="0">Name</th>
               <th data-col="1">Provider</th>
               <th data-col="2">Org</th>
-              <th data-col="3">Runner Group</th>
-              <th data-col="4">In Use</th>
-              <th data-col="5">Max Parallel Creation</th>
-              <th data-col="6">Shutdown</th>
+              <th data-col="3" class="narrow">Runner Group</th>
+              <th data-col="4">Capacity</th>
+              <th data-col="5" class="narrow">Max Parallel Creation</th>
+              <th data-col="6">Description</th>
             </tr>
           </thead>
           <tbody>
@@ -372,7 +379,7 @@
               <td>{{.RunnerGroupId}}</td>
               <td class="usage"><span class="val"><span class="dim">&mdash; / {{if .MaxTrays}}{{.MaxTrays}}{{else}}&infin;{{end}}</span></span><span class="meter" style="visibility:hidden"><span class="fill"></span></span><div class="status-detail"></div></td>
               <td>{{if .MaxParallelCreation}}{{.MaxParallelCreation}}{{else}}<span class="dim">10</span>{{end}}</td>
-              <td>{{.Shutdown}}</td>
+              <td class="desc">{{if .Description}}{{.Description}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -532,23 +539,27 @@
     .map(tr => ({ name: tr.dataset.type, max: parseInt(tr.dataset.max) || 0 }));
   let lastTrays = []; // latest known trays, for recomputing capacity on filter change
 
+  const STATUS_ORDER = ['creating', 'registering', 'registered', 'running', 'deleting'];
+
+  function blankSummary(max) {
+    const s = { max: max || 0, active: 0 };
+    STATUS_ORDER.forEach(st => { s[st] = 0; });
+    return s;
+  }
+
   // Per-type counts; "active" mirrors the server's MaxTrays accounting
   // (every tray except deleting ones counts against the limit).
   function summarize(trays) {
     const m = new Map();
-    configuredTypes.forEach(t =>
-      m.set(t.name, { max: t.max, active: 0, running: 0, idle: 0, starting: 0, deleting: 0 }));
+    configuredTypes.forEach(t => m.set(t.name, blankSummary(t.max)));
     trays.forEach(t => {
       let s = m.get(t.type);
       if (!s) {
-        s = { max: 0, active: 0, running: 0, idle: 0, starting: 0, deleting: 0 };
+        s = blankSummary(0);
         m.set(t.type, s);
       }
-      if (t.status === 'deleting') { s.deleting++; return; }
-      s.active++;
-      if (t.status === 'running') s.running++;
-      else if (t.status === 'registered') s.idle++;
-      else s.starting++;
+      if (s[t.status] !== undefined) s[t.status]++;
+      if (t.status !== 'deleting') s.active++;
     });
     return m;
   }
@@ -565,17 +576,13 @@
     }
   }
 
-  // Per-status counts as HTML spans coloured like the status badges.
+  // Per-status counts as HTML spans coloured like the status badges,
+  // in lifecycle order and named exactly like the statuses.
   function breakdownHTML(s) {
-    const parts = [];
-    if (s.running) parts.push('<span class="st-running">' + s.running + ' running</span>');
-    if (s.idle) parts.push('<span class="st-idle">' + s.idle + ' idle</span>');
-    if (s.starting) parts.push('<span class="st-starting">' + s.starting + ' starting</span>');
-    if (s.deleting) parts.push('<span class="st-deleting">' + s.deleting + ' deleting</span>');
-    return parts.join('<span class="dim"> · </span>');
+    return STATUS_ORDER.filter(st => s[st])
+      .map(st => '<span class="st-' + st + '">' + s[st] + ' ' + st + '</span>')
+      .join('<span class="dim"> · </span>');
   }
-
-  const emptySummary = { max: 0, active: 0, running: 0, idle: 0, starting: 0, deleting: 0 };
 
   // Updates the toolbar capacity chip (selected type only) and the
   // "In Use" column on the Tray Types tab.
@@ -586,7 +593,7 @@
     if (activeFilter === '*') {
       chip.style.display = 'none';
     } else {
-      const s = summary.get(activeFilter) || emptySummary;
+      const s = summary.get(activeFilter) || blankSummary(0);
       chip.style.display = '';
       const detail = breakdownHTML(s);
       setHTML(chip.querySelector('.cap-text'),
@@ -596,7 +603,7 @@
     }
 
     document.querySelectorAll('#traytype-table tbody tr[data-type]').forEach(tr => {
-      const s = summary.get(tr.dataset.type) || emptySummary;
+      const s = summary.get(tr.dataset.type) || blankSummary(0);
       const cell = tr.querySelector('td.usage');
       if (!cell) return;
       setHTML(cell.querySelector('.val'),

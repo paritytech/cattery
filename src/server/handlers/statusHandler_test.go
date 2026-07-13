@@ -101,7 +101,8 @@ func TestStatusTemplateRenders(t *testing.T) {
 		Orgs:      []*config.GitHubOrganization{{Name: "test-org"}},
 		Providers: []*config.ProviderConfig{{"name": "gce", "type": "gce"}},
 		TrayTypes: []*config.TrayType{
-			{Name: "gce-large", Provider: "gce", GitHubOrg: "test-org", RunnerGroupId: 1, MaxTrays: 5},
+			{Name: "gce-large", Provider: "gce", GitHubOrg: "test-org", RunnerGroupId: 1, MaxTrays: 5,
+				Description: "GCE e2-standard-8 spot VM for heavy builds"},
 			{Name: "docker-small", Provider: "docker", GitHubOrg: "test-org", RunnerGroupId: 1},
 			{Name: "nomad-spot", Provider: "nomad", GitHubOrg: "test-org", RunnerGroupId: 1, MaxTrays: 2},
 		},
@@ -114,6 +115,7 @@ func TestStatusTemplateRenders(t *testing.T) {
 	// Tray type limits reach the client via data attributes on the tray types table.
 	assert.Contains(t, out, `data-max="5"`)
 	assert.Contains(t, out, "gce-large")
+	assert.Contains(t, out, "GCE e2-standard-8 spot VM for heavy builds")
 	assert.Contains(t, out, `data-id="tray-1"`)
 	assert.Contains(t, out, "https://github.com/test-org/repo/actions/runs/42/job/7")
 
