@@ -83,6 +83,8 @@ providers:
 
 trayTypes:
   - name: cattery-tiny
+    # free-text, shown on the status page (Tray Types tab)
+    description: Small local Docker runner for lint and quick checks
     provider: docker-local
     shutdown: false
     runnerGroupId: 3

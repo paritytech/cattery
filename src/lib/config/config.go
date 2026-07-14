@@ -314,6 +314,7 @@ const DefaultMaxParallelCreation = 10
 
 type TrayType struct {
 	Name                string     `yaml:"name" validate:"required"`
+	Description         string     `yaml:"description"`
 	Provider            string     `yaml:"provider" validate:"required"`
 	RunnerGroupId       int64      `yaml:"runnerGroupId" validate:"required"`
 	Shutdown            bool       `yaml:"shutdown"`

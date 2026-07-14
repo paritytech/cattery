@@ -6,6 +6,8 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root { color-scheme: dark; }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 14px;
@@ -54,30 +56,70 @@
     details[open] summary::before { transform: rotate(90deg); }
     details .section-body { margin-top: 10px; }
 
-    /* Filter bar */
-    .filters {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
+    /* Capacity meter (toolbar chip + tray types table) */
+    .meter {
+      display: inline-block;
+      width: 90px;
+      height: 4px;
+      border-radius: 2px;
+      overflow: hidden;
+      vertical-align: middle;
     }
-    .filters button {
+    .meter .fill { display: block; height: 100%; border-radius: 2px; transition: width 0.3s; }
+    .meter.ok   { background: #002535; } .meter.ok .fill   { background: #4fc3f7; }
+    .meter.warn { background: #2e2300; } .meter.warn .fill { background: #e6b800; }
+    .meter.full { background: #2a1010; } .meter.full .fill { background: #e57373; }
+
+    .cap-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+    .cap-inline .cap-text b { color: #fff; font-weight: 600; }
+
+    td.usage .meter { margin-left: 8px; }
+    td.usage .status-detail { font-size: 11px; margin-top: 3px; }
+
+    /* Tray type description: free text, allowed to wrap */
+    td.desc { white-space: normal; min-width: 240px; max-width: 480px; color: #999; }
+
+    /* Numeric columns whose header is wider than the data: wrap the header */
+    th.narrow { white-space: normal; max-width: 110px; }
+
+    /* Per-status counts, matching the badge colours */
+    .st-creating    { color: #777; }
+    .st-registering { color: #e6b800; }
+    .st-registered  { color: #4fc3f7; }
+    .st-running     { color: #66bb6a; }
+    .st-deleting    { color: #e57373; }
+
+    /* Filter toolbar */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .toolbar label { color: #666; font-size: 12px; }
+    .toolbar select {
       background: #1a1a1a;
       border: 1px solid #333;
-      color: #888;
-      padding: 4px 12px;
+      color: #ccc;
+      padding: 5px 8px;
       border-radius: 4px;
       font-size: 12px;
-      cursor: pointer;
       font-family: inherit;
+      cursor: pointer;
     }
-    .filters button:hover { color: #ccc; border-color: #555; }
-    .filters button.active { background: #222; color: #fff; border-color: #4fc3f7; }
+    .toolbar select:focus { outline: none; border-color: #4fc3f7; }
 
     .table-wrap {
       border: 1px solid #222;
       border-radius: 6px;
-      overflow: hidden;
+      overflow-x: auto;
     }
 
     table { width: 100%; border-collapse: collapse; }
@@ -156,28 +198,6 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: flex; flex-direction: column; gap: 36px; }
 
-    .kv-grid {
-      display: grid;
-      grid-template-columns: 160px 1fr;
-      gap: 4px 16px;
-      font-size: 13px;
-    }
-    .kv-grid .k { color: #666; }
-    .kv-grid .v { color: #ccc; word-break: break-all; }
-
-    .card {
-      background: #161616;
-      border: 1px solid #222;
-      border-radius: 6px;
-      padding: 14px 18px;
-      margin-bottom: 12px;
-    }
-    .card .name {
-      color: #fff;
-      font-weight: 600;
-      font-size: 14px;
-      margin-bottom: 10px;
-    }
   </style>
 </head>
 <body>
@@ -203,8 +223,16 @@
     <details id="trays-details" open>
       <summary><h2>Trays (<span id="tray-count">{{len .Trays}}</span>)</h2></summary>
       <div class="section-body">
-        <div class="filters" id="tray-filters" data-configured-types="{{range $i, $t := .TrayTypes}}{{if $i}},{{end}}{{$t.Name}}{{end}}">
-          <button class="active" data-filter="*">All</button>
+        <div class="toolbar">
+          <label for="tray-filter">Type</label>
+          <select id="tray-filter">
+            <option value="*">All types</option>
+            {{range .TrayTypes}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+          </select>
+          <span class="cap-inline" id="tray-capacity" style="display:none">
+            <span class="cap-text"></span>
+            <span class="meter"><span class="fill"></span></span>
+          </span>
         </div>
         <div class="table-wrap">
           <table id="tray-table">
@@ -222,7 +250,7 @@
             </thead>
             <tbody>
               {{range .Trays}}
-              <tr data-status="{{.Status}}" data-type="{{.TrayTypeName}}">
+              <tr data-id="{{.Id}}" data-status="{{.Status}}" data-type="{{.TrayTypeName}}">
                 <td class="dim">{{.Id}}</td>
                 <td>{{.TrayTypeName}}</td>
                 <td>{{.GitHubOrgName}}</td>
@@ -283,11 +311,24 @@
 
   <div class="tab-panel" id="tab-orgs">
     {{if .Orgs}}
-      {{range .Orgs}}
-      <div class="card">
-        <div class="name">{{.Name}}</div>
+      <div class="table-wrap">
+        <table id="org-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">App ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Orgs}}
+            <tr>
+              <td>{{.Name}}</td>
+              <td>{{.AppId}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
-      {{end}}
     {{else}}
       <p class="empty">No GitHub orgs configured.</p>
     {{end}}
@@ -295,11 +336,24 @@
 
   <div class="tab-panel" id="tab-providers">
     {{if .Providers}}
-      {{range .Providers}}
-      <div class="card">
-        <div class="name">{{.Get "name"}} <span class="dim" style="font-weight:400;font-size:12px;">({{.Get "type"}})</span></div>
+      <div class="table-wrap">
+        <table id="provider-table">
+          <thead>
+            <tr>
+              <th data-col="0">Name</th>
+              <th data-col="1">Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Providers}}
+            <tr>
+              <td>{{.Get "name"}}</td>
+              <td>{{.Get "type"}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
-      {{end}}
     {{else}}
       <p class="empty">No providers configured.</p>
     {{end}}
@@ -314,22 +368,22 @@
               <th data-col="0">Name</th>
               <th data-col="1">Provider</th>
               <th data-col="2">Org</th>
-              <th data-col="3">Runner Group</th>
-              <th data-col="4">Max Trays</th>
-              <th data-col="5">Max Parallel Creation</th>
-              <th data-col="6">Shutdown</th>
+              <th data-col="3" class="narrow">Runner Group</th>
+              <th data-col="4">Capacity</th>
+              <th data-col="5" class="narrow">Max Parallel Creation</th>
+              <th data-col="6">Description</th>
             </tr>
           </thead>
           <tbody>
             {{range .TrayTypes}}
-            <tr>
+            <tr data-type="{{.Name}}" data-max="{{.MaxTrays}}">
               <td>{{.Name}}</td>
-              <td>{{.Provider}}</td>
+              <td>{{.Provider}}{{with providerType .Provider}} <span class="dim">({{.}})</span>{{end}}</td>
               <td>{{.GitHubOrg}}</td>
               <td>{{.RunnerGroupId}}</td>
-              <td>{{if .MaxTrays}}{{.MaxTrays}}{{else}}<span class="dim">&infin;</span>{{end}}</td>
+              <td class="usage"><span class="val"><span class="dim">&mdash; / {{if .MaxTrays}}{{.MaxTrays}}{{else}}&infin;{{end}}</span></span><span class="meter" style="visibility:hidden"><span class="fill"></span></span><div class="status-detail"></div></td>
               <td>{{if .MaxParallelCreation}}{{.MaxParallelCreation}}{{else}}<span class="dim">10</span>{{end}}</td>
-              <td>{{.Shutdown}}</td>
+              <td class="desc">{{if .Description}}{{.Description}}{{else}}<span class="dim">&mdash;</span>{{end}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -366,6 +420,27 @@
     }
   }
 
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  // Update helpers: touch the DOM only when content actually changed, so the
+  // 5s refresh never disturbs text selection, scroll position or hover state.
+  function setText(el, s) {
+    if (el.textContent !== s) el.textContent = s;
+  }
+  function setHTML(el, html) {
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+  // Move nodes inside parent only when out of position.
+  function reorder(parent, nodes) {
+    nodes.forEach((node, i) => {
+      if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] || null);
+    });
+  }
+
   // --- Sort state per table ---
   const sortState = {}; // tableId -> { col, asc }
 
@@ -382,14 +457,14 @@
         ? av.localeCompare(bv, undefined, { numeric: true })
         : bv.localeCompare(av, undefined, { numeric: true });
     });
-    rows.forEach(tr => tbody.appendChild(tr));
+    reorder(tbody, rows);
     // Update indicators
     table.querySelectorAll('th .sort-indicator').forEach(el => el.remove());
     const th = table.querySelector('th[data-col="' + s.col + '"]');
     if (th) {
       const span = document.createElement('span');
       span.className = 'sort-indicator';
-      span.textContent = s.asc ? '\u25B2' : '\u25BC';
+      span.textContent = s.asc ? '▲' : '▼';
       th.appendChild(span);
     }
   }
@@ -405,7 +480,8 @@
     });
   });
 
-  // --- Filter state ---
+  // --- Filter ---
+  const filterSelect = document.getElementById('tray-filter');
   let activeFilter = '*';
 
   function applyFilter() {
@@ -416,7 +492,7 @@
       tr.style.display = match ? '' : 'none';
       if (match) trayVisible++;
     });
-    document.getElementById('tray-count').textContent = trayVisible;
+    setText(document.getElementById('tray-count'), String(trayVisible));
     document.getElementById('tray-empty').style.display = trayVisible === 0 ? '' : 'none';
     document.querySelector('#tray-table').closest('.table-wrap').style.display = trayVisible === 0 ? 'none' : '';
 
@@ -433,60 +509,160 @@
 
   function selectFilter(type) {
     activeFilter = type;
-    const bar = document.getElementById('tray-filters');
-    bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-    const btn = bar.querySelector('[data-filter="' + type + '"]') || bar.querySelector('[data-filter="*"]');
-    btn.classList.add('active');
+    if (filterSelect.value !== type) filterSelect.value = type;
+    updateCapacity();
     applyFilter();
   }
 
-  function buildFilterButtons(trays) {
-    const bar = document.getElementById('tray-filters');
-    const configured = (bar.dataset.configuredTypes || '').split(',').filter(Boolean);
-    const types = [...new Set([...configured, ...trays.map(t => t.type)])].sort();
-    // If the selected type no longer exists, fall back to All.
-    if (activeFilter !== '*' && !types.includes(activeFilter)) {
-      activeFilter = '*';
+  filterSelect.addEventListener('change', () => selectFilter(filterSelect.value));
+
+  function updateFilterOptions(trays) {
+    const types = [...new Set([...configuredTypes.map(t => t.name), ...trays.map(t => t.type)])]
+      .filter(Boolean).sort();
+    if (activeFilter !== '*' && !types.includes(activeFilter)) activeFilter = '*';
+    const desired = ['*', ...types];
+    const current = Array.from(filterSelect.options).map(o => o.value);
+    if (current.join('\n') !== desired.join('\n')) {
+      filterSelect.innerHTML = '';
+      desired.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v === '*' ? 'All types' : v;
+        filterSelect.appendChild(opt);
+      });
     }
-    // Rebuild: the "All" button is the first child and stays; rest are re-created.
-    while (bar.children.length > 1) bar.removeChild(bar.lastChild);
-    types.forEach(type => {
-      const btn = document.createElement('button');
-      btn.dataset.filter = type;
-      btn.textContent = type;
-      btn.addEventListener('click', () => selectFilter(type));
-      bar.appendChild(btn);
-    });
-    const allBtn = bar.querySelector('[data-filter="*"]');
-    allBtn.onclick = () => selectFilter('*');
-    // Apply active class for whichever filter is current.
-    bar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-    (bar.querySelector('[data-filter="' + activeFilter + '"]') || allBtn).classList.add('active');
+    // Touch .value only when it drifted: assigning it every refresh disturbs
+    // the native dropdown while the user is browsing its options.
+    if (filterSelect.value !== activeFilter) filterSelect.value = activeFilter;
   }
 
-  // --- Render helpers ---
-  function renderTrayRows(trays) {
-    const tbody = document.querySelector('#tray-table tbody');
-    tbody.innerHTML = '';
+  // --- Capacity ---
+  // Tray types are static config, so names and limits come from the
+  // server-rendered Tray Types table; only tray counts change at runtime.
+  const configuredTypes = Array.from(document.querySelectorAll('#traytype-table tbody tr[data-type]'))
+    .map(tr => ({ name: tr.dataset.type, max: parseInt(tr.dataset.max) || 0 }));
+  let lastTrays = []; // latest known trays, for recomputing capacity on filter change
+
+  const STATUS_ORDER = ['creating', 'registering', 'registered', 'running', 'deleting'];
+
+  function blankSummary(max) {
+    const s = { max: max || 0, active: 0 };
+    STATUS_ORDER.forEach(st => { s[st] = 0; });
+    return s;
+  }
+
+  // Per-type counts; "active" mirrors the server's MaxTrays accounting
+  // (every tray except deleting ones counts against the limit).
+  function summarize(trays) {
+    const m = new Map();
+    configuredTypes.forEach(t => m.set(t.name, blankSummary(t.max)));
     trays.forEach(t => {
-      const tr = document.createElement('tr');
-      tr.dataset.status = t.status;
-      tr.dataset.type = t.type;
-      var jobCell = t.jobUrl
-        ? '<a href="' + esc(t.jobUrl) + '" target="_blank" rel="noopener">' + esc(t.job) + '</a>'
-        : esc(t.job);
-      tr.innerHTML =
-        '<td class="dim">' + esc(t.id) + '</td>' +
-        '<td>' + esc(t.type) + '</td>' +
-        '<td>' + esc(t.org) + '</td>' +
-        '<td><span class="badge">' + esc(t.status) + '</span></td>' +
-        '<td>' + esc(t.repository) + '</td>' +
-        '<td>' + esc(t.workflow) + '</td>' +
-        '<td>' + jobCell + '</td>' +
-        '<td class="dim">' + esc(t.since) + '</td>';
-      tbody.appendChild(tr);
+      let s = m.get(t.type);
+      if (!s) {
+        s = blankSummary(0);
+        m.set(t.type, s);
+      }
+      if (s[t.status] !== undefined) s[t.status]++;
+      if (t.status !== 'deleting') s.active++;
+    });
+    return m;
+  }
+
+  function setMeter(meter, s) {
+    if (s.max > 0) {
+      meter.style.visibility = '';
+      const ratio = Math.min(1, s.active / s.max);
+      meter.className = 'meter ' + (s.active >= s.max ? 'full' : ratio >= 0.8 ? 'warn' : 'ok');
+      meter.querySelector('.fill').style.width = (ratio * 100) + '%';
+    } else {
+      // no limit — keep the element in flow so cells stay aligned
+      meter.style.visibility = 'hidden';
+    }
+  }
+
+  // Per-status counts as HTML spans coloured like the status badges,
+  // in lifecycle order and named exactly like the statuses.
+  function breakdownHTML(s) {
+    return STATUS_ORDER.filter(st => s[st])
+      .map(st => '<span class="st-' + st + '">' + s[st] + ' ' + st + '</span>')
+      .join('<span class="dim"> · </span>');
+  }
+
+  // Updates the toolbar capacity chip (selected type only) and the
+  // "In Use" column on the Tray Types tab.
+  function updateCapacity() {
+    const summary = summarize(lastTrays);
+
+    const chip = document.getElementById('tray-capacity');
+    if (activeFilter === '*') {
+      chip.style.display = 'none';
+    } else {
+      const s = summary.get(activeFilter) || blankSummary(0);
+      chip.style.display = '';
+      const detail = breakdownHTML(s);
+      setHTML(chip.querySelector('.cap-text'),
+        '<b>' + s.active + ' / ' + (s.max > 0 ? s.max : '&infin;') + '</b> in use' +
+        (detail ? ' (' + detail + ')' : ''));
+      setMeter(chip.querySelector('.meter'), s);
+    }
+
+    document.querySelectorAll('#traytype-table tbody tr[data-type]').forEach(tr => {
+      const s = summary.get(tr.dataset.type) || blankSummary(0);
+      const cell = tr.querySelector('td.usage');
+      if (!cell) return;
+      setHTML(cell.querySelector('.val'),
+        s.active + ' <span class="dim">/ ' + (s.max > 0 ? s.max : '&infin;') + '</span>');
+      setMeter(cell.querySelector('.meter'), s);
+      setHTML(cell.querySelector('.status-detail'), breakdownHTML(s));
     });
   }
+
+  // --- Tray table reconciliation (keyed by tray id, updated in place) ---
+  function newTrayRow(id) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = id;
+    for (let i = 0; i < 8; i++) tr.appendChild(document.createElement('td'));
+    tr.cells[0].className = 'dim';
+    tr.cells[7].className = 'dim';
+    return tr;
+  }
+
+  function updateTrayRow(tr, t) {
+    if (tr.dataset.status !== t.status) tr.dataset.status = t.status;
+    if (tr.dataset.type !== t.type) tr.dataset.type = t.type;
+    setHTML(tr.cells[0], esc(t.id));
+    setHTML(tr.cells[1], esc(t.type));
+    setHTML(tr.cells[2], esc(t.org));
+    setHTML(tr.cells[3], '<span class="badge">' + esc(t.status) + '</span>');
+    setHTML(tr.cells[4], esc(t.repository));
+    setHTML(tr.cells[5], esc(t.workflow));
+    setHTML(tr.cells[6], t.jobUrl
+      ? '<a href="' + esc(t.jobUrl) + '" target="_blank" rel="noopener">' + esc(t.job) + '</a>'
+      : esc(t.job));
+    setHTML(tr.cells[7], esc(t.since));
+  }
+
+  function reconcileTrays(trays) {
+    const tbody = document.querySelector('#tray-table tbody');
+    const byId = new Map(Array.from(tbody.rows).map(r => [r.dataset.id, r]));
+    const rows = trays.map(t => {
+      let tr = byId.get(t.id);
+      if (tr) {
+        byId.delete(t.id);
+      } else {
+        tr = newTrayRow(t.id);
+        tbody.appendChild(tr);
+      }
+      updateTrayRow(tr, t);
+      return tr;
+    });
+    byId.forEach(r => r.remove());
+    reorder(tbody, rows); // server order (most recently changed first)
+    applySort('tray-table');
+  }
+
+  // --- Event table: rebuilt only when the message history actually changed ---
+  let eventsFingerprint = null;
 
   function renderDetail(m) {
     if (m.kind === 'scale') {
@@ -511,6 +687,9 @@
   }
 
   function renderEventRows(messages) {
+    const fp = JSON.stringify(messages);
+    if (fp === eventsFingerprint) return;
+    eventsFingerprint = fp;
     const tbody = document.querySelector('#event-table tbody');
     tbody.innerHTML = '';
     messages.forEach(m => {
@@ -524,12 +703,7 @@
         '<td class="detail">' + renderDetail(m) + '</td>';
       tbody.appendChild(tr);
     });
-  }
-
-  function esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
+    applySort('event-table');
   }
 
   // --- Fetch loop ---
@@ -539,25 +713,24 @@
       if (!resp.ok) return;
       const data = await resp.json();
 
-      document.getElementById('timestamp').textContent = data.now + ' \u2014 refreshes every 5s';
+      setText(document.getElementById('timestamp'), data.now + ' — refreshes every 5s');
 
-      buildFilterButtons(data.trays || []);
-      renderTrayRows(data.trays || []);
-      applySort('tray-table');
-
+      lastTrays = data.trays || [];
+      updateFilterOptions(lastTrays);
+      updateCapacity();
+      reconcileTrays(lastTrays);
       renderEventRows(data.messages || []);
-      applySort('event-table');
-
       applyFilter();
     } catch (e) {
       // silently retry next cycle
     }
   }
 
-  // Derive initial filter buttons from server-rendered rows; applyFilter sets empty states.
-  const initialTrays = Array.from(document.querySelectorAll('#tray-table tbody tr[data-type]'))
-    .map(r => ({ type: r.dataset.type }));
-  buildFilterButtons(initialTrays);
+  // Initial state from the server-rendered rows.
+  lastTrays = Array.from(document.querySelectorAll('#tray-table tbody tr'))
+    .map(r => ({ type: r.dataset.type, status: r.dataset.status }));
+  updateFilterOptions(lastTrays);
+  updateCapacity();
   applyFilter();
 
   setInterval(refresh, 5000);

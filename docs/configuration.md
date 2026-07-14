@@ -150,6 +150,7 @@ Defines one or more tray "profiles" that the Tray Manager can maintain.
 | Key                 | Type               | Required | Description                                                                    |
 |---------------------|--------------------|----------|--------------------------------------------------------------------------------|
 | name                | string             | yes      | Unique name for the tray type. Also used as the runner scale set name/label.   |
+| description         | string             | no       | Free-text description shown on the status page (Tray Types tab). Use it to document what the type provides: machine size, image, intended workloads. |
 | provider            | string             | yes      | Name of a provider defined in `providers`.                                     |
 | runnerGroupId       | int                | yes      | GitHub Runner Group ID to register runners into.                               |
 | githubOrg           | string             | yes      | The GitHub org key, matching one of the entries under `github`.                |
