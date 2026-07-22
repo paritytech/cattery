@@ -90,6 +90,7 @@ type statusTrayJSON struct {
 
 type statusMessageJSON struct {
 	Time     string `json:"time"`
+	TimeFull string `json:"timeFull"`
 	TrayType string `json:"type"`
 	Kind     string `json:"kind"`
 
@@ -142,6 +143,7 @@ func (h *Handlers) StatusData(w http.ResponseWriter, r *http.Request) {
 	for i, m := range msgs {
 		item := statusMessageJSON{
 			Time:     m.Time.UTC().Format("15:04:05"),
+			TimeFull: m.Time.UTC().Format("2006-01-02 15:04:05 UTC"),
 			TrayType: m.TrayType,
 			Kind:     string(m.Kind),
 		}

@@ -104,6 +104,17 @@ func TestStatusTemplateRenders(t *testing.T) {
 				JobDisplayName: "build",
 				RunnerName:     "tray-1",
 			},
+			{
+				Time:           now.Add(-3 * time.Minute),
+				Kind:           scaleSetPoller.MessageKindJobCompleted,
+				TrayType:       "gce-large",
+				Repository:     "test-org/repo",
+				WorkflowRunID:  41,
+				JobID:          6,
+				JobDisplayName: "lint",
+				RunnerName:     "tray-0",
+				Result:         "succeeded",
+			},
 		},
 		Orgs:      []*config.GitHubOrganization{{Name: "test-org", AppId: 123456, InstallationId: 654321}},
 		Providers: []*config.ProviderConfig{{"name": "gce", "type": "gce"}},
@@ -125,6 +136,8 @@ func TestStatusTemplateRenders(t *testing.T) {
 	assert.Contains(t, out, "GCE e2-standard-8 spot VM for heavy builds")
 	assert.Contains(t, out, "(google)") // provider type next to provider name
 	assert.Contains(t, out, "123456")   // org app id
+	assert.Contains(t, out, `<span class="res-succeeded">succeeded</span>`)
+	assert.Contains(t, out, `title="`+now.Add(-time.Minute).Format("2006-01-02 15:04:05")+` UTC"`)
 	assert.Contains(t, out, `data-id="tray-1"`)
 	assert.Contains(t, out, "https://github.com/test-org/repo/actions/runs/42/job/7")
 

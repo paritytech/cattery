@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Cattery Status</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🐈%3C/text%3E%3C/svg%3E">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -26,6 +27,7 @@
     }
     header h1 { color: #fff; font-size: 17px; font-weight: 600; }
     header .meta { color: #555; font-size: 12px; }
+    header .meta.err { color: #e57373; }
 
     main { padding: 28px 24px; display: flex; flex-direction: column; gap: 36px; }
 
@@ -96,6 +98,15 @@
     .st-running     { color: #66bb6a; }
     .st-deleting    { color: #e57373; }
 
+    /* Job results in the event feed */
+    .res-succeeded { color: #66bb6a; }
+    .res-failed    { color: #e57373; }
+    .res-canceled  { color: #777; }
+
+    /* Latest desired runner count (from scale events) next to capacity */
+    .desired { font-size: 12px; font-weight: 400; color: #555; }
+    .desired.hot { color: #e6b800; }
+
     /* Filter toolbar */
     .toolbar {
       display: flex;
@@ -115,6 +126,17 @@
       cursor: pointer;
     }
     .toolbar select:focus { outline: none; border-color: #4fc3f7; }
+    .toolbar input[type="search"] {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #ccc;
+      padding: 5px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+      width: 220px;
+    }
+    .toolbar input[type="search"]:focus { outline: none; border-color: #4fc3f7; }
 
     .table-wrap {
       border: 1px solid #222;
@@ -154,6 +176,12 @@
       font-size: 12px;
       font-weight: 500;
     }
+    /* Uniform width for tray status badges ("registering" is the widest) */
+    #tray-table .badge { min-width: 92px; text-align: center; }
+    /* Shrink Status and Since to their content so they sit next to each other
+       instead of being stretched by the table's 100% width */
+    #tray-table th:nth-child(4), #tray-table td:nth-child(4),
+    #tray-table th:nth-child(5), #tray-table td:nth-child(5) { width: 1%; }
 
     /* Tray status colours */
     [data-status="creating"]    td .badge { background: #252525; color: #777; }
@@ -229,6 +257,16 @@
             <option value="*">All types</option>
             {{range .TrayTypes}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
           </select>
+          <label for="status-filter">Status</label>
+          <select id="status-filter">
+            <option value="*">All statuses</option>
+            <option>creating</option>
+            <option>registering</option>
+            <option>registered</option>
+            <option>running</option>
+            <option>deleting</option>
+          </select>
+          <input type="search" id="tray-search" placeholder="Search id, repo, workflow, job&hellip;">
           <span class="cap-inline" id="tray-capacity" style="display:none">
             <span class="cap-text"></span>
             <span class="meter"><span class="fill"></span></span>
@@ -242,10 +280,10 @@
                 <th data-col="1">Type</th>
                 <th data-col="2">Org</th>
                 <th data-col="3">Status</th>
-                <th data-col="4">Repository</th>
-                <th data-col="5">Workflow</th>
-                <th data-col="6">Job</th>
-                <th data-col="7">Since</th>
+                <th data-col="4">Since</th>
+                <th data-col="5">Repository</th>
+                <th data-col="6">Workflow</th>
+                <th data-col="7">Job</th>
               </tr>
             </thead>
             <tbody>
@@ -255,10 +293,10 @@
                 <td>{{.TrayTypeName}}</td>
                 <td>{{.GitHubOrgName}}</td>
                 <td><span class="badge">{{.Status}}</span></td>
+                <td class="dim">{{age .StatusChanged}}</td>
                 <td>{{.Repository}}</td>
                 <td>{{.WorkflowName}}</td>
                 <td>{{if joburl .}}<a href="{{joburl .}}" target="_blank" rel="noopener">{{.JobName}}</a>{{else}}{{.JobName}}{{end}}</td>
-                <td class="dim">{{age .StatusChanged}}</td>
               </tr>
               {{end}}
             </tbody>
@@ -286,7 +324,7 @@
             <tbody>
               {{range .Messages}}
               <tr data-kind="{{.Kind}}" data-type="{{.TrayType}}">
-                <td class="dim">{{.Time.UTC.Format "15:04:05"}}</td>
+                <td class="dim" title="{{.Time.UTC.Format "2006-01-02 15:04:05 UTC"}}">{{.Time.UTC.Format "15:04:05"}}</td>
                 <td>{{.TrayType}}</td>
                 <td><span class="badge">{{.Kind}}</span></td>
                 <td class="detail">
@@ -294,7 +332,7 @@
                     desired={{.DesiredCount}}{{with .Stats}} available={{.Available}} assigned={{.Assigned}} running={{.Running}} runners(busy={{.Busy}} idle={{.Idle}} registered={{.Registered}}){{end}}
                   {{- else -}}
                     {{- $url := msgJobURL . -}}
-                    {{- if $url -}}<a href="{{$url}}" target="_blank" rel="noopener">{{.JobDisplayName}}</a>{{- else -}}{{.JobDisplayName}}{{- end }} on {{.RunnerName}}{{if .Result}} (result: {{.Result}}){{end -}}
+                    {{- if $url -}}<a href="{{$url}}" target="_blank" rel="noopener">{{.JobDisplayName}}</a>{{- else -}}{{.JobDisplayName}}{{- end }} on {{.RunnerName}}{{if .Result}} (result: <span class="res-{{.Result}}">{{.Result}}</span>){{end -}}
                   {{- end -}}
                 </td>
               </tr>
@@ -482,13 +520,20 @@
 
   // --- Filter ---
   const filterSelect = document.getElementById('tray-filter');
+  const statusSelect = document.getElementById('status-filter');
+  const searchInput = document.getElementById('tray-search');
   let activeFilter = '*';
 
   function applyFilter() {
+    const status = statusSelect.value;
+    const query = searchInput.value.trim().toLowerCase();
+
     const trayBody = document.querySelector('#tray-table tbody');
     let trayVisible = 0;
     Array.from(trayBody.rows).forEach(tr => {
-      const match = activeFilter === '*' || tr.dataset.type === activeFilter;
+      const match = (activeFilter === '*' || tr.dataset.type === activeFilter)
+        && (status === '*' || tr.dataset.status === status)
+        && (!query || tr.textContent.toLowerCase().includes(query));
       tr.style.display = match ? '' : 'none';
       if (match) trayVisible++;
     });
@@ -499,13 +544,17 @@
     const eventBody = document.querySelector('#event-table tbody');
     let eventVisible = 0;
     Array.from(eventBody.rows).forEach(tr => {
-      const match = activeFilter === '*' || tr.dataset.type === activeFilter;
+      const match = (activeFilter === '*' || tr.dataset.type === activeFilter)
+        && (!query || tr.textContent.toLowerCase().includes(query));
       tr.style.display = match ? '' : 'none';
       if (match) eventVisible++;
     });
     document.getElementById('event-empty').style.display = eventVisible === 0 ? '' : 'none';
     document.querySelector('#event-table').closest('.table-wrap').style.display = eventVisible === 0 ? 'none' : '';
   }
+
+  statusSelect.addEventListener('change', applyFilter);
+  searchInput.addEventListener('input', applyFilter);
 
   function selectFilter(type) {
     activeFilter = type;
@@ -544,6 +593,24 @@
   let lastTrays = []; // latest known trays, for recomputing capacity on filter change
 
   const STATUS_ORDER = ['creating', 'registering', 'registered', 'running', 'deleting'];
+
+  // Latest desired runner count per type, taken from the newest scale event.
+  // desired > active means demand currently exceeds capacity (jobs queuing).
+  let lastDesired = {};
+
+  function updateDesired(messages) { // messages are newest-first
+    const seen = {};
+    messages.forEach(m => {
+      if (m.kind === 'scale' && seen[m.type] === undefined) seen[m.type] = m.desiredCount || 0;
+    });
+    lastDesired = seen;
+  }
+
+  function desiredHTML(name, s) {
+    const d = lastDesired[name];
+    if (d === undefined) return '';
+    return ' <span class="desired' + (d > s.active ? ' hot' : '') + '">· desired ' + d + '</span>';
+  }
 
   function blankSummary(max) {
     const s = { max: max || 0, active: 0 };
@@ -602,6 +669,7 @@
       const detail = breakdownHTML(s);
       setHTML(chip.querySelector('.cap-text'),
         '<b>' + s.active + ' / ' + (s.max > 0 ? s.max : '&infin;') + '</b> in use' +
+        desiredHTML(activeFilter, s) +
         (detail ? ' (' + detail + ')' : ''));
       setMeter(chip.querySelector('.meter'), s);
     }
@@ -611,7 +679,8 @@
       const cell = tr.querySelector('td.usage');
       if (!cell) return;
       setHTML(cell.querySelector('.val'),
-        s.active + ' <span class="dim">/ ' + (s.max > 0 ? s.max : '&infin;') + '</span>');
+        s.active + ' <span class="dim">/ ' + (s.max > 0 ? s.max : '&infin;') + '</span>' +
+        desiredHTML(tr.dataset.type, s));
       setMeter(cell.querySelector('.meter'), s);
       setHTML(cell.querySelector('.status-detail'), breakdownHTML(s));
     });
@@ -623,7 +692,7 @@
     tr.dataset.id = id;
     for (let i = 0; i < 8; i++) tr.appendChild(document.createElement('td'));
     tr.cells[0].className = 'dim';
-    tr.cells[7].className = 'dim';
+    tr.cells[4].className = 'dim';
     return tr;
   }
 
@@ -634,12 +703,12 @@
     setHTML(tr.cells[1], esc(t.type));
     setHTML(tr.cells[2], esc(t.org));
     setHTML(tr.cells[3], '<span class="badge">' + esc(t.status) + '</span>');
-    setHTML(tr.cells[4], esc(t.repository));
-    setHTML(tr.cells[5], esc(t.workflow));
-    setHTML(tr.cells[6], t.jobUrl
+    setHTML(tr.cells[4], esc(t.since));
+    setHTML(tr.cells[5], esc(t.repository));
+    setHTML(tr.cells[6], esc(t.workflow));
+    setHTML(tr.cells[7], t.jobUrl
       ? '<a href="' + esc(t.jobUrl) + '" target="_blank" rel="noopener">' + esc(t.job) + '</a>'
       : esc(t.job));
-    setHTML(tr.cells[7], esc(t.since));
   }
 
   function reconcileTrays(trays) {
@@ -682,7 +751,7 @@
       ? '<a href="' + esc(m.jobUrl) + '" target="_blank" rel="noopener">' + job + '</a>'
       : job;
     let s = jobLink + ' on ' + esc(m.runnerName || '');
-    if (m.result) s += ' (result: ' + esc(m.result) + ')';
+    if (m.result) s += ' (result: <span class="res-' + esc(m.result) + '">' + esc(m.result) + '</span>)';
     return s;
   }
 
@@ -697,7 +766,7 @@
       tr.dataset.kind = m.kind;
       tr.dataset.type = m.type;
       tr.innerHTML =
-        '<td class="dim">' + esc(m.time) + '</td>' +
+        '<td class="dim" title="' + esc(m.timeFull || '') + '">' + esc(m.time) + '</td>' +
         '<td>' + esc(m.type) + '</td>' +
         '<td><span class="badge">' + esc(m.kind) + '</span></td>' +
         '<td class="detail">' + renderDetail(m) + '</td>';
@@ -707,28 +776,46 @@
   }
 
   // --- Fetch loop ---
+  const timestampEl = document.getElementById('timestamp');
+  let lastGoodNow = (timestampEl.textContent.split(' — ')[0] || '').trim();
+
+  function markDisconnected() {
+    timestampEl.classList.add('err');
+    setText(timestampEl,
+      'connection lost, retrying' + (lastGoodNow ? ' — last update ' + lastGoodNow : ''));
+  }
+
   async function refresh() {
     try {
       const resp = await fetch('/status/data');
-      if (!resp.ok) return;
+      if (!resp.ok) { markDisconnected(); return; }
       const data = await resp.json();
 
-      setText(document.getElementById('timestamp'), data.now + ' — refreshes every 5s');
+      lastGoodNow = data.now;
+      timestampEl.classList.remove('err');
+      setText(timestampEl, data.now + ' — refreshes every 5s');
 
       lastTrays = data.trays || [];
+      updateDesired(data.messages || []);
       updateFilterOptions(lastTrays);
       updateCapacity();
       reconcileTrays(lastTrays);
       renderEventRows(data.messages || []);
       applyFilter();
     } catch (e) {
-      // silently retry next cycle
+      markDisconnected();
     }
   }
 
   // Initial state from the server-rendered rows.
   lastTrays = Array.from(document.querySelectorAll('#tray-table tbody tr'))
     .map(r => ({ type: r.dataset.type, status: r.dataset.status }));
+  // Seed desired counts from the server-rendered scale events (newest first).
+  Array.from(document.querySelectorAll('#event-table tbody tr[data-kind="scale"]')).forEach(tr => {
+    const type = tr.cells[1].textContent.trim();
+    const m = /desired=(\d+)/.exec(tr.cells[3].textContent);
+    if (type && m && lastDesired[type] === undefined) lastDesired[type] = parseInt(m[1]);
+  });
   updateFilterOptions(lastTrays);
   updateCapacity();
   applyFilter();
