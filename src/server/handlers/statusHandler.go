@@ -181,21 +181,23 @@ func (h *Handlers) StatusData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// buildJobURL returns the GitHub Actions job URL, or "" if any part is missing.
-// Format: https://github.com/{owner}/{repo}/actions/runs/{workflowRunId}/job/{jobRunId}
-func buildJobURL(repo string, workflowRunID, jobRunID int64) string {
-	if repo == "" || workflowRunID == 0 || jobRunID == 0 {
+// buildJobURL returns the GitHub Actions workflow run URL, or "" if any part
+// is missing. The scale set messages carry only a GUID job id (not the numeric
+// one GitHub's /job/{id} URLs need), so link to the run page instead.
+// Format: https://github.com/{owner}/{repo}/actions/runs/{workflowRunId}
+func buildJobURL(repo string, workflowRunID int64) string {
+	if repo == "" || workflowRunID == 0 {
 		return ""
 	}
-	return fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repo, workflowRunID, jobRunID)
+	return fmt.Sprintf("https://github.com/%s/actions/runs/%d", repo, workflowRunID)
 }
 
 func jobURL(t *trays.Tray) string {
-	return buildJobURL(t.Repository, t.WorkflowRunId, t.JobRunId)
+	return buildJobURL(t.Repository, t.WorkflowRunId)
 }
 
 func messageJobURL(m *scaleSetPoller.Message) string {
-	return buildJobURL(m.Repository, m.WorkflowRunID, m.JobID)
+	return buildJobURL(m.Repository, m.WorkflowRunID)
 }
 
 func formatAge(t time.Time) string {

@@ -139,7 +139,7 @@ func TestStatusTemplateRenders(t *testing.T) {
 	assert.Contains(t, out, `<span class="res-succeeded">succeeded</span>`)
 	assert.Contains(t, out, `title="`+now.Add(-time.Minute).Format("2006-01-02 15:04:05")+` UTC"`)
 	assert.Contains(t, out, `data-id="tray-1"`)
-	assert.Contains(t, out, "https://github.com/test-org/repo/actions/runs/42/job/7")
+	assert.Contains(t, out, "https://github.com/test-org/repo/actions/runs/42")
 
 	if path := os.Getenv("STATUS_RENDER_OUT"); path != "" {
 		require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
