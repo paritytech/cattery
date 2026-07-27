@@ -11,7 +11,6 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v84/github"
-	log "github.com/sirupsen/logrus"
 )
 
 const githubAPITimeout = 30 * time.Second
@@ -24,6 +23,16 @@ var (
 type GithubClient struct {
 	client *github.Client
 	Org    *config.GitHubOrganization
+}
+
+// NewGithubClient wraps an already-constructed go-github client. Tests use it
+// to point the client at a fake API server; production code should use
+// NewGithubClientWithOrgName.
+func NewGithubClient(client *github.Client, org *config.GitHubOrganization) *GithubClient {
+	return &GithubClient{
+		client: client,
+		Org:    org,
+	}
 }
 
 func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
@@ -48,29 +57,55 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
 	defer cancel()
 
-	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowId)
-	if err != nil {
-		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
-		return err
-	}
-	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
-
-	rerunCtx, rerunCancel := context.WithTimeout(context.Background(), githubAPITimeout)
-	defer rerunCancel()
-
-	_, err = gc.client.Actions.RerunFailedJobsByID(rerunCtx, gc.Org.Name, repoName, workflowId)
+	_, err := gc.client.Actions.RerunFailedJobsByID(ctx, gc.Org.Name, repoName, workflowId)
 	return err
 }
 
-func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int64) (string, string, error) {
+type WorkflowRunInfo struct {
+	Status     string
+	Conclusion string
+	HeadBranch string
+	CreatedAt  time.Time
+}
+
+func (gc *GithubClient) GetWorkflowRunInfo(repoName string, workflowRunId int64) (WorkflowRunInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
 	defer cancel()
 
 	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowRunId)
 	if err != nil {
-		return "", "", err
+		return WorkflowRunInfo{}, err
 	}
-	return wr.GetStatus(), wr.GetConclusion(), nil
+	return WorkflowRunInfo{
+		Status:     wr.GetStatus(),
+		Conclusion: wr.GetConclusion(),
+		HeadBranch: wr.GetHeadBranch(),
+		CreatedAt:  wr.GetCreatedAt().Time,
+	}, nil
+}
+
+// HasMergedPullRequestForBranch reports whether a pull request with the given
+// head branch was merged after the given time. Detection is by head branch
+// rather than commit SHA because squash/rebase merges never put the run's head
+// SHA on the default branch.
+func (gc *GithubClient) HasMergedPullRequestForBranch(repoName string, headBranch string, mergedAfter time.Time) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	prs, _, err := gc.client.PullRequests.List(ctx, gc.Org.Name, repoName, &github.PullRequestListOptions{
+		State: "all",
+		Head:  gc.Org.Name + ":" + headBranch,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	for _, pr := range prs {
+		if pr.MergedAt != nil && pr.MergedAt.Time.After(mergedAfter) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // createClient creates a new GitHub client
