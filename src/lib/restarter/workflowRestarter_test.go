@@ -232,6 +232,20 @@ func TestHandleRestartRequest_MergedCheckErrorKeepsRequest(t *testing.T) {
 	assert.Empty(t, repo.deleted, "request must stay pending for retry on merged-check error")
 }
 
+func TestHandleRestartRequest_MergedCheckForbiddenFailsOpen(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:   runJSON("completed", "failure", "feature"),
+		prsStatus: http.StatusForbidden, // App lacks 'Pull requests: read'
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Equal(t, 1, api.restarts, "missing permission must not block restarts")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
 func TestHandleRestartRequest_NoHeadBranchStillRestarts(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{

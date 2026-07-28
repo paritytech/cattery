@@ -43,7 +43,7 @@ Stale trays (no heartbeat for 2+ minutes) are automatically cleaned up.
 
 - Go 1.25+
 - MongoDB
-- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with Actions read/write permissions, installed on your organization
+- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with Actions read/write and Pull requests read permissions, installed on your organization
 - Docker and/or GCP credentials depending on your provider choice
 
 ## Quick start

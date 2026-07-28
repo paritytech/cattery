@@ -108,6 +108,13 @@ func (gc *GithubClient) HasMergedPullRequestForBranch(repoName string, headBranc
 	return false, nil
 }
 
+// IsForbidden reports whether err is a GitHub API 403 response, which for an
+// installation token means the App lacks the required permission.
+func IsForbidden(err error) bool {
+	var ghErr *github.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden
+}
+
 // createClient creates a new GitHub client
 func createClient(org *config.GitHubOrganization) (*github.Client, error) {
 	githubClientsMu.Lock()

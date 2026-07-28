@@ -129,6 +129,13 @@ func (wr *WorkflowRestarter) branchMerged(logger *log.Entry, ghClient *githubCli
 
 	merged, err := ghClient.HasMergedPullRequestForBranch(req.RepoName, run.HeadBranch, run.CreatedAt)
 	if err != nil {
+		// Fail open on missing permission: a restart nobody needs is better
+		// than restarts silently stopping until the App grants
+		// 'Pull requests: read'.
+		if githubClient.IsForbidden(err) {
+			logger.Warnf("Cannot check merged pull requests for workflow run %d: GitHub App lacks 'Pull requests: read' permission, proceeding with restart", req.WorkflowRunId)
+			return false, nil
+		}
 		logger.Errorf("Failed to check merged pull requests for workflow run %d (branch '%s'): %v", req.WorkflowRunId, run.HeadBranch, err)
 		return false, err
 	}
