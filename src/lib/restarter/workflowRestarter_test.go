@@ -97,10 +97,19 @@ func runJSON(status, conclusion, headBranch string) string {
 		status, conclusion, headBranch, time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 }
 
-const mergedPRJSON = `[{"number":1,"state":"closed"}]`
+func prListJSON(prs ...string) string {
+	return "[" + strings.Join(prs, ",") + "]"
+}
 
-func mergedNowPRJSON() string {
-	return fmt.Sprintf(`[{"number":1,"state":"closed","merged_at":%q}]`, time.Now().UTC().Format(time.RFC3339))
+func openPR() string { return `{"number":1,"state":"open"}` }
+
+func closedPR(closedAt time.Time) string {
+	return fmt.Sprintf(`{"number":2,"state":"closed","closed_at":%q}`, closedAt.UTC().Format(time.RFC3339))
+}
+
+func mergedPR(mergedAt time.Time) string {
+	ts := mergedAt.UTC().Format(time.RFC3339)
+	return fmt.Sprintf(`{"number":3,"state":"closed","closed_at":%q,"merged_at":%q}`, ts, ts)
 }
 
 func newTestRestarter(t *testing.T, repo repositories.RestarterRepository, api *fakeGithubAPI) *WorkflowRestarter {
@@ -194,7 +203,8 @@ func TestHandleRestartRequest_FailureRestarts(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
 		runJSON: runJSON("completed", "failure", "feature"),
-		prsJSON: mergedPRJSON, // closed but not merged
+		// closed long before the run existed — a reused branch name
+		prsJSON: prListJSON(closedPR(time.Now().Add(-2 * time.Hour))),
 	}
 	wr := newTestRestarter(t, repo, api)
 
@@ -208,7 +218,7 @@ func TestHandleRestartRequest_MergedPRSkipsRestart(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
 		runJSON: runJSON("completed", "failure", "feature"),
-		prsJSON: mergedNowPRJSON(),
+		prsJSON: prListJSON(mergedPR(time.Now())),
 	}
 	wr := newTestRestarter(t, repo, api)
 
@@ -216,6 +226,35 @@ func TestHandleRestartRequest_MergedPRSkipsRestart(t *testing.T) {
 
 	assert.Zero(t, api.restarts)
 	assert.Contains(t, repo.deleted, int64(42), "request must be cleaned up when the PR is already merged")
+}
+
+func TestHandleRestartRequest_ClosedUnmergedPRSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "failure", "feature"),
+		prsJSON: prListJSON(closedPR(time.Now())),
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts)
+	assert.Contains(t, repo.deleted, int64(42), "request must be cleaned up when the PR was closed without merging")
+}
+
+func TestHandleRestartRequest_OpenPRWinsOverClosed(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "failure", "feature"),
+		// a recently closed PR alongside an open one — e.g. closed then reopened
+		prsJSON: prListJSON(closedPR(time.Now()), openPR()),
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Equal(t, 1, api.restarts, "an open PR for the branch must keep restarts working")
+	assert.Contains(t, repo.deleted, int64(42))
 }
 
 func TestHandleRestartRequest_MergedCheckErrorKeepsRequest(t *testing.T) {
@@ -250,7 +289,7 @@ func TestHandleRestartRequest_NoHeadBranchStillRestarts(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
 		runJSON: runJSON("completed", "failure", ""),
-		prsJSON: mergedNowPRJSON(), // must not be consulted without a head branch
+		prsJSON: prListJSON(mergedPR(time.Now())), // must not be consulted without a head branch
 	}
 	wr := newTestRestarter(t, repo, api)
 

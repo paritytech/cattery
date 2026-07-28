@@ -91,14 +91,14 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 
 	switch run.Conclusion {
 	case "failure":
-		merged, err := wr.branchMerged(logger, ghClient, req, run)
+		prClosed, err := wr.branchPRClosed(logger, ghClient, req, run)
 		if err != nil {
 			// Leave the request pending: it is retried on the next poll and
 			// eventually expires via TTL.
 			return
 		}
-		if merged {
-			logger.Infof("Skipping restart for workflow run %d (%s/%s): pull request for branch '%s' already merged",
+		if prClosed {
+			logger.Infof("Skipping restart for workflow run %d (%s/%s): pull request for branch '%s' already merged or closed",
 				req.WorkflowRunId, req.OrgName, req.RepoName, run.HeadBranch)
 			break
 		}
@@ -119,15 +119,16 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 	}
 }
 
-// branchMerged reports whether the run's head branch belongs to a pull request
-// merged after the run was created. The mergedAfter guard keeps an old merged
-// PR from a reused branch name from suppressing a legitimate restart.
-func (wr *WorkflowRestarter) branchMerged(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
+// branchPRClosed reports whether the run's head branch belongs to a pull
+// request closed (merged or not) after the run was created. The closedAfter
+// guard keeps an old closed PR from a reused branch name from suppressing a
+// legitimate restart.
+func (wr *WorkflowRestarter) branchPRClosed(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
 	if run.HeadBranch == "" {
 		return false, nil
 	}
 
-	merged, err := ghClient.HasMergedPullRequestForBranch(req.RepoName, run.HeadBranch, run.CreatedAt)
+	closed, err := ghClient.HasClosedPullRequestForBranch(req.RepoName, run.HeadBranch, run.CreatedAt)
 	if err != nil {
 		// Fail open on missing permission: a restart nobody needs is better
 		// than restarts silently stopping until the App grants
@@ -136,8 +137,8 @@ func (wr *WorkflowRestarter) branchMerged(logger *log.Entry, ghClient *githubCli
 			logger.Warnf("Cannot check merged pull requests for workflow run %d: GitHub App lacks 'Pull requests: read' permission, proceeding with restart", req.WorkflowRunId)
 			return false, nil
 		}
-		logger.Errorf("Failed to check merged pull requests for workflow run %d (branch '%s'): %v", req.WorkflowRunId, run.HeadBranch, err)
+		logger.Errorf("Failed to check pull requests for workflow run %d (branch '%s'): %v", req.WorkflowRunId, run.HeadBranch, err)
 		return false, err
 	}
-	return merged, nil
+	return closed, nil
 }

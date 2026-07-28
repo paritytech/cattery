@@ -84,11 +84,12 @@ func (gc *GithubClient) GetWorkflowRunInfo(repoName string, workflowRunId int64)
 	}, nil
 }
 
-// HasMergedPullRequestForBranch reports whether a pull request with the given
-// head branch was merged after the given time. Detection is by head branch
+// HasClosedPullRequestForBranch reports whether a pull request with the given
+// head branch was closed (merged or not) after the given time, while no pull
+// request for that branch is currently open. Detection is by head branch
 // rather than commit SHA because squash/rebase merges never put the run's head
 // SHA on the default branch.
-func (gc *GithubClient) HasMergedPullRequestForBranch(repoName string, headBranch string, mergedAfter time.Time) (bool, error) {
+func (gc *GithubClient) HasClosedPullRequestForBranch(repoName string, headBranch string, closedAfter time.Time) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
 	defer cancel()
 
@@ -101,7 +102,10 @@ func (gc *GithubClient) HasMergedPullRequestForBranch(repoName string, headBranc
 	}
 
 	for _, pr := range prs {
-		if pr.MergedAt != nil && pr.MergedAt.Time.After(mergedAfter) {
+		if pr.GetState() == "open" {
+			return false, nil
+		}
+		if pr.ClosedAt != nil && pr.ClosedAt.Time.After(closedAfter) {
 			return true, nil
 		}
 	}
