@@ -145,7 +145,7 @@ jobs:
      - name: Set up Go
        uses: actions/setup-go@v5
        with:
-         go-version: '1.24'
+         go-version-file: src/go.mod
 
      - name: Install dependencies
        run: go mod download -C src
