@@ -11,11 +11,15 @@ import (
 
 type WorkflowRestarter struct {
 	repository repositories.RestarterRepository
+	// newGithubClient is overridable so tests can point the client at a fake
+	// GitHub API server.
+	newGithubClient func(orgName string) (*githubClient.GithubClient, error)
 }
 
 func NewWorkflowRestarter(repository repositories.RestarterRepository) *WorkflowRestarter {
 	return &WorkflowRestarter{
-		repository: repository,
+		repository:      repository,
+		newGithubClient: githubClient.NewGithubClientWithOrgName,
 	}
 }
 
@@ -69,24 +73,44 @@ func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *lo
 }
 
 func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *log.Entry, req repositories.RestartRequest) {
-	ghClient, err := githubClient.NewGithubClientWithOrgName(req.OrgName)
+	ghClient, err := wr.newGithubClient(req.OrgName)
 	if err != nil {
 		logger.Errorf("Failed to get GitHub client for org %s: %v", req.OrgName, err)
 		return
 	}
 
-	status, conclusion, err := ghClient.GetWorkflowRunStatus(req.RepoName, req.WorkflowRunId)
+	run, err := ghClient.GetWorkflowRunInfo(req.RepoName, req.WorkflowRunId)
 	if err != nil {
 		logger.Errorf("Failed to get workflow run status for %d: %v", req.WorkflowRunId, err)
 		return
 	}
 
-	if status != "completed" {
+	if run.Status != "completed" {
 		return
 	}
 
-	switch conclusion {
+	switch run.Conclusion {
 	case "failure":
+		// A failed merge queue run already evicted the PR from the queue;
+		// re-running it cannot re-enqueue the PR, so a restart is wasted.
+		if run.Event == "merge_group" {
+			logger.Infof("Skipping restart for workflow run %d (%s/%s): merge queue runs cannot be retried",
+				req.WorkflowRunId, req.OrgName, req.RepoName)
+			break
+		}
+
+		prClosed, err := wr.branchPRClosed(logger, ghClient, req, run)
+		if err != nil {
+			// Leave the request pending: it is retried on the next poll and
+			// eventually expires via TTL.
+			return
+		}
+		if prClosed {
+			logger.Infof("Skipping restart for workflow run %d (%s/%s): pull request for branch '%s' already merged or closed",
+				req.WorkflowRunId, req.OrgName, req.RepoName, run.HeadBranch)
+			break
+		}
+
 		logger.Infof("Restarting failed jobs for workflow run %d (%s/%s)", req.WorkflowRunId, req.OrgName, req.RepoName)
 		err = ghClient.RestartFailedJobs(req.RepoName, req.WorkflowRunId)
 		if err != nil {
@@ -95,10 +119,40 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 		}
 		logger.Infof("Successfully restarted failed jobs for workflow run %d", req.WorkflowRunId)
 	default:
-		logger.Debugf("Workflow run %d completed with conclusion '%s', cleaning up restart request", req.WorkflowRunId, conclusion)
+		logger.Debugf("Workflow run %d completed with conclusion '%s', cleaning up restart request", req.WorkflowRunId, run.Conclusion)
 	}
 
 	if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
 		logger.Errorf("Failed to delete restart request for workflow %d: %v", req.WorkflowRunId, err)
 	}
+}
+
+// branchPRClosed reports whether the run's head branch belongs to a pull
+// request closed (merged or not) after the run was created. The closedAfter
+// guard keeps an old closed PR from a reused branch name from suppressing a
+// legitimate restart.
+func (wr *WorkflowRestarter) branchPRClosed(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
+	// Only runs triggered by a pull request are tied to its lifecycle; push,
+	// schedule, and dispatch runs restart regardless of PR state.
+	if run.Event != "pull_request" && run.Event != "pull_request_target" {
+		return false, nil
+	}
+
+	if run.HeadBranch == "" {
+		return false, nil
+	}
+
+	closed, err := ghClient.HasClosedPullRequestForBranch(req.RepoName, run.HeadBranch, run.CreatedAt)
+	if err != nil {
+		// Fail open on missing permission: a restart nobody needs is better
+		// than restarts silently stopping until the App grants
+		// 'Pull requests: read'.
+		if githubClient.IsForbidden(err) {
+			logger.Warnf("Cannot check merged pull requests for workflow run %d: GitHub App lacks 'Pull requests: read' permission, proceeding with restart", req.WorkflowRunId)
+			return false, nil
+		}
+		logger.Errorf("Failed to check pull requests for workflow run %d (branch '%s'): %v", req.WorkflowRunId, run.HeadBranch, err)
+		return false, err
+	}
+	return closed, nil
 }

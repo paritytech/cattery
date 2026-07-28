@@ -11,7 +11,6 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/google/go-github/v84/github"
-	log "github.com/sirupsen/logrus"
 )
 
 const githubAPITimeout = 30 * time.Second
@@ -24,6 +23,16 @@ var (
 type GithubClient struct {
 	client *github.Client
 	Org    *config.GitHubOrganization
+}
+
+// NewGithubClient wraps an already-constructed go-github client. Tests use it
+// to point the client at a fake API server; production code should use
+// NewGithubClientWithOrgName.
+func NewGithubClient(client *github.Client, org *config.GitHubOrganization) *GithubClient {
+	return &GithubClient{
+		client: client,
+		Org:    org,
+	}
 }
 
 func NewGithubClientWithOrgName(orgName string) (*GithubClient, error) {
@@ -48,29 +57,72 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
 	defer cancel()
 
-	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowId)
-	if err != nil {
-		log.Errorf("Failed to get workflow run by id %d: %v", workflowId, err)
-		return err
-	}
-	log.Debugf("Workflow run status: %s, conclusion: %s", wr.GetStatus(), wr.GetConclusion())
-
-	rerunCtx, rerunCancel := context.WithTimeout(context.Background(), githubAPITimeout)
-	defer rerunCancel()
-
-	_, err = gc.client.Actions.RerunFailedJobsByID(rerunCtx, gc.Org.Name, repoName, workflowId)
+	_, err := gc.client.Actions.RerunFailedJobsByID(ctx, gc.Org.Name, repoName, workflowId)
 	return err
 }
 
-func (gc *GithubClient) GetWorkflowRunStatus(repoName string, workflowRunId int64) (string, string, error) {
+type WorkflowRunInfo struct {
+	Status     string
+	Conclusion string
+	Event      string
+	HeadBranch string
+	CreatedAt  time.Time
+}
+
+func (gc *GithubClient) GetWorkflowRunInfo(repoName string, workflowRunId int64) (WorkflowRunInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
 	defer cancel()
 
 	wr, _, err := gc.client.Actions.GetWorkflowRunByID(ctx, gc.Org.Name, repoName, workflowRunId)
 	if err != nil {
-		return "", "", err
+		return WorkflowRunInfo{}, err
 	}
-	return wr.GetStatus(), wr.GetConclusion(), nil
+	return WorkflowRunInfo{
+		Status:     wr.GetStatus(),
+		Conclusion: wr.GetConclusion(),
+		Event:      wr.GetEvent(),
+		HeadBranch: wr.GetHeadBranch(),
+		CreatedAt:  wr.GetCreatedAt().Time,
+	}, nil
+}
+
+// HasClosedPullRequestForBranch reports whether a pull request with the given
+// head branch was closed (merged or not) after the given time, while no pull
+// request for that branch is currently open. Detection is by head branch
+// rather than commit SHA because squash/rebase merges never put the run's head
+// SHA on the default branch.
+func (gc *GithubClient) HasClosedPullRequestForBranch(repoName string, headBranch string, closedAfter time.Time) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	prs, _, err := gc.client.PullRequests.List(ctx, gc.Org.Name, repoName, &github.PullRequestListOptions{
+		State: "all",
+		Head:  gc.Org.Name + ":" + headBranch,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	// An open PR anywhere in the list vetoes the check; the list is ordered by
+	// creation date, so open and closed PRs can appear in any order.
+	for _, pr := range prs {
+		if pr.GetState() == "open" {
+			return false, nil
+		}
+	}
+	for _, pr := range prs {
+		if pr.ClosedAt != nil && pr.ClosedAt.Time.After(closedAfter) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// IsForbidden reports whether err is a GitHub API 403 response, which for an
+// installation token means the App lacks the required permission.
+func IsForbidden(err error) bool {
+	var ghErr *github.ErrorResponse
+	return errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden
 }
 
 // createClient creates a new GitHub client

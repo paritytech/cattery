@@ -15,7 +15,8 @@ helm install cattery ./charts/cattery -f my-values.yaml
 - Helm 3.8+
 - A reachable MongoDB instance (this chart does **not** bundle one)
 - A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with
-  Actions read/write permissions, installed on your organization
+  Actions read/write and Pull requests read permissions, installed on your
+  organization
 - Credentials for at least one provider (Docker socket access, or a GCP
   service account for the `google` provider)
 
