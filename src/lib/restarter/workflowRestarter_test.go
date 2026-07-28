@@ -92,9 +92,9 @@ func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func runJSON(status, conclusion, headBranch string) string {
-	return fmt.Sprintf(`{"id":42,"status":%q,"conclusion":%q,"head_branch":%q,"created_at":%q}`,
-		status, conclusion, headBranch, time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+func runJSON(status, conclusion, headBranch, event string) string {
+	return fmt.Sprintf(`{"id":42,"status":%q,"conclusion":%q,"head_branch":%q,"event":%q,"created_at":%q}`,
+		status, conclusion, headBranch, event, time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
 }
 
 func prListJSON(prs ...string) string {
@@ -202,7 +202,7 @@ func TestPollPendingRestarts_ExpiredRequest(t *testing.T) {
 func TestHandleRestartRequest_FailureRestarts(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "failure", "feature"),
+		runJSON: runJSON("completed", "failure", "feature", "pull_request"),
 		// closed long before the run existed — a reused branch name
 		prsJSON: prListJSON(closedPR(time.Now().Add(-2 * time.Hour))),
 	}
@@ -217,7 +217,7 @@ func TestHandleRestartRequest_FailureRestarts(t *testing.T) {
 func TestHandleRestartRequest_MergedPRSkipsRestart(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "failure", "feature"),
+		runJSON: runJSON("completed", "failure", "feature", "pull_request"),
 		prsJSON: prListJSON(mergedPR(time.Now())),
 	}
 	wr := newTestRestarter(t, repo, api)
@@ -231,7 +231,7 @@ func TestHandleRestartRequest_MergedPRSkipsRestart(t *testing.T) {
 func TestHandleRestartRequest_ClosedUnmergedPRSkipsRestart(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "failure", "feature"),
+		runJSON: runJSON("completed", "failure", "feature", "pull_request"),
 		prsJSON: prListJSON(closedPR(time.Now())),
 	}
 	wr := newTestRestarter(t, repo, api)
@@ -245,7 +245,7 @@ func TestHandleRestartRequest_ClosedUnmergedPRSkipsRestart(t *testing.T) {
 func TestHandleRestartRequest_OpenPRWinsOverClosed(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "failure", "feature"),
+		runJSON: runJSON("completed", "failure", "feature", "pull_request"),
 		// a recently closed PR alongside an open one — e.g. closed then reopened
 		prsJSON: prListJSON(closedPR(time.Now()), openPR()),
 	}
@@ -260,7 +260,7 @@ func TestHandleRestartRequest_OpenPRWinsOverClosed(t *testing.T) {
 func TestHandleRestartRequest_MergedCheckErrorKeepsRequest(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON:   runJSON("completed", "failure", "feature"),
+		runJSON:   runJSON("completed", "failure", "feature", "pull_request"),
 		prsStatus: http.StatusInternalServerError,
 	}
 	wr := newTestRestarter(t, repo, api)
@@ -274,7 +274,7 @@ func TestHandleRestartRequest_MergedCheckErrorKeepsRequest(t *testing.T) {
 func TestHandleRestartRequest_MergedCheckForbiddenFailsOpen(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON:   runJSON("completed", "failure", "feature"),
+		runJSON:   runJSON("completed", "failure", "feature", "pull_request"),
 		prsStatus: http.StatusForbidden, // App lacks 'Pull requests: read'
 	}
 	wr := newTestRestarter(t, repo, api)
@@ -285,10 +285,39 @@ func TestHandleRestartRequest_MergedCheckForbiddenFailsOpen(t *testing.T) {
 	assert.Contains(t, repo.deleted, int64(42))
 }
 
+func TestHandleRestartRequest_MergeGroupSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "failure", "gh-readonly-queue/main/pr-7", "merge_group"),
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "merge queue runs must not be restarted")
+	assert.Zero(t, api.prCalls)
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_PushEventSkipsPRCheck(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "failure", "feature", "push"),
+		prsJSON: prListJSON(mergedPR(time.Now())), // must not be consulted for push runs
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.prCalls, "push-triggered runs must not consult the PR endpoint")
+	assert.Equal(t, 1, api.restarts)
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
 func TestHandleRestartRequest_NoHeadBranchStillRestarts(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "failure", ""),
+		runJSON: runJSON("completed", "failure", "", "pull_request"),
 		prsJSON: prListJSON(mergedPR(time.Now())), // must not be consulted without a head branch
 	}
 	wr := newTestRestarter(t, repo, api)
@@ -303,7 +332,7 @@ func TestHandleRestartRequest_NoHeadBranchStillRestarts(t *testing.T) {
 func TestHandleRestartRequest_NotCompleted(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("in_progress", "", "feature"),
+		runJSON: runJSON("in_progress", "", "feature", "pull_request"),
 	}
 	wr := newTestRestarter(t, repo, api)
 
@@ -316,7 +345,7 @@ func TestHandleRestartRequest_NotCompleted(t *testing.T) {
 func TestHandleRestartRequest_SuccessCleansUp(t *testing.T) {
 	repo := &mockRestarterRepository{}
 	api := &fakeGithubAPI{
-		runJSON: runJSON("completed", "success", "feature"),
+		runJSON: runJSON("completed", "success", "feature", "pull_request"),
 	}
 	wr := newTestRestarter(t, repo, api)
 

@@ -91,6 +91,14 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 
 	switch run.Conclusion {
 	case "failure":
+		// A failed merge queue run already evicted the PR from the queue;
+		// re-running it cannot re-enqueue the PR, so a restart is wasted.
+		if run.Event == "merge_group" {
+			logger.Infof("Skipping restart for workflow run %d (%s/%s): merge queue runs cannot be retried",
+				req.WorkflowRunId, req.OrgName, req.RepoName)
+			break
+		}
+
 		prClosed, err := wr.branchPRClosed(logger, ghClient, req, run)
 		if err != nil {
 			// Leave the request pending: it is retried on the next poll and
@@ -124,6 +132,12 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 // guard keeps an old closed PR from a reused branch name from suppressing a
 // legitimate restart.
 func (wr *WorkflowRestarter) branchPRClosed(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
+	// Only runs triggered by a pull request are tied to its lifecycle; push,
+	// schedule, and dispatch runs restart regardless of PR state.
+	if run.Event != "pull_request" && run.Event != "pull_request_target" {
+		return false, nil
+	}
+
 	if run.HeadBranch == "" {
 		return false, nil
 	}

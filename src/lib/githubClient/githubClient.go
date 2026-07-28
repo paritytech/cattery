@@ -64,6 +64,7 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 type WorkflowRunInfo struct {
 	Status     string
 	Conclusion string
+	Event      string
 	HeadBranch string
 	CreatedAt  time.Time
 }
@@ -79,6 +80,7 @@ func (gc *GithubClient) GetWorkflowRunInfo(repoName string, workflowRunId int64)
 	return WorkflowRunInfo{
 		Status:     wr.GetStatus(),
 		Conclusion: wr.GetConclusion(),
+		Event:      wr.GetEvent(),
 		HeadBranch: wr.GetHeadBranch(),
 		CreatedAt:  wr.GetCreatedAt().Time,
 	}, nil
@@ -101,10 +103,14 @@ func (gc *GithubClient) HasClosedPullRequestForBranch(repoName string, headBranc
 		return false, err
 	}
 
+	// An open PR anywhere in the list vetoes the check; the list is ordered by
+	// creation date, so open and closed PRs can appear in any order.
 	for _, pr := range prs {
 		if pr.GetState() == "open" {
 			return false, nil
 		}
+	}
+	for _, pr := range prs {
 		if pr.ClosedAt != nil && pr.ClosedAt.Time.After(closedAfter) {
 			return true, nil
 		}
