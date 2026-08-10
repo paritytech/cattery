@@ -169,9 +169,11 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)
 	workflowName := parseWorkflowName(jobInfo.JobWorkflowRef)
-	repo := fullRepoName(jobInfo.OwnerName, jobInfo.RepositoryName)
 
-	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, repo, jobInfo.JobDisplayName, workflowName)
+	// The tray stores the bare repository name: the restarter passes it to
+	// GitHub API calls that take the owner separately. Storing the full name
+	// here broke the restarter (duplicated owner in the API URL).
+	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName, jobInfo.JobDisplayName, workflowName)
 	if err != nil {
 		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
 		return err
@@ -186,7 +188,7 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 		Time:           time.Now(),
 		Kind:           MessageKindJobStarted,
 		TrayType:       cs.poller.trayType.Name,
-		Repository:     repo,
+		Repository:     fullRepoName(jobInfo.OwnerName, jobInfo.RepositoryName),
 		WorkflowRunID:  jobInfo.WorkflowRunID,
 		JobID:          jobID,
 		JobDisplayName: jobInfo.JobDisplayName,
