@@ -32,7 +32,9 @@ func (wr *WorkflowRestarter) RequestRestart(ctx context.Context, workflowRunId i
 // requests and triggers restarts when workflows have completed with failure.
 func (wr *WorkflowRestarter) StartPoller(ctx context.Context) {
 	const pollInterval = 30 * time.Second
-	const requestTTL = 1 * time.Hour
+	// Must exceed the longest expected workflow run: a job preempted early in
+	// a run can only be re-run after the whole run completes.
+	const requestTTL = 6 * time.Hour
 
 	logger := log.WithField("component", "restarterPoller")
 
