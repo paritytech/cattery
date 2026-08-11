@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -193,7 +194,13 @@ func buildJobURL(repo string, workflowRunID int64) string {
 }
 
 func jobURL(t *trays.Tray) string {
-	return buildJobURL(t.Repository, t.WorkflowRunId)
+	// The tray stores the bare repository name; trays written by Cattery
+	// 0.3.0-0.3.2 may still hold the full "owner/repo" one.
+	repo := t.Repository
+	if repo != "" && !strings.Contains(repo, "/") {
+		repo = t.GitHubOrgName + "/" + repo
+	}
+	return buildJobURL(repo, t.WorkflowRunId)
 }
 
 func messageJobURL(m *scaleSetPoller.Message) string {
