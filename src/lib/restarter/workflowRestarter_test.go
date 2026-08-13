@@ -61,15 +61,18 @@ var _ repositories.RestarterRepository = (*mockRestarterRepository)(nil)
 
 // --- Fake GitHub API ---
 
-// fakeGithubAPI serves the three endpoints the restarter hits, backed by
+// fakeGithubAPI serves the four endpoints the restarter hits, backed by
 // canned JSON responses.
 type fakeGithubAPI struct {
-	runJSON   string
-	prsJSON   string
-	prsStatus int
+	runJSON       string
+	prsJSON       string
+	prsStatus     int
+	runListJSON   string
+	runListStatus int
 
-	prCalls  int
-	restarts int
+	prCalls      int
+	runListCalls int
+	restarts     int
 }
 
 func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +81,13 @@ func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/rerun-failed-jobs"):
 		f.restarts++
 		w.WriteHeader(http.StatusCreated)
+	case strings.Contains(r.URL.Path, "/actions/workflows/"):
+		f.runListCalls++
+		if f.runListStatus != 0 {
+			w.WriteHeader(f.runListStatus)
+			return
+		}
+		_, _ = w.Write([]byte(f.runListJSON))
 	case strings.Contains(r.URL.Path, "/actions/runs/"):
 		_, _ = w.Write([]byte(f.runJSON))
 	case strings.HasSuffix(r.URL.Path, "/pulls"):
@@ -93,8 +103,16 @@ func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func runJSON(status, conclusion, headBranch, event string) string {
-	return fmt.Sprintf(`{"id":42,"status":%q,"conclusion":%q,"head_branch":%q,"event":%q,"created_at":%q}`,
+	return fmt.Sprintf(`{"id":42,"workflow_id":7,"status":%q,"conclusion":%q,"head_branch":%q,"event":%q,"created_at":%q}`,
 		status, conclusion, headBranch, event, time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+}
+
+func runListJSON(runIDs ...int64) string {
+	var runs []string
+	for _, id := range runIDs {
+		runs = append(runs, fmt.Sprintf(`{"id":%d}`, id))
+	}
+	return fmt.Sprintf(`{"total_count":%d,"workflow_runs":[%s]}`, len(runIDs), strings.Join(runs, ","))
 }
 
 func prListJSON(prs ...string) string {
@@ -325,6 +343,93 @@ func TestHandleRestartRequest_NoHeadBranchStillRestarts(t *testing.T) {
 	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
 
 	assert.Zero(t, api.prCalls)
+	assert.Equal(t, 1, api.restarts)
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledRestarts(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "main", "push"),
+		runListJSON: runListJSON(42), // the run itself is the newest — no supersession
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Equal(t, 1, api.runListCalls, "cancelled runs must be checked for supersession")
+	assert.Equal(t, 1, api.restarts, "a cancelled run without a newer sibling is a preemption victim and must restart")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledSupersededSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "feature", "pull_request"),
+		prsJSON:     prListJSON(openPR()),
+		runListJSON: runListJSON(43), // a newer run cancelled this one via concurrency
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "a run superseded by a newer one must not be restarted")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledSupersededCheckErrorKeepsRequest(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:       runJSON("completed", "cancelled", "main", "push"),
+		runListStatus: http.StatusInternalServerError,
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts)
+	assert.Empty(t, repo.deleted, "request must stay pending for retry on supersession-check error")
+}
+
+func TestHandleRestartRequest_CancelledNoHeadBranchSkipsSupersededCheck(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "", "push"),
+		runListJSON: runListJSON(43), // must not be consulted without a head branch
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.runListCalls, "supersession check cannot be scoped without a branch")
+	assert.Equal(t, 1, api.restarts, "fail open and restart when supersession cannot be checked")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledMergeGroupSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "cancelled", "gh-readonly-queue/main/pr-7", "merge_group"),
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "cancelled merge queue runs must not be restarted")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_FailureSkipsSupersededCheck(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "failure", "main", "push"),
+		runListJSON: runListJSON(43), // must not be consulted for failed runs
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.runListCalls, "failed runs restart without a supersession check")
 	assert.Equal(t, 1, api.restarts)
 	assert.Contains(t, repo.deleted, int64(42))
 }

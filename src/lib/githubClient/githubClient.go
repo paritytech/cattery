@@ -66,6 +66,7 @@ type WorkflowRunInfo struct {
 	Conclusion string
 	Event      string
 	HeadBranch string
+	WorkflowID int64
 	CreatedAt  time.Time
 }
 
@@ -82,8 +83,36 @@ func (gc *GithubClient) GetWorkflowRunInfo(repoName string, workflowRunId int64)
 		Conclusion: wr.GetConclusion(),
 		Event:      wr.GetEvent(),
 		HeadBranch: wr.GetHeadBranch(),
+		WorkflowID: wr.GetWorkflowID(),
 		CreatedAt:  wr.GetCreatedAt().Time,
 	}, nil
+}
+
+// HasNewerWorkflowRun reports whether the workflow has a run for the same
+// branch and event created after the given run. Run IDs are monotonically
+// increasing, so the newest run having a higher ID means the given run has
+// been superseded.
+func (gc *GithubClient) HasNewerWorkflowRun(repoName string, workflowID int64, branch string, event string, runID int64) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	runs, _, err := gc.client.Actions.ListWorkflowRunsByID(ctx, gc.Org.Name, repoName, workflowID, &github.ListWorkflowRunsOptions{
+		Branch:              branch,
+		Event:               event,
+		ExcludePullRequests: true,
+		ListOptions:         github.ListOptions{PerPage: 1},
+	})
+	if err != nil {
+		return false, err
+	}
+
+	// Runs are listed newest-first.
+	for _, run := range runs.WorkflowRuns {
+		if run.GetID() > runID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // HasClosedPullRequestForBranch reports whether a pull request with the given
