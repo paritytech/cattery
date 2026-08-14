@@ -92,7 +92,11 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 	}
 
 	switch run.Conclusion {
-	case "failure":
+	// "cancelled" is included because GitHub marks some jobs on a preempted
+	// runner as cancelled rather than failed, and a single cancelled job makes
+	// the whole run conclude "cancelled" — such runs are preemption victims
+	// just like failed ones.
+	case "failure", "cancelled":
 		// A failed merge queue run already evicted the PR from the queue;
 		// re-running it cannot re-enqueue the PR, so a restart is wasted.
 		if run.Event == "merge_group" {
@@ -113,6 +117,20 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 			break
 		}
 
+		if run.Conclusion == "cancelled" {
+			superseded, err := wr.runSuperseded(logger, ghClient, req, run)
+			if err != nil {
+				// Leave the request pending: it is retried on the next poll
+				// and eventually expires via TTL.
+				return
+			}
+			if superseded {
+				logger.Infof("Skipping restart for cancelled workflow run %d (%s/%s): a newer run exists for branch '%s'",
+					req.WorkflowRunId, req.OrgName, req.RepoName, run.HeadBranch)
+				break
+			}
+		}
+
 		logger.Infof("Restarting failed jobs for workflow run %d (%s/%s)", req.WorkflowRunId, req.OrgName, req.RepoName)
 		err = ghClient.RestartFailedJobs(req.RepoName, req.WorkflowRunId)
 		if err != nil {
@@ -127,6 +145,28 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 	if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
 		logger.Errorf("Failed to delete restart request for workflow %d: %v", req.WorkflowRunId, err)
 	}
+}
+
+// runSuperseded reports whether a newer run of the same workflow exists for
+// the run's branch and event. A cancelled run with a newer sibling was almost
+// certainly cancelled by a concurrency group when the newer run started, not
+// by preemption, and restarting it would waste runners on an obsolete commit.
+// A manually cancelled run without a newer sibling is indistinguishable from a
+// preemption victim and gets restarted; that trade-off is accepted since
+// restart requests only exist for runs that lost a runner to preemption.
+func (wr *WorkflowRestarter) runSuperseded(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
+	// Without a branch or workflow id the newer-run lookup cannot be scoped;
+	// fail open and restart.
+	if run.HeadBranch == "" || run.WorkflowID == 0 {
+		return false, nil
+	}
+
+	superseded, err := ghClient.HasNewerWorkflowRun(req.RepoName, run.WorkflowID, run.HeadBranch, run.Event, req.WorkflowRunId)
+	if err != nil {
+		logger.Errorf("Failed to check for newer runs of workflow run %d (branch '%s'): %v", req.WorkflowRunId, run.HeadBranch, err)
+		return false, err
+	}
+	return superseded, nil
 }
 
 // branchPRClosed reports whether the run's head branch belongs to a pull
