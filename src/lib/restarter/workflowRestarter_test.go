@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,10 +70,18 @@ type fakeGithubAPI struct {
 	prsStatus     int
 	runListJSON   string
 	runListStatus int
+	jobsJSON      string
+	jobsStatus    int
+	// annotationsJSON is keyed by job id; jobs without an entry get an
+	// empty annotation list.
+	annotationsJSON   map[int64]string
+	annotationsStatus int
 
-	prCalls      int
-	runListCalls int
-	restarts     int
+	prCalls          int
+	runListCalls     int
+	jobsCalls        int
+	annotationsCalls int
+	restarts         int
 }
 
 func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +97,30 @@ func (f *fakeGithubAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(f.runListJSON))
+	case strings.HasSuffix(r.URL.Path, "/jobs"):
+		f.jobsCalls++
+		if f.jobsStatus != 0 {
+			w.WriteHeader(f.jobsStatus)
+			return
+		}
+		if f.jobsJSON == "" {
+			_, _ = w.Write([]byte(jobsJSON()))
+			return
+		}
+		_, _ = w.Write([]byte(f.jobsJSON))
+	case strings.HasSuffix(r.URL.Path, "/annotations"):
+		f.annotationsCalls++
+		if f.annotationsStatus != 0 {
+			w.WriteHeader(f.annotationsStatus)
+			return
+		}
+		parts := strings.Split(r.URL.Path, "/")
+		jobID, _ := strconv.ParseInt(parts[len(parts)-2], 10, 64)
+		if body, ok := f.annotationsJSON[jobID]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
 	case strings.Contains(r.URL.Path, "/actions/runs/"):
 		_, _ = w.Write([]byte(f.runJSON))
 	case strings.HasSuffix(r.URL.Path, "/pulls"):
@@ -114,6 +147,33 @@ func runListJSON(runIDs ...int64) string {
 	}
 	return fmt.Sprintf(`{"total_count":%d,"workflow_runs":[%s]}`, len(runIDs), strings.Join(runs, ","))
 }
+
+type fakeJob struct {
+	id         int64
+	conclusion string
+}
+
+func jobsJSON(jobs ...fakeJob) string {
+	var items []string
+	for _, j := range jobs {
+		items = append(items, fmt.Sprintf(`{"id":%d,"run_id":42,"status":"completed","conclusion":%q}`, j.id, j.conclusion))
+	}
+	return fmt.Sprintf(`{"total_count":%d,"jobs":[%s]}`, len(jobs), strings.Join(items, ","))
+}
+
+func annotationsJSON(messages ...string) string {
+	var items []string
+	for _, m := range messages {
+		items = append(items, fmt.Sprintf(`{"annotation_level":"failure","message":%q}`, m))
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+const (
+	userCancelAnnotation        = "The run was canceled by @alice."
+	concurrencyCancelAnnotation = "Canceling since a higher priority waiting request for 'ci-feature' exists"
+	preemptionAnnotation        = "The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled."
+)
 
 func prListJSON(prs ...string) string {
 	return "[" + strings.Join(prs, ",") + "]"
@@ -352,13 +412,111 @@ func TestHandleRestartRequest_CancelledRestarts(t *testing.T) {
 	api := &fakeGithubAPI{
 		runJSON:     runJSON("completed", "cancelled", "main", "push"),
 		runListJSON: runListJSON(42), // the run itself is the newest — no supersession
+		jobsJSON:    jobsJSON(fakeJob{1, "success"}, fakeJob{2, "cancelled"}),
+		annotationsJSON: map[int64]string{
+			2: annotationsJSON(preemptionAnnotation),
+		},
 	}
 	wr := newTestRestarter(t, repo, api)
 
 	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
 
 	assert.Equal(t, 1, api.runListCalls, "cancelled runs must be checked for supersession")
-	assert.Equal(t, 1, api.restarts, "a cancelled run without a newer sibling is a preemption victim and must restart")
+	assert.Equal(t, 1, api.annotationsCalls, "only cancelled jobs are inspected for a cancellation cause")
+	assert.Equal(t, 1, api.restarts, "a cancelled run nobody cancelled is a preemption victim and must restart")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledByUserSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "feature", "pull_request"),
+		prsJSON:     prListJSON(openPR()),
+		runListJSON: runListJSON(42),
+		jobsJSON:    jobsJSON(fakeJob{1, "cancelled"}, fakeJob{2, "cancelled"}),
+		annotationsJSON: map[int64]string{
+			1: annotationsJSON(userCancelAnnotation),
+			2: annotationsJSON(userCancelAnnotation),
+		},
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "a run cancelled by a person must not be restarted")
+	assert.Equal(t, 1, api.annotationsCalls, "the first matching annotation decides")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledByUserAfterPreemptionSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "main", "push"),
+		runListJSON: runListJSON(42),
+		// job 1 lost its runner, then a person cancelled the rest of the run
+		jobsJSON: jobsJSON(fakeJob{1, "cancelled"}, fakeJob{2, "cancelled"}),
+		annotationsJSON: map[int64]string{
+			1: annotationsJSON(preemptionAnnotation),
+			2: annotationsJSON(userCancelAnnotation),
+		},
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "a person cancelling after a preemption still vetoes the restart")
+	assert.Equal(t, 2, api.annotationsCalls)
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledByConcurrencyAnnotationSkipsRestart(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON: runJSON("completed", "cancelled", "feature", "pull_request"),
+		prsJSON: prListJSON(openPR()),
+		// the newer run belongs to another event type, so the run list check misses it
+		runListJSON: runListJSON(42),
+		jobsJSON:    jobsJSON(fakeJob{1, "cancelled"}),
+		annotationsJSON: map[int64]string{
+			1: annotationsJSON(concurrencyCancelAnnotation),
+		},
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts, "a run cancelled by its concurrency group must not be restarted")
+	assert.Contains(t, repo.deleted, int64(42))
+}
+
+func TestHandleRestartRequest_CancelledCauseCheckErrorKeepsRequest(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:     runJSON("completed", "cancelled", "main", "push"),
+		runListJSON: runListJSON(42),
+		jobsStatus:  http.StatusInternalServerError,
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Zero(t, api.restarts)
+	assert.Empty(t, repo.deleted, "request must stay pending for retry on cancellation-cause check error")
+}
+
+func TestHandleRestartRequest_CancelledCauseCheckForbiddenFailsOpen(t *testing.T) {
+	repo := &mockRestarterRepository{}
+	api := &fakeGithubAPI{
+		runJSON:           runJSON("completed", "cancelled", "main", "push"),
+		runListJSON:       runListJSON(42),
+		jobsJSON:          jobsJSON(fakeJob{1, "cancelled"}),
+		annotationsStatus: http.StatusForbidden, // App lacks 'Checks: read'
+	}
+	wr := newTestRestarter(t, repo, api)
+
+	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
+
+	assert.Equal(t, 1, api.restarts, "missing permission must not block restarts")
 	assert.Contains(t, repo.deleted, int64(42))
 }
 
@@ -374,6 +532,7 @@ func TestHandleRestartRequest_CancelledSupersededSkipsRestart(t *testing.T) {
 	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
 
 	assert.Zero(t, api.restarts, "a run superseded by a newer one must not be restarted")
+	assert.Zero(t, api.jobsCalls, "supersession is decided before the annotation lookup")
 	assert.Contains(t, repo.deleted, int64(42))
 }
 
@@ -430,6 +589,7 @@ func TestHandleRestartRequest_FailureSkipsSupersededCheck(t *testing.T) {
 	wr.handleRestartRequest(context.Background(), log.WithField("test", true), testRequest())
 
 	assert.Zero(t, api.runListCalls, "failed runs restart without a supersession check")
+	assert.Zero(t, api.jobsCalls, "failed runs restart without a cancellation-cause check")
 	assert.Equal(t, 1, api.restarts)
 	assert.Contains(t, repo.deleted, int64(42))
 }

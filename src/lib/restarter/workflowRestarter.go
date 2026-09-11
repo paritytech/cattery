@@ -129,6 +129,18 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 					req.WorkflowRunId, req.OrgName, req.RepoName, run.HeadBranch)
 				break
 			}
+
+			cause, err := wr.cancellationCause(logger, ghClient, req)
+			if err != nil {
+				// Leave the request pending: it is retried on the next poll
+				// and eventually expires via TTL.
+				return
+			}
+			if cause != githubClient.CancellationCauseUnknown {
+				logger.Infof("Skipping restart for cancelled workflow run %d (%s/%s): cancelled by %s, not by preemption",
+					req.WorkflowRunId, req.OrgName, req.RepoName, cause)
+				break
+			}
 		}
 
 		logger.Infof("Restarting failed jobs for workflow run %d (%s/%s)", req.WorkflowRunId, req.OrgName, req.RepoName)
@@ -147,13 +159,32 @@ func (wr *WorkflowRestarter) handleRestartRequest(ctx context.Context, logger *l
 	}
 }
 
+// cancellationCause reports who cancelled the run according to the
+// annotations on its cancelled jobs: a person, a concurrency group, or nobody
+// identifiable (a preemption). Restart requests only exist for runs that lost
+// a runner to preemption, so an unknown cause means the preemption itself
+// cancelled the run and it must be restarted.
+func (wr *WorkflowRestarter) cancellationCause(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest) (githubClient.CancellationCause, error) {
+	cause, err := ghClient.GetRunCancellationCause(req.RepoName, req.WorkflowRunId)
+	if err != nil {
+		// Fail open on missing permission: a restart nobody needs is better
+		// than restarts silently stopping until the App grants 'Checks: read'.
+		if githubClient.IsForbidden(err) {
+			logger.Warnf("Cannot check cancellation cause for workflow run %d: GitHub App lacks 'Checks: read' permission, proceeding with restart", req.WorkflowRunId)
+			return githubClient.CancellationCauseUnknown, nil
+		}
+		logger.Errorf("Failed to check cancellation cause for workflow run %d: %v", req.WorkflowRunId, err)
+		return githubClient.CancellationCauseUnknown, err
+	}
+	return cause, nil
+}
+
 // runSuperseded reports whether a newer run of the same workflow exists for
 // the run's branch and event. A cancelled run with a newer sibling was almost
 // certainly cancelled by a concurrency group when the newer run started, not
 // by preemption, and restarting it would waste runners on an obsolete commit.
-// A manually cancelled run without a newer sibling is indistinguishable from a
-// preemption victim and gets restarted; that trade-off is accepted since
-// restart requests only exist for runs that lost a runner to preemption.
+// This check is cheap (one API call) and needs no extra permission, so it runs
+// before the annotation-based cancellationCause check.
 func (wr *WorkflowRestarter) runSuperseded(logger *log.Entry, ghClient *githubClient.GithubClient, req repositories.RestartRequest, run githubClient.WorkflowRunInfo) (bool, error) {
 	// Without a branch or workflow id the newer-run lookup cannot be scoped;
 	// fail open and restart.
