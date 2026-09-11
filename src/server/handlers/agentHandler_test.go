@@ -323,6 +323,134 @@ func TestAgentInterrupt_Success(t *testing.T) {
 	assert.Equal(t, int64(123), restarterRepository.requests[0].WorkflowRunId)
 }
 
+func TestAgentInterrupt_IdleTraySkipsRequest(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		GitHubOrgName: "test-org",
+		Repository:    "test-org/repo",
+		// no WorkflowRunId: preempted before picking up a job
+	}
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/interrupt", h.AgentInterrupt)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/interrupt", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, restarterRepository.requests, "a tray without a job must not create a restart request")
+}
+
+func TestAgentUnregister_PreemptedRequestsRestart(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		Status:        trays.TrayStatusRunning,
+		WorkflowRunId: 123,
+		GitHubOrgName: "test-org",
+		Repository:    "test-org/repo",
+		ProviderData:  map[string]string{},
+	}
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonPreempted})
+	req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, repo.Trays)
+	assert.Len(t, restarterRepository.requests, 1, "a preempted unregister must schedule a restart")
+	assert.Equal(t, int64(123), restarterRepository.requests[0].WorkflowRunId)
+	assert.Equal(t, "test-org/repo", restarterRepository.requests[0].RepoName)
+}
+
+func TestAgentUnregister_PreemptedIdleTraySkipsRestart(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:           "tray-1",
+		Status:       trays.TrayStatusRunning,
+		ProviderData: map[string]string{},
+	}
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonPreempted})
+	req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, restarterRepository.requests)
+}
+
+func TestAgentUnregister_SigTermWithJobRequestsRestart(t *testing.T) {
+	// The VM was stopped under a running job without the shutdown handler
+	// noticing a preemption (e.g. parity-int-ubuntu-xl-91e787182e6fa6ed,
+	// 2026-09-09): the job is lost either way, so it must be re-run.
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		Status:        trays.TrayStatusRunning,
+		WorkflowRunId: 123,
+		GitHubOrgName: "test-org",
+		Repository:    "test-org/repo",
+		ProviderData:  map[string]string{},
+	}
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonSigTerm})
+	req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Len(t, restarterRepository.requests, 1, "a signal-stopped agent with a running job must schedule a restart")
+	assert.Equal(t, int64(123), restarterRepository.requests[0].WorkflowRunId)
+}
+
+func TestAgentUnregister_OtherReasonsDoNotRequestRestart(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+	for _, reason := range []messages.UnregisterReason{messages.UnregisterReasonDone, messages.UnregisterReasonControllerKill, messages.UnregisterReasonUnknown} {
+		repo.Trays["tray-1"] = &trays.Tray{
+			Id:            "tray-1",
+			Status:        trays.TrayStatusRunning,
+			WorkflowRunId: 123,
+			GitHubOrgName: "test-org",
+			Repository:    "test-org/repo",
+			ProviderData:  map[string]string{},
+		}
+		body, _ := json.Marshal(messages.UnregisterRequest{Reason: reason})
+		req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	}
+	assert.Empty(t, restarterRepository.requests, "only preemption and signal shutdowns schedule a restart")
+}
+
 // --- writeResponse tests ---
 
 func TestWriteResponse(t *testing.T) {
