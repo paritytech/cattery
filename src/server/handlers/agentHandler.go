@@ -6,6 +6,7 @@ import (
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -168,6 +169,23 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	logger.Tracef("Agent unregister request")
 
+	// A preempted agent normally has its restart requested by the VM's
+	// shutdown handler via /agent/interrupt before it gets here, but that
+	// handler races the ACPI power-off systemd starts at the same moment and
+	// can be killed first. Requesting here too is idempotent (upsert by run
+	// id) and must happen before the tray, and its workflow run id, is
+	// deleted. Failure is logged only: the agent is shutting down regardless.
+	//
+	// SigTerm is treated the same: the agent only receives a signal while
+	// its listener is still running, so if the tray has a job that job is in
+	// progress and about to fail with "runner lost communication". Whatever
+	// stopped the VM (a preemption the handler missed, a host event, a
+	// manual delete), re-running the failed job is the right outcome.
+	if unregisterRequest.Reason == messages.UnregisterReasonPreempted ||
+		unregisterRequest.Reason == messages.UnregisterReasonSigTerm {
+		_ = h.requestRestartForTray(r.Context(), logger, tray)
+	}
+
 	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
 	if deleteErr != nil {
@@ -264,10 +282,25 @@ func (h *Handlers) AgentInterrupt(responseWriter http.ResponseWriter, r *http.Re
 
 	logger.Debug("Agent restart request with id " + tray.Id)
 
-	workflowRunId := tray.WorkflowRunId
-	if err := h.RestartManager.RequestRestart(r.Context(), workflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
-		logger.Errorf("Failed to request restart for workflow %d: %v", workflowRunId, err)
+	if err := h.requestRestartForTray(r.Context(), logger, tray); err != nil {
 		http.Error(responseWriter, "Failed to request restart", http.StatusInternalServerError)
 		return
 	}
+}
+
+// requestRestartForTray schedules a workflow restart for the job running on
+// the tray. A tray that has not picked up a job yet (WorkflowRunId 0) has
+// nothing to restart; saving a request for it would make the poller hit
+// GitHub with run id 0 every 30s until the request expires.
+func (h *Handlers) requestRestartForTray(ctx context.Context, logger *log.Entry, tray *trays.Tray) error {
+	if tray.WorkflowRunId == 0 {
+		logger.Infof("Tray %s has no workflow run assigned, nothing to restart", tray.Id)
+		return nil
+	}
+
+	if err := h.RestartManager.RequestRestart(ctx, tray.WorkflowRunId, tray.GitHubOrgName, tray.Repository); err != nil {
+		logger.Errorf("Failed to request restart for workflow %d: %v", tray.WorkflowRunId, err)
+		return err
+	}
+	return nil
 }
