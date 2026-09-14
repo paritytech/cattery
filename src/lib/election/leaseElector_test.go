@@ -2,6 +2,7 @@ package election
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,14 +20,21 @@ type fakeStore struct {
 	lastRelKey   string
 	lastRelHold  string
 	acquireFn    func(call int) (bool, error)
+	// acquireCtxFn, when set, takes precedence over acquireFn and receives the
+	// per-call ctx so a test can simulate a store that stalls.
+	acquireCtxFn func(ctx context.Context, call int) (bool, error)
 }
 
-func (f *fakeStore) Acquire(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
+func (f *fakeStore) Acquire(ctx context.Context, _, _ string, _ time.Duration) (bool, error) {
 	f.mu.Lock()
 	f.acquireCalls++
 	n := f.acquireCalls
 	fn := f.acquireFn
+	ctxFn := f.acquireCtxFn
 	f.mu.Unlock()
+	if ctxFn != nil {
+		return ctxFn(ctx, n)
+	}
 	if fn != nil {
 		return fn(n)
 	}
@@ -139,6 +147,88 @@ func TestLeaseElector_LostLeadershipCancelsButDoesNotRelease(t *testing.T) {
 	time.Sleep(30 * time.Millisecond) // let several retry cycles run
 	_, releases := store.counts()
 	assert.Equal(t, 0, releases, "losing the lease must not release it")
+}
+
+// A renew that errors while the lease is still within its TTL must not end the
+// term: the lease is still ours, and flapping on one transient store error
+// would tear down the poller for nothing.
+func TestLeaseElector_TransientRenewErrorKeepsLeadership(t *testing.T) {
+	store := &fakeStore{
+		acquireFn: func(call int) (bool, error) {
+			if call == 1 {
+				return true, nil
+			}
+			// Every renew fails "transiently"; the TTL (100ms) is what bounds
+			// the term, not the error.
+			return false, errors.New("store unavailable")
+		},
+	}
+	elector := newTestElector(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	var termStart, termEnd time.Time
+
+	go elector.Run(ctx, "type-a", func(lctx context.Context) {
+		termStart = time.Now()
+		close(started)
+		<-lctx.Done()
+		termEnd = time.Now()
+		close(stopped)
+	})
+
+	waitClosed(t, started, "leadership start")
+	// The term must end once the TTL lapses without a successful renew...
+	waitClosed(t, stopped, "step-down at lease expiry")
+
+	// ...but not before: with a 5ms renew interval, the old behaviour ended the
+	// term on the first failed renew (~5ms). Allow slack below the 100ms TTL
+	// for timer granularity; anything under half the TTL means a transient
+	// error ended the term.
+	term := termEnd.Sub(termStart)
+	assert.GreaterOrEqual(t, term, 50*time.Millisecond, "transient renew errors ended the term early (term lasted %s)", term)
+	acquires, releases := store.counts()
+	assert.Greater(t, acquires, 3, "renews kept being attempted during the term")
+	assert.Equal(t, 0, releases, "an expired lease must not be released")
+}
+
+// A store that stalls on renew must not keep leaderCtx alive past the lease's
+// expiry: another replica may take the key the moment the TTL lapses, and two
+// live leaders would double-poll the same GitHub session.
+func TestLeaseElector_StalledRenewStepsDownAtExpiry(t *testing.T) {
+	store := &fakeStore{
+		acquireCtxFn: func(ctx context.Context, call int) (bool, error) {
+			if call == 1 {
+				return true, nil
+			}
+			<-ctx.Done() // hang until the elector gives up on this call
+			return false, ctx.Err()
+		},
+	}
+	elector := newTestElector(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+
+	go elector.Run(ctx, "type-a", func(lctx context.Context) {
+		close(started)
+		<-lctx.Done()
+		close(stopped)
+	})
+
+	waitClosed(t, started, "leadership start")
+	termStart := time.Now()
+	waitClosed(t, stopped, "step-down after stalled renew")
+
+	// TTL is 100ms; allow generous slack for scheduling but reject anything
+	// that looks like the stall being waited out indefinitely.
+	assert.Less(t, time.Since(termStart), 500*time.Millisecond, "leaderCtx outlived the lease TTL")
+	_, releases := store.counts()
+	assert.Equal(t, 0, releases, "an expired lease must not be released")
 }
 
 // If onElected returns on its own (the poller exited), the lease is released so

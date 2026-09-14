@@ -668,7 +668,7 @@ func TestHandleStale_DeletesStaleTrays(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tm.HandleStale(ctx)
+	go tm.HandleStale(ctx)
 
 	// Expect both stale trays to be cleaned within a few poll cycles.
 	assert.Eventually(t, func() bool {
@@ -699,7 +699,7 @@ func TestHandleStale_GetStaleErrorDoesNotCrashLoop(t *testing.T) {
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tm.HandleStale(ctx)
+	go tm.HandleStale(ctx)
 
 	// Let it tick a few times under error condition.
 	time.Sleep(50 * time.Millisecond)
@@ -737,7 +737,7 @@ func TestHandleStale_ContextCancellationStopsLoop(t *testing.T) {
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tm.HandleStale(ctx)
+	go tm.HandleStale(ctx)
 	time.Sleep(30 * time.Millisecond)
 	cancel()
 

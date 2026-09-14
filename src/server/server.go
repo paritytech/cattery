@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -87,6 +88,10 @@ func Start() {
 		logger.Fatalf("Failed to initialize leader election: %v", err)
 	}
 
+	// Every leader-only background loop is tracked here so shutdown waits for
+	// all of them to step down and release their leases.
+	var leaderTasks sync.WaitGroup
+
 	for _, trayType := range config.Get().TrayTypes {
 		org := config.Get().GetGitHubOrg(trayType.GitHubOrg)
 		if org == nil {
@@ -102,25 +107,20 @@ func Start() {
 		poller := scaleSetPoller.NewPoller(ssClient, trayType, tm)
 		ssm.Register(trayType.Name, poller)
 
-		ssm.Add(1)
-		go func(p *scaleSetPoller.Poller, name string) {
-			defer ssm.Done()
-			// Run the poller only while this replica holds the lease for this
-			// tray type; leaderCtx is cancelled the moment leadership is lost.
-			err := elector.Run(ctx, name, func(leaderCtx context.Context) {
-				runPoller(leaderCtx, p, name, logger)
-			})
-			if err != nil && ctx.Err() == nil {
-				logger.Errorf("Leader election for '%s' exited: %v", name, err)
-			}
-		}(poller, trayType.Name)
+		// Run the poller only while this replica holds the lease for this
+		// tray type; leaderCtx is cancelled the moment leadership is lost.
+		name := trayType.Name
+		runLeaderTask(ctx, &leaderTasks, elector, name, logger, func(leaderCtx context.Context) {
+			runPoller(leaderCtx, poller, name, logger)
+		})
 	}
 
-	// Start restart poller (replaces workflow_run webhook)
-	rm.StartPoller(ctx)
-
-	// Start stale tray cleanup
-	tm.HandleStale(ctx)
+	// The restart poller and the stale tray cleanup are cluster-wide singletons:
+	// two replicas running them would re-run the same workflows and clean the
+	// same trays twice. Each is leased under its own key, independent of the
+	// per-tray-type poller leases, so they may land on any replica.
+	runLeaderTask(ctx, &leaderTasks, elector, leaseKeyRestarter, logger, rm.RunPoller)
+	runLeaderTask(ctx, &leaderTasks, elector, leaseKeyStaleTrays, logger, tm.HandleStale)
 
 	h := &handlers.Handlers{
 		TrayManager:     tm,
@@ -147,9 +147,9 @@ func Start() {
 		}
 	}
 
-	logger.Info("Waiting for pollers to shut down...")
-	ssm.Wait()
-	logger.Info("All pollers stopped")
+	logger.Info("Waiting for leader tasks to shut down...")
+	leaderTasks.Wait()
+	logger.Info("All leader tasks stopped")
 
 	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer disconnectCancel()
@@ -157,6 +157,27 @@ func Start() {
 		logger.Errorf("Failed to disconnect from MongoDB: %v", err)
 	}
 	logger.Info("MongoDB connection closed")
+}
+
+// Lease keys for the cluster-wide singleton loops. They share the key space
+// with tray type names, so tray types must not use these names.
+const (
+	leaseKeyRestarter  = "cattery-restarter"
+	leaseKeyStaleTrays = "cattery-stale-trays"
+)
+
+// runLeaderTask runs task in the background for as long as this replica holds
+// the lease for key: task receives a context that is cancelled the moment
+// leadership is lost and is re-invoked whenever leadership is regained. The
+// goroutine is tracked in wg so shutdown can wait for the task to step down.
+func runLeaderTask(ctx context.Context, wg *sync.WaitGroup, elector election.Elector, key string, logger *log.Logger, task election.OnElected) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := elector.Run(ctx, key, task); err != nil && ctx.Err() == nil {
+			logger.Errorf("Leader election for '%s' exited: %v", key, err)
+		}
+	}()
 }
 
 // runPoller runs a tray type's scale set listener until ctx is cancelled —

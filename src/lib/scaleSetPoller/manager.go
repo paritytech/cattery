@@ -8,7 +8,6 @@ import (
 type Manager struct {
 	mu      sync.RWMutex
 	pollers map[string]*Poller
-	wg      sync.WaitGroup
 }
 
 func NewManager() *Manager {
@@ -46,16 +45,4 @@ func (m *Manager) MessageHistory() []*Message {
 		return all[i].Time.After(all[j].Time)
 	})
 	return all
-}
-
-func (m *Manager) Add(delta int) {
-	m.wg.Add(delta)
-}
-
-func (m *Manager) Done() {
-	m.wg.Done()
-}
-
-func (m *Manager) Wait() {
-	m.wg.Wait()
 }

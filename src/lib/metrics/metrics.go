@@ -35,7 +35,7 @@ var (
 
 	scaleSetPollErrors = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cattery_scaleset_poll_errors",
-		Help: "Number of scale set polling errors",
+		Help: "Number of errors while handling scale set messages (job started/completed, scaling)",
 	}, []string{"org", "tray_type"})
 
 	// Gauges

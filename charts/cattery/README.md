@@ -180,8 +180,9 @@ CRDs installed in the cluster).
 The Deployment defaults to `strategy: Recreate` with a single replica: each tray
 type's poller holds a long-running GitHub session, so two overlapping pods would
 double-poll. To run multiple replicas, set `config.coordination.backend` to
-`mongo` or `k8s` — which leases each tray type's session to one replica at a
-time — and switch `updateStrategy` to RollingUpdate. The tray API is served by
+`mongo` or `k8s` — which leases each tray type's session, the workflow
+restarter, and the stale tray cleanup to one replica at a time — and switch
+`updateStrategy` to RollingUpdate. The tray API is served by
 every replica regardless, so trays stay served throughout rollouts and
 failovers. The `k8s` backend additionally needs `rbac.create` (default `true`)
 for Lease access and mounts the service account token automatically.

@@ -28,30 +28,33 @@ func (wr *WorkflowRestarter) RequestRestart(ctx context.Context, workflowRunId i
 	return wr.repository.SaveRestartRequest(ctx, workflowRunId, orgName, repoName)
 }
 
-// StartPoller starts a background goroutine that periodically checks pending restart
-// requests and triggers restarts when workflows have completed with failure.
-func (wr *WorkflowRestarter) StartPoller(ctx context.Context) {
+// RunPoller periodically checks pending restart requests and triggers restarts
+// when workflows have completed with failure. It blocks until ctx is done.
+//
+// It must run on a single replica at a time (the caller gates it behind
+// leader election): two replicas polling the same requests would both call
+// GitHub's re-run endpoint for the same run.
+func (wr *WorkflowRestarter) RunPoller(ctx context.Context) {
 	const pollInterval = 30 * time.Second
 	// Must exceed the longest expected workflow run: a job preempted early in
 	// a run can only be re-run after the whole run completes.
 	const requestTTL = 6 * time.Hour
 
 	logger := log.WithField("component", "restarterPoller")
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				logger.Info("Restart poller shutting down")
-				return
-			default:
-				time.Sleep(pollInterval)
-				wr.pollPendingRestarts(ctx, logger, requestTTL)
-			}
-		}
-	}()
-
 	logger.Info("Restart poller started")
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Restart poller shutting down")
+			return
+		case <-ticker.C:
+			wr.pollPendingRestarts(ctx, logger, requestTTL)
+		}
+	}
 }
 
 func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *log.Entry, ttl time.Duration) {
@@ -62,6 +65,13 @@ func (wr *WorkflowRestarter) pollPendingRestarts(ctx context.Context, logger *lo
 	}
 
 	for _, req := range requests {
+		// Shutdown (or loss of leadership) waits for this loop to return, and
+		// each request costs several GitHub calls; stop between requests
+		// rather than finishing the whole batch.
+		if ctx.Err() != nil {
+			return
+		}
+
 		if time.Since(req.CreatedAt) > ttl {
 			logger.Warnf("Restart request for workflow %d expired (age: %v), deleting", req.WorkflowRunId, time.Since(req.CreatedAt))
 			if err := wr.repository.DeleteRestartRequest(ctx, req.WorkflowRunId); err != nil {
