@@ -224,41 +224,46 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 	return tray, nil
 }
 
+// HandleStale periodically deletes trays stuck in a non-running status for
+// longer than the configured threshold. It blocks until ctx is done.
+//
+// It must run on a single replica at a time (the caller gates it behind
+// leader election): two replicas would each pick up the same stale trays and
+// call the provider's cleanup twice.
 func (tm *TrayManager) HandleStale(ctx context.Context) {
 	cfg := config.Get().Stale.WithDefaults()
 	thresholds := resolveStaleThresholds(cfg.Thresholds)
 
 	log.Infof("Stale handler starting: pollInterval=%s thresholds=%v", cfg.PollInterval, formatThresholds(thresholds))
 
-	go func() {
-		ticker := time.NewTicker(cfg.PollInterval)
-		defer ticker.Stop()
+	ticker := time.NewTicker(cfg.PollInterval)
+	defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stale, err := tm.trayRepository.GetStale(ctx, thresholds)
-				if err != nil {
-					log.Errorf("Failed to get stale trays: %v", err)
-					continue
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Stale handler shutting down")
+			return
+		case <-ticker.C:
+			stale, err := tm.trayRepository.GetStale(ctx, thresholds)
+			if err != nil {
+				log.Errorf("Failed to get stale trays: %v", err)
+				continue
+			}
 
-				if len(stale) > 0 {
-					log.Infof("Found %d stale trays: %v", len(stale), stale)
-				}
+			if len(stale) > 0 {
+				log.Infof("Found %d stale trays: %v", len(stale), stale)
+			}
 
-				for _, tray := range stale {
-					log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
-					if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
-						log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
-					}
-					metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
+			for _, tray := range stale {
+				log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
+				if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
+					log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
 				}
+				metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 			}
 		}
-	}()
+	}
 }
 
 // resolveStaleThresholds converts the string-keyed config map into a

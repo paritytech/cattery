@@ -8,7 +8,7 @@ Cattery follows a **server/agent** architecture:
 
 ```
 GitHub Actions                Cattery Server               Infrastructure
- (Scale Set API)                  |                         (Docker / GCE)
+ (Scale Set API)                  |                    (Docker / GCE / Nomad)
        |                          |                              |
        |-- job demand ----------->|                              |
        |                          |-- provision tray ----------->|
@@ -28,23 +28,24 @@ GitHub Actions                Cattery Server               Infrastructure
 
 A tray progresses through: **Creating** -> **Registering** -> **Registered** -> **Running** -> **Deleting**
 
-Stale trays (no heartbeat for 2+ minutes) are automatically cleaned up.
+A tray that sits in any non-running status for longer than a configurable threshold is treated as stale and deleted (defaults: 5 minutes for Creating and Registering, 15 minutes for Registered and Deleting; see the `stale` section in [Configuration](docs/configuration.md)). An idle Registered tray is also told to shut itself down after 15 minutes.
 
 ## Features
 
-- **Multi-provider** — Ships with Docker and Google Compute Engine providers, new providers can be added
+- **Multi-provider** — Ships with Docker, Google Compute Engine and Nomad providers, new providers can be added
 - **Scale-to-zero** — Runners are only provisioned when jobs are queued
 - **Ephemeral runners** — Each job gets a fresh, isolated environment via JIT configuration
 - **Multi-org support** — Manage runners across multiple GitHub organizations from a single server
-- **Automatic failed job restart** — Agents can request reruns of failed workflow jobs
+- **Preemption recovery** — Jobs lost to a preempted or terminated VM are re-run once their workflow run completes (skipped for merge queue runs, closed pull requests, and runs cancelled by a person or a concurrency group)
+- **High availability** — Multiple server replicas with leader election backed by MongoDB or Kubernetes Leases
 - **Monitoring** — Built-in status page (`/status`) and Prometheus metrics (`/metrics`)
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - MongoDB
-- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with Actions read/write, Checks read and Pull requests read permissions, installed on your organization
-- Docker and/or GCP credentials depending on your provider choice
+- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) installed on your organization with these organization permissions: Self-hosted runners (read and write, for the runner scale set and JIT runner configuration), Actions (read and write, to re-run failed jobs), Checks (read) and Pull requests (read) for the preemption recovery checks
+- Docker, GCP credentials, or a Nomad cluster depending on your provider choice
 
 ## Quick start
 
@@ -95,6 +96,8 @@ trayTypes:
       image: my-runner-image:latest
 ```
 
+`maxTrays` must be set: with the default of 0 no trays are ever created. A complete walkthrough with a local docker runner is in [examples/example.md](examples/example.md).
+
 ### Run
 
 **Server:**
@@ -130,7 +133,7 @@ See [charts/cattery/values.yaml](charts/cattery/values.yaml) for the available v
 
 ## Configuration
 
-See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering server, database, GitHub App, providers, and tray types.
+See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering server, database, stale tray cleanup, leader election, GitHub App, providers, and tray types.
 
 ## License
 

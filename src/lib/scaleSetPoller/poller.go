@@ -134,13 +134,30 @@ func (cs *catteryScaler) RecordDesiredRunners(count int)                {}
 func (cs *catteryScaler) HandleDesiredRunnerCount(ctx context.Context, count int) (int, error) {
 	cs.recordScaleMessage(count)
 
-	err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count)
-	if err != nil {
-		cs.poller.logger.Errorf("Failed to scale for demand (%d): %v", count, err)
-		return 0, err
+	// Scaling failures (provider or DB) are transient from the session's point
+	// of view: the next statistics message triggers another attempt. Failing
+	// the session would only add a 30s+ gap during which job events are lost.
+	if err := cs.poller.trayManager.ScaleForDemand(ctx, cs.poller.trayType, count); err != nil {
+		cs.recordHandlerError(fmt.Sprintf("scale for demand (%d)", count), err)
 	}
 
-	return cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
+	active, err := cs.poller.trayManager.CountTrays(ctx, cs.poller.trayType.Name)
+	if err != nil {
+		cs.recordHandlerError("count trays", err)
+		return 0, nil
+	}
+	return active, nil
+}
+
+// recordHandlerError logs a failure inside a listener callback and counts it
+// in cattery_scaleset_poll_errors. The scaleset listener acks a message before
+// invoking the callbacks and aborts the whole session on any callback error,
+// so per-tray failures must never propagate back to it: the acked batch would
+// be lost, and every JobStarted arriving before the session is recreated would
+// leave its tray without a workflow run id (and so unrestartable on preemption).
+func (cs *catteryScaler) recordHandlerError(what string, err error) {
+	cs.poller.logger.Errorf("Failed to %s: %v", what, err)
+	metrics.ScaleSetPollErrorsInc(cs.poller.trayType.GitHubOrg, cs.poller.trayType.Name)
 }
 
 func (cs *catteryScaler) recordScaleMessage(count int) {
@@ -173,13 +190,17 @@ func (cs *catteryScaler) HandleJobStarted(ctx context.Context, jobInfo *scaleset
 	// The tray stores the bare repository name: the restarter passes it to
 	// GitHub API calls that take the owner separately. Storing the full name
 	// here broke the restarter (duplicated owner in the API URL).
+	//
+	// A failure here is per-tray, not session-level, so it is logged and
+	// counted but not returned: the listener has already acked the message,
+	// and a returned error would make it drop the session and every job
+	// event that arrives before the session is recreated (see recordHandlerError).
 	tray, err := cs.poller.trayManager.SetJob(ctx, jobInfo.RunnerName, jobID, jobInfo.WorkflowRunID, jobInfo.RepositoryName, jobInfo.JobDisplayName, workflowName)
 	if err != nil {
-		cs.poller.logger.Errorf("Failed to set job on tray %s: %v", jobInfo.RunnerName, err)
-		return err
+		cs.recordHandlerError("set job on tray "+jobInfo.RunnerName, err)
 	}
 
-	if tray == nil {
+	if err == nil && tray == nil {
 		cs.poller.logger.Warnf("Tray %s not found for job %s (workflow run %d) — tray already removed",
 			jobInfo.RunnerName, jobInfo.JobDisplayName, jobInfo.WorkflowRunID)
 	}
@@ -208,10 +229,10 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 		return nil
 	}
 
-	_, err := cs.poller.trayManager.DeleteTray(ctx, jobInfo.RunnerName)
-	if err != nil {
-		cs.poller.logger.Errorf("Failed to delete tray %s: %v", jobInfo.RunnerName, err)
-		return err
+	// Per-tray failure: log and count, do not fail the session. The stale
+	// handler and the agent's own unregister will still remove the tray.
+	if _, err := cs.poller.trayManager.DeleteTray(ctx, jobInfo.RunnerName); err != nil {
+		cs.recordHandlerError("delete tray "+jobInfo.RunnerName, err)
 	}
 
 	jobID, _ := strconv.ParseInt(jobInfo.JobID, 10, 64)

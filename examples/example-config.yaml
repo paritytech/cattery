@@ -1,9 +1,13 @@
 server:
   listenAddress: "0.0.0.0:5137"
+  # Optional. Serve /status and /metrics on a separate port. If omitted (or
+  # equal to listenAddress) they are served on the agent port.
+  # statusListenAddress: "0.0.0.0:5138"
+  # Public URL the agents use to reach this server.
   advertiseUrl: https://cattery.my-org.com
 
 database:
-  uri: mongodb://localhost:27017/cattery
+  uri: mongodb://localhost:27017/
   database: cattery
 
 # Optional. Stale-tray cleanup loop. Defaults shown below.
@@ -18,9 +22,10 @@ stale:
     deleting: 15m
 
 # Optional. Leader election for running multiple cattery replicas. Each tray
-# type's scale set poller (the GitHub session) runs on exactly one replica — the
-# leader for that tray type — while every replica keeps serving the tray HTTP
-# API, so trays stay served across rollouts and failovers.
+# type's scale set poller (the GitHub session), the workflow restarter and the
+# stale tray cleanup run on exactly one replica at a time, while every replica
+# keeps serving the agent HTTP API, so trays stay served across rollouts and
+# failovers.
 #
 # backend "memory" (default) is a no-op that always leads — correct ONLY for a
 # single replica. Running multiple replicas on "memory" makes every replica
@@ -41,32 +46,32 @@ coordination:
   # k8s backend only; both optional:
   # kubernetes:
   #   namespace: cattery          # defaults to the pod's namespace
-  #   leaseNamePrefix: "cattery-" # prepended to the sanitized tray type name
+  #   leaseNamePrefix: "cattery-" # prepended to the sanitized lease key
 
+# GitHub organizations, each managed through a GitHub App installation.
+# The App needs: Self-hosted runners (read/write), Actions (read/write),
+# Checks (read), Pull requests (read).
 github:
-  - name: paritytech-stg
+  - name: my-org
     appId: 123456
     installationId: 654321
     appClientId: Iv123abC
     privateKeyPath: path/to/github-private-key.pem
-    webhookSecret: my-webhook-secret
 
-  - name: paritytech
+  - name: my-org-staging
     appId: 123456
-    installationId: 654321
+    installationId: 654322
     appClientId: Iv123abC
-    privateKeyPath: path/to/github-private-key.pem
-    webhookSecret: my-webhook-secret
+    privateKeyPath: path/to/github-private-key-staging.pem
 
 providers:
   - name: docker-local
     type: docker
-    catteryUrl: http://host.containers.internal:5137 # example for podman
 
   - name: gce-stg
     type: google
     project: my-gcp-project
-    credentialsFile: path/to/credentials.json
+    credentialsFile: path/to/credentials.json  # optional; Application Default Credentials otherwise
 
   - name: nomad-scw
     type: nomad
@@ -82,37 +87,42 @@ providers:
     insecure: false          # optional, skip TLS verification (dev only)
 
 trayTypes:
+  # The tray type name is the runner scale set name: target it with
+  # `runs-on: <name>` in workflows that can use the runner group.
   - name: cattery-tiny
     # free-text, shown on the status page (Tray Types tab)
     description: Small local Docker runner for lint and quick checks
     provider: docker-local
     shutdown: false
-    runnerGroupId: 3
-    githubOrg: My-Github-Org
+    runnerGroupId: 3         # org Settings -> Actions -> Runner groups, id is in the URL
+    githubOrg: my-org
+    maxTrays: 2              # required: 0 (the default) never creates trays
     config:
       image: cattery-runner-tiny:latest
 
   - name: cattery-gce
-    config:
-      instanceTemplate: global/instanceTemplates/<instance-template>
-      machineType: e2-standard-2
-      project: my-gcp-project
-      zones:
-        - us-west1-a
-        - us-west1-b
+    provider: gce-stg
+    githubOrg: my-org-staging
+    runnerGroupId: 3
+    maxTrays: 3              # max number of VMs of this type
+    maxParallelCreation: 5   # optional, defaults to 10
+    shutdown: true
+    # Forwarded as GCE instance metadata alongside cattery-url and
+    # cattery-agent-id; consumed by the image's startup script.
     extraMetadata:
       # can be: version (0.0.2), server (to download binary from server) or a commit hash
       cattery-agent-version: 0.0.4
       # cattery-agent-version: 13d197aa1e73db09514772e55794b3a0f9b7952b
-    githubOrg: My-Github-Org
-    maxTrays: 3 # max number of VMs of this type
-    provider: gce
-    runnerGroupId: 3 # check in github org settings -> Runner groups
-    shutdown: true
+    config:
+      instanceTemplate: global/instanceTemplates/<instance-template>
+      machineType: e2-standard-2
+      zones:                 # one is picked at random per tray
+        - us-west1-a
+        - us-west1-b
 
   - name: cattery-nomad
     provider: nomad-scw
-    githubOrg: My-Github-Org
+    githubOrg: my-org
     runnerGroupId: 3
     maxTrays: 5
     shutdown: true

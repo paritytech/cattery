@@ -80,6 +80,10 @@ func NewLeaseElector(store LeaseStore, holder string, cfg LeaseConfig) Elector {
 func (e *LeaseElector) Run(ctx context.Context, key string, onElected OnElected) error {
 	logger := e.logger.WithField("key", key)
 	for ctx.Err() == nil {
+		// The lease is valid for TTL from the store's clock at the time of the
+		// call. Measuring from before the call (local clock) gives a
+		// conservative local expiry: the store's lease can only outlive it.
+		attemptedAt := time.Now()
 		acquired, err := e.store.Acquire(ctx, key, e.holder, e.cfg.TTL)
 		if err != nil {
 			logger.Warnf("Lease acquire failed: %v", err)
@@ -92,17 +96,26 @@ func (e *LeaseElector) Run(ctx context.Context, key string, onElected OnElected)
 		}
 
 		logger.Info("Acquired leadership")
-		e.lead(ctx, key, logger, onElected)
+		e.lead(ctx, key, logger, onElected, attemptedAt.Add(e.cfg.TTL))
 		logger.Info("Lost leadership")
 	}
 	return ctx.Err()
 }
 
-// lead runs onElected for one leadership term: it renews on a ticker, cancels
-// leaderCtx the instant a renew fails (or ctx ends), waits for onElected to
-// return, and best-effort releases the lease. It returns when the term ends;
-// Run then loops to attempt reacquisition.
-func (e *LeaseElector) lead(ctx context.Context, key string, logger *log.Entry, onElected OnElected) {
+// lead runs onElected for one leadership term. It renews on a ticker and
+// cancels leaderCtx when the lease is lost or ctx ends, waits for onElected
+// to return, and best-effort releases the lease. It returns when the term
+// ends; Run then loops to attempt reacquisition.
+//
+// expiresAt is the local, conservative estimate of when the lease lapses
+// without a renew. Renew errors (a slow or unreachable store) do not end the
+// term by themselves: the lease is still ours until expiresAt, and dropping
+// leadership on a single transient error would needlessly flap the poller.
+// The term ends the instant expiresAt passes without a successful renew, and
+// each renew call is bounded by expiresAt, so neither a stalled store nor a
+// fast-failing one can keep leaderCtx alive past the point where another
+// replica may take the key.
+func (e *LeaseElector) lead(ctx context.Context, key string, logger *log.Entry, onElected OnElected, expiresAt time.Time) {
 	leaderCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -112,8 +125,19 @@ func (e *LeaseElector) lead(ctx context.Context, key string, logger *log.Entry, 
 		onElected(leaderCtx)
 	}()
 
+	// stepDown stops the work without releasing: the lease is either expired
+	// or owned by someone else, and releasing could clobber a new owner.
+	stepDown := func(why string) {
+		logger.Warnf("Stepping down: %s", why)
+		cancel()
+		<-done
+	}
+
 	ticker := time.NewTicker(e.cfg.RenewInterval)
 	defer ticker.Stop()
+
+	expiry := time.NewTimer(time.Until(expiresAt))
+	defer expiry.Stop()
 
 	for {
 		select {
@@ -129,18 +153,28 @@ func (e *LeaseElector) lead(ctx context.Context, key string, logger *log.Entry, 
 			// lease so another replica can pick the key up immediately.
 			e.release(key, logger)
 			return
+		case <-expiry.C:
+			stepDown("lease expired without a successful renew")
+			return
 		case <-ticker.C:
-			acquired, err := e.store.Acquire(ctx, key, e.holder, e.cfg.TTL)
+			attemptedAt := time.Now()
+			renewCtx, renewCancel := context.WithDeadline(ctx, expiresAt)
+			acquired, err := e.store.Acquire(renewCtx, key, e.holder, e.cfg.TTL)
+			renewCancel()
+
 			if err != nil {
-				logger.Warnf("Lease renew failed: %v", err)
+				// Still ours until expiresAt; the expiry timer ends the term
+				// if no later renew succeeds.
+				logger.Warnf("Lease renew failed, lease still valid for %s: %v",
+					time.Until(expiresAt).Round(time.Millisecond), err)
+				continue
 			}
 			if !acquired {
-				// Lost the lease (expired before renew, or stolen). Stop the
-				// work immediately; do NOT release — someone else may own it now.
-				cancel()
-				<-done
+				stepDown("lease no longer held (expired before renew, or taken over)")
 				return
 			}
+			expiresAt = attemptedAt.Add(e.cfg.TTL)
+			expiry.Reset(time.Until(expiresAt))
 		}
 	}
 }

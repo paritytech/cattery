@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/nomad/api"
@@ -88,11 +89,21 @@ func NewNomadProvider(name string, providerConfig config.ProviderConfig) *NomadP
 		}
 		cfg.TLSConfig.CACert = caFile
 	}
-	if strings.EqualFold(providerConfig.Get("insecure"), "true") {
-		if cfg.TLSConfig == nil {
-			cfg.TLSConfig = &api.TLSConfig{}
+	// Provider config is a string map; viper renders an unquoted YAML bool
+	// into it as "1"/"0", a quoted one as "true"/"false". ParseBool accepts
+	// both spellings.
+	if raw := providerConfig.Get("insecure"); raw != "" {
+		insecure, err := strconv.ParseBool(raw)
+		if err != nil {
+			logger.Errorf("nomad provider has invalid 'insecure' value %q: %v", raw, err)
+			return nil
 		}
-		cfg.TLSConfig.Insecure = true
+		if insecure {
+			if cfg.TLSConfig == nil {
+				cfg.TLSConfig = &api.TLSConfig{}
+			}
+			cfg.TLSConfig.Insecure = true
+		}
 	}
 
 	client, err := api.NewClient(cfg)

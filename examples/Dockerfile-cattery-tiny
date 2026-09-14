@@ -1,24 +1,30 @@
+# Minimal runner image for the docker provider. Build from the repository root:
+#   docker build -t cattery-runner-tiny:latest -f examples/Dockerfile-cattery-tiny .
+#
+# The docker provider starts the container with
+#   /action-runner/cattery/cattery agent -i <tray-id> -s <advertiseUrl> --runner-folder /action-runner
+# so the agent binary and the GitHub Actions runner must live at those paths.
+
+ARG GO_VERSION=1.26
+
+FROM golang:${GO_VERSION} AS build
+WORKDIR /cattery
+COPY src/ .
+RUN CGO_ENABLED=0 go build -o /out/cattery .
+
 FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y \
-    git dotnet-runtime-8.0 golang-go tar curl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates tar \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /action-runner
 
-ARG RUNNER_VERISON='2.333'
-ENV RUNNER_VERISON=$RUNNER_VERISON
+ARG RUNNER_VERSION='2.333.0'
+RUN curl -sL -o actions-runner.tar.gz \
+      https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+    && tar xzf actions-runner.tar.gz \
+    && rm actions-runner.tar.gz \
+    && ./bin/installdependencies.sh
 
-RUN curl -sL -o actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERISON}.0/actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz
-RUN ls -al
-RUN tar xzf ./actions-runner-linux-x64-${RUNNER_VERISON}.0.tar.gz
-
-WORKDIR /cattery-agent
-
-COPY . .
-
-RUN ls -al /action-runner
-RUN ls -al /cattery-agent
-RUN ls -al .
-
-
-RUN cd src && go build -o /action-runner/cattery/cattery
+COPY --from=build /out/cattery /action-runner/cattery/cattery
