@@ -205,7 +205,8 @@ func TestNewNomadProvider(t *testing.T) {
 		// The TLS config lives inside an unexported nomad client field, so
 		// we don't introspect it — we'd need a real handshake, which an
 		// httptest server below covers.
-		for _, v := range []string{"true", "TRUE", "True"} {
+		// "1"/"0" is how viper hands an unquoted YAML bool to the string map.
+		for _, v := range []string{"true", "TRUE", "True", "1", "false", "0"} {
 			p := NewNomadProvider("toaster", config.ProviderConfig{
 				"name":     "toaster",
 				"type":     "nomad",
@@ -214,6 +215,16 @@ func TestNewNomadProvider(t *testing.T) {
 			})
 			assert.NotNil(t, p, "insecure=%q should be accepted", v)
 		}
+	})
+
+	t.Run("insecure with a non-bool value is rejected", func(t *testing.T) {
+		p := NewNomadProvider("toaster", config.ProviderConfig{
+			"name":     "toaster",
+			"type":     "nomad",
+			"address":  "https://example.invalid:4646",
+			"insecure": "yes",
+		})
+		assert.Nil(t, p, "a value ParseBool cannot read must not be silently ignored")
 	})
 }
 

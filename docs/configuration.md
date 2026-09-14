@@ -1,7 +1,6 @@
 # Configuration
 
-Cattery uses YAML configuration files and searches for the file named config.yaml first in the working directory and then in the /etc/cattery directory.
-Cattery will use the first config file found.
+Cattery reads a YAML configuration file. Pass its path with `cattery server -c /path/to/config.yaml`; without `-c`, cattery looks for `config.yaml` first in `/etc/cattery/` and then in the working directory, and uses the first one found.
 
 ### Example:
 
@@ -10,11 +9,21 @@ server:
   listenAddress: "0.0.0.0:5137"
   statusListenAddress: "0.0.0.0:5138"
   advertiseUrl: https://example.org
-  agentSecret: my-secret-token
 
 database:
   uri: mongodb://localhost:27017/
   database: cattery
+
+stale:
+  pollInterval: 1m
+  thresholds:
+    creating: 5m
+    registering: 5m
+    registered: 15m
+    deleting: 15m
+
+coordination:
+  backend: memory
 
 github:
   - name: my-org
@@ -48,7 +57,6 @@ trayTypes:
     maxParallelCreation: 5
     config:
       image: cattery-runner-tiny:latest
-      namePrefix: cattery
 
   - name: cattery-gce-prod
     provider: gce-prod
@@ -59,7 +67,6 @@ trayTypes:
     extraMetadata:
       cattery-agent-version: 0.0.4
     config:
-      project: my-gcp-project
       zones:
         - europe-west1-c
         - europe-west1-d
@@ -88,7 +95,7 @@ trayTypes:
 | listenAddress        | string | yes      | Host:port for the HTTP server to bind (e.g., 0.0.0.0:5137).                                                             |
 | statusListenAddress  | string | no       | Separate host:port for the /status and /metrics endpoints. If empty or equal to listenAddress, served on the agent port. |
 | advertiseUrl         | string | yes      | Public base URL where the server is reachable. Passed to agents.                                                         |
-| agentSecret          | string | no       | Bearer token that agents must present to register/unregister. If empty, agent auth is disabled.                          |
+| agentSecret          | string | no       | Bearer token the server requires on every `/agent/*` request. **Leave empty:** the agent does not send this token yet, so setting it rejects every agent registration. |
 
 #### database
 
@@ -96,6 +103,30 @@ trayTypes:
 |----------|--------|----------|---------------------------------------------------------------|
 | uri      | string | yes      | MongoDB connection string (e.g., mongodb://localhost:27017/). |
 | database | string | yes      | Database name (e.g., cattery).                                |
+
+#### stale
+Optional. Configures the cleanup loop that deletes trays stuck in a non-running status. A tray whose status has not changed for longer than its threshold is deleted (the provider resource is cleaned up and the record removed). `running` trays are never stale.
+
+| Key          | Type                    | Required | Description                                                                                                                                     |
+|--------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| pollInterval | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
+| thresholds   | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
+
+Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, an agent whose tray has sat in `registered` (idle, no job) for 15 minutes is told to shut down on its next ping.
+
+#### coordination
+Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.
+
+| Key                         | Type     | Required | Description                                                                                                                      |
+|-----------------------------|----------|----------|----------------------------------------------------------------------------------------------------------------------------------|
+| backend                     | enum     | no       | `memory` (default), `mongo` or `k8s`. `memory` always leads and is correct **only for a single replica**. `mongo` stores leases in the configured database. `k8s` uses `coordination.k8s.io` Leases and must run in-cluster with RBAC to get/create/update leases. |
+| lease.ttl                   | duration | no       | Lease validity; bounds worst-case failover after a leader dies. Default `30s`. Ignored by `memory`.                              |
+| lease.renewInterval         | duration | no       | How often a leader renews. Default `ttl/3`. Must stay well below `ttl`.                                                          |
+| lease.retryInterval         | duration | no       | How often a non-leader retries acquisition. Default `5s`.                                                                        |
+| kubernetes.namespace        | string   | no       | `k8s` only. Namespace for Lease objects. Defaults to the pod's namespace.                                                        |
+| kubernetes.leaseNamePrefix  | string   | no       | `k8s` only. Prefix prepended to the sanitized lease key to form the Lease name.                                                  |
+
+Lease keys are the tray type names plus `cattery-restarter` and `cattery-stale-trays`; do not name a tray type after those two.
 
 #### github
 A list of GitHub organizations/accounts the server manages via a GitHub App.
@@ -142,7 +173,7 @@ Provider-specific fields:
   | namespace | string | no       | Nomad namespace to dispatch into. Defaults to `default`.                                          |
   | region    | string | no       | Nomad region. Defaults to the agent's region.                                                     |
   | tlsCaFile | string | no       | Path to a PEM CA bundle for verifying the Nomad agent's TLS certificate.                          |
-  | insecure  | bool   | no       | Skip TLS verification. Dev-only.                                                                  |
+  | insecure  | bool   | no       | Skip TLS verification. Dev-only. Accepts `true`/`false`, quoted or not.                          |
 
 #### trayTypes
 Defines one or more tray "profiles" that the Tray Manager can maintain.
@@ -155,29 +186,30 @@ Defines one or more tray "profiles" that the Tray Manager can maintain.
 | runnerGroupId       | int                | yes      | GitHub Runner Group ID to register runners into.                               |
 | githubOrg           | string             | yes      | The GitHub org key, matching one of the entries under `github`.                |
 | shutdown            | bool               | no       | Whether instances should self-terminate when the job completes.                |
-| maxTrays            | int                | no       | Maximum number of concurrent trays of this type.                               |
+| maxTrays            | int                | yes      | Maximum number of concurrent trays of this type. Also the scale set's runner capacity reported to GitHub. Must be greater than 0: with the default of 0 no trays are ever created. |
 | maxParallelCreation | int                | no       | Maximum number of trays to create in parallel. Defaults to 10.                 |
-| extraMetadata       | map[string]string  | no       | Extra key-value metadata passed to the provider (e.g., GCE instance metadata). |
+| extraMetadata       | map[string]string  | no       | Extra key-value metadata passed to the provider (GCE instance metadata, Nomad dispatch meta; ignored by docker). Keys are lowercased when the file is read. |
 | config              | provider-dependent | yes      | Provider-specific configuration for how to create a tray (see below).          |
 
 Provider-specific config under trayType.config:
 
 - docker config
-  
+
+  Containers are named after the tray id and started as `<image> /action-runner/cattery/cattery agent -i <tray-id> -s <advertiseUrl> --runner-folder /action-runner` with `host.docker.internal` mapped to the host, so the image must contain the cattery binary and the Actions runner at those paths (see [examples/Dockerfile-cattery-tiny](../examples/Dockerfile-cattery-tiny)).
+
   | Key        | Type   | Required | Description                                                                 |
   |------------|--------|----------|-----------------------------------------------------------------------------|
   | image      | string | yes      | Docker image to run for the agent/runner (e.g., cattery-runner-tiny:latest) |
-  | namePrefix | string | no       | Prefix for container names                                                  |
 
 - google (GCE) config
-  
+
+  Instances are named after the tray id and receive `cattery-url` (the `advertiseUrl`) and `cattery-agent-id` (the tray id) as instance metadata, plus any `extraMetadata`. The GCP project comes from the provider.
+
   | Key              | Type     | Required | Description                                                                     |
   |------------------|----------|----------|---------------------------------------------------------------------------------|
-  | project          | string   | no       | GCP project ID (can also be set at provider level)                              |
-  | zones            | []string | yes      | List of zones to create instances in (e.g. `europe-west1-c`)                    |
+  | zones            | []string | yes      | List of zones to create instances in (e.g. `europe-west1-c`); one is picked at random per tray |
   | machineType      | string   | yes      | Instance machine type (e.g. `e2-standard-4`)                                    |
   | instanceTemplate | string   | yes      | Template to base instances on (e.g. `global/instanceTemplates/cattery-default`) |
-  | namePrefix       | string   | no       | Prefix for VM names                                                             |
 
 - nomad config
 
@@ -189,7 +221,7 @@ Provider-specific config under trayType.config:
 
   **Bootstrap composition.** The provider builds the dispatched payload from three pieces:
 
-  1. A fixed prelude that downloads the cattery agent binary from `$CATTERY_URL/agent/binary` to `/usr/local/bin/cattery`.
+  1. A fixed prelude that downloads the cattery agent binary from `$CATTERY_URL/agent/download` (the server serves its own executable) to `/usr/local/bin/cattery`.
   2. The optional `script` field, executed as a pre-agent hook.
   3. An `exec /usr/local/bin/cattery agent -i "$TRAY_NAME" -s "$CATTERY_URL" --runner-folder <runnerFolder>`, where `<runnerFolder>` defaults to `/cattery`.
 
