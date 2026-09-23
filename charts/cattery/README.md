@@ -285,8 +285,9 @@ CRDs installed in the cluster).
 
 Template-level tests live in `tests/` and run with the
 [helm-unittest](https://github.com/helm-unittest/helm-unittest) plugin
-(`helm unittest charts/cattery`, or without installing anything:
-`docker run --rm -v "$PWD/charts:/apps" helmunittest/helm-unittest cattery`).
+(`helm unittest charts/cattery`; plugin 1.x needs Helm 3.18 or newer), or
+without installing anything:
+`docker run --rm -v "$PWD/charts:/apps" helmunittest/helm-unittest cattery`.
 CI also applies the rendered runner RBAC to a kind cluster and runs the
 kubernetes provider's integration tests as that ServiceAccount.
 

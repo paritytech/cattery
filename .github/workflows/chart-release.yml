@@ -24,7 +24,9 @@ concurrency:
 env:
   CHART_PATH: charts/cattery
   CHART_NAME: cattery
-  HELM_VERSION: v3.16.3
+  # helm-unittest 1.x declares platformHooks in its plugin.yaml, which Helm
+  # understands from 3.18 on; older versions refuse to load the plugin.
+  HELM_VERSION: v3.21.4
   HELM_UNITTEST_VERSION: 1.1.2
 
 jobs:

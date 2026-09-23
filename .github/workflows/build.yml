@@ -139,7 +139,7 @@ jobs:
       # provider does and exercises the remote-cluster code path for real.
       - uses: azure/setup-helm@v4
         with:
-          version: v3.16.3
+          version: v3.21.4   # keep in step with chart-release.yml
 
       - name: apply the chart's runner RBAC and mint a token for it
         run: |
