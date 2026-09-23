@@ -25,6 +25,7 @@ env:
   CHART_PATH: charts/cattery
   CHART_NAME: cattery
   HELM_VERSION: v3.16.3
+  HELM_UNITTEST_VERSION: 1.1.2
 
 jobs:
   lint:
@@ -45,6 +46,14 @@ jobs:
 
       - name: helm template (smoke values)
         run: helm template smoke "${CHART_PATH}" -f "${CHART_PATH}/ci/smoke-values.yaml" > /dev/null
+
+      # Template-level unit tests (charts/cattery/tests): gating of RBAC and
+      # the service account token, the runners.namespace guard, the runner
+      # ServiceAccount and PodTemplate rendering.
+      - name: helm unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git --version "${HELM_UNITTEST_VERSION}"
+          helm unittest "${CHART_PATH}"
 
   check-version:
     name: check for version bump

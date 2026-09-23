@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
@@ -420,6 +422,97 @@ func TestK8sWaitDeploy_ListErrorSurfacesImmediately(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, apierrors.IsForbidden(err), "%v", err)
 	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+// ---------------------------------------------------------------------------
+// WaitDeploy: watch resilience
+// ---------------------------------------------------------------------------
+
+// fakeWatches replaces the tracker's watch with fake watchers the test drives.
+// Every Watch call gets a fresh watcher, delivered on the returned channel in
+// order, so a test can act once the provider is actually watching.
+func fakeWatches(client *fake.Clientset) <-chan *watch.FakeWatcher {
+	watchers := make(chan *watch.FakeWatcher, 4)
+	client.PrependWatchReactor("pods", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		fw := watch.NewFakeWithChanSize(8, false)
+		watchers <- fw
+		return true, fw, nil
+	})
+	return watchers
+}
+
+func markRunning(t *testing.T, client *fake.Clientset, pod *corev1.Pod) {
+	t.Helper()
+	running := pod.DeepCopy()
+	running.Status.Phase = corev1.PodRunning
+	_, err := client.CoreV1().Pods(testK8sNamespace).Update(context.Background(), running, metav1.UpdateOptions{})
+	require.NoError(t, err)
+}
+
+func TestK8sWaitDeploy_RelistsWhenWatchCloses(t *testing.T) {
+	tray := deployedTray(t)
+	pending := labelledPod("p1", tray.Id, corev1.PodStatus{Phase: corev1.PodPending})
+	client, p := newFakeK8sProvider(t, 10*time.Second, pending)
+	watchers := fakeWatches(client)
+
+	go func() {
+		fw := <-watchers // the initial list saw the pod Pending
+		markRunning(t, client, pending)
+		fw.Stop() // server-side timeout or dropped connection
+	}()
+
+	require.NoError(t, p.WaitDeploy(context.Background(), tray), "a closed watch must lead to a fresh list, not a failure")
+}
+
+func TestK8sWaitDeploy_RelistsOnExpiredResourceVersion(t *testing.T) {
+	tray := deployedTray(t)
+	pending := labelledPod("p1", tray.Id, corev1.PodStatus{Phase: corev1.PodPending})
+	client, p := newFakeK8sProvider(t, 10*time.Second, pending)
+	watchers := fakeWatches(client)
+
+	go func() {
+		fw := <-watchers
+		markRunning(t, client, pending)
+		fw.Error(&metav1.Status{Code: http.StatusGone, Reason: metav1.StatusReasonGone, Message: "too old resource version"})
+	}()
+
+	require.NoError(t, p.WaitDeploy(context.Background(), tray))
+}
+
+func TestK8sWaitDeploy_WatchErrorEventFails(t *testing.T) {
+	tray := deployedTray(t)
+	client, p := newFakeK8sProvider(t, 10*time.Second, labelledPod("p1", tray.Id, corev1.PodStatus{Phase: corev1.PodPending}))
+	watchers := fakeWatches(client)
+
+	go func() {
+		fw := <-watchers
+		fw.Error(&metav1.Status{Code: http.StatusForbidden, Reason: metav1.StatusReasonForbidden, Message: "pods is forbidden"})
+	}()
+
+	start := time.Now()
+	err := p.WaitDeploy(context.Background(), tray)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pods is forbidden")
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestK8sWaitDeploy_IgnoresBookmarksAndForeignEvents(t *testing.T) {
+	tray := deployedTray(t)
+	pending := labelledPod("p1", tray.Id, corev1.PodStatus{Phase: corev1.PodPending})
+	client, p := newFakeK8sProvider(t, 10*time.Second, pending)
+	watchers := fakeWatches(client)
+
+	go func() {
+		fw := <-watchers
+		fw.Action(watch.Bookmark, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", ResourceVersion: "9"}})
+		fw.Modify(labelledPod("other", "k8s-small-ffffffffffffffff", corev1.PodStatus{Phase: corev1.PodRunning}))
+		fw.Delete(labelledPod("other", "k8s-small-ffffffffffffffff", corev1.PodStatus{Phase: corev1.PodRunning}))
+		running := pending.DeepCopy()
+		running.Status.Phase = corev1.PodRunning
+		fw.Modify(running)
+	}()
+
+	require.NoError(t, p.WaitDeploy(context.Background(), tray))
 }
 
 // ---------------------------------------------------------------------------

@@ -131,6 +131,37 @@ jobs:
         working-directory: src
         run: go tool cover -func=coverage.out
 
+      # Second pass for the kubernetes provider as the identity the chart
+      # gives it: apply the chart's ServiceAccount and runner RBAC, mint a
+      # token for that account and run the provider tests through the
+      # server/tokenFile/caFile access mode. This proves the Role in
+      # charts/cattery/templates/rbac.yaml is sufficient for everything the
+      # provider does and exercises the remote-cluster code path for real.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: apply the chart's runner RBAC and mint a token for it
+        run: |
+          set -euo pipefail
+          helm template cattery charts/cattery \
+            --set 'config.providers[0].name=k8s,config.providers[0].type=kubernetes' \
+            -s templates/serviceaccount.yaml -s templates/rbac.yaml | kubectl apply -f -
+          mkdir -p "${RUNNER_TEMP}/kube"
+          kubectl create token cattery --duration=1h > "${RUNNER_TEMP}/kube/token"
+          kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > "${RUNNER_TEMP}/kube/ca.crt"
+          {
+            echo "CATTERY_TEST_KUBE_SERVER=$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.server}')"
+            echo "CATTERY_TEST_KUBE_TOKEN_FILE=${RUNNER_TEMP}/kube/token"
+            echo "CATTERY_TEST_KUBE_CA_FILE=${RUNNER_TEMP}/kube/ca.crt"
+          } >> "${GITHUB_ENV}"
+
+      - name: run kubernetes provider tests as the chart's service account
+        working-directory: src
+        env:
+          CGO_ENABLED: 1
+        run: go test -tags=integration_k8s -race -count=1 -run 'TestKubernetesProvider' ./lib/trays/providers/
+
   release:
     needs: [integration-mongo, integration-k8s, setup]
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
