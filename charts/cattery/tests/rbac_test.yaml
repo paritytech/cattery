@@ -1,0 +1,155 @@
+suite: rbac
+templates:
+  - templates/rbac.yaml
+tests:
+  - it: renders nothing with the memory backend and no kubernetes provider
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders only the lease role for the k8s coordination backend
+    set:
+      config.coordination.backend: k8s
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        isKind:
+          of: Role
+      - documentIndex: 0
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cattery-leader-election
+      - documentIndex: 0
+        equal:
+          path: rules[0].resources
+          value: ["leases"]
+      - documentIndex: 1
+        isKind:
+          of: RoleBinding
+
+  - it: renders the runner-jobs role in runners.namespace for an in-cluster provider
+    set:
+      config.providers:
+        - name: k8s
+          type: kubernetes
+          namespace: cattery-runners
+      runners.namespace: cattery-runners
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        isKind:
+          of: Role
+      - documentIndex: 0
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cattery-runner-jobs
+      - documentIndex: 0
+        equal:
+          path: metadata.namespace
+          value: cattery-runners
+      - documentIndex: 0
+        contains:
+          path: rules
+          content:
+            apiGroups: ["batch"]
+            resources: ["jobs"]
+            verbs: ["create", "get", "delete"]
+      - documentIndex: 0
+        contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["pods"]
+            verbs: ["get", "list", "watch"]
+      - documentIndex: 0
+        contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: ["podtemplates"]
+            verbs: ["get"]
+      - documentIndex: 1
+        isKind:
+          of: RoleBinding
+      - documentIndex: 1
+        equal:
+          path: metadata.namespace
+          value: cattery-runners
+      - documentIndex: 1
+        equal:
+          path: subjects[0].name
+          value: RELEASE-NAME-cattery
+      - documentIndex: 1
+        equal:
+          path: subjects[0].namespace
+          value: NAMESPACE
+
+  - it: defaults runners.namespace to the release namespace
+    set:
+      config.providers:
+        - name: k8s
+          type: kubernetes
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        equal:
+          path: metadata.namespace
+          value: NAMESPACE
+
+  - it: renders both roles when the k8s backend and an in-cluster provider are configured
+    set:
+      config.coordination.backend: k8s
+      config.providers:
+        - name: k8s
+          type: kubernetes
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: renders nothing for a provider that targets another cluster
+    set:
+      config.providers:
+        - name: remote-server
+          type: kubernetes
+          server: https://10.0.0.1:6443
+          tokenFile: /cattery/secrets/target/token
+        - name: remote-kubeconfig
+          type: kubernetes
+          kubeconfig: /cattery/secrets/target/kubeconfig
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: respects rbac.create=false
+    set:
+      rbac.create: false
+      config.providers:
+        - name: k8s
+          type: kubernetes
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: refuses a provider namespace that differs from runners.namespace
+    set:
+      config.providers:
+        - name: k8s
+          type: kubernetes
+          namespace: cattery-runners
+      runners.namespace: other
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.providers\[k8s\].namespace is "cattery-runners" but runners.namespace is "other"'
+
+  - it: refuses an unset provider namespace when runners.namespace is not the release namespace
+    set:
+      config.providers:
+        - name: k8s
+          type: kubernetes
+      runners.namespace: cattery-runners
+    asserts:
+      - failedTemplate:
+          errorPattern: 'runners.namespace is "cattery-runners"'

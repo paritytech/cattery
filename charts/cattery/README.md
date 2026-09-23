@@ -17,8 +17,9 @@ helm install cattery ./charts/cattery -f my-values.yaml
 - A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with
   Actions read/write and Pull requests read permissions, installed on your
   organization
-- Credentials for at least one provider (Docker socket access, or a GCP
-  service account for the `google` provider)
+- Credentials for at least one provider (Docker socket access, a GCP service
+  account for the `google` provider, or nothing extra for the `kubernetes`
+  provider, which runs trays in this cluster)
 
 ## Installing
 
@@ -107,6 +108,107 @@ extraVolumeMounts:
     mountPath: /var/run/docker.sock
 ```
 
+### Kubernetes provider
+
+The `kubernetes` provider runs each tray as a batch/v1 Job. It can target the
+cluster the server runs in or any other cluster.
+
+**Same cluster.** A provider without `kubeconfig` or `server` uses the pod's
+service account. The chart then mounts the token and, with `rbac.create`,
+creates a Role + RoleBinding in `runners.namespace` for Jobs
+(create/get/delete), pods (get/list/watch) and podtemplates (get). The
+`runners` block also provisions what the runner pods themselves need:
+
+```yaml
+config:
+  server:
+    # reachable from runner pods; in server mode the agent is downloaded from here
+    advertiseUrl: http://cattery.cattery.svc:5137
+  providers:
+    - name: k8s
+      type: kubernetes
+      namespace: cattery-runners      # must equal runners.namespace
+  trayTypes:
+    - name: k8s-small
+      provider: k8s
+      githubOrg: my-org
+      runnerGroupId: 1
+      maxTrays: 10
+      config:
+        image: ghcr.io/actions/actions-runner:2.333.0
+        serviceAccountName: cattery-runner
+        resources:
+          requests: {cpu: "2", memory: 4Gi}
+    - name: k8s-dind
+      provider: k8s
+      githubOrg: my-org
+      runnerGroupId: 1
+      maxTrays: 5
+      config:
+        podTemplateRef: runner-dind
+
+runners:
+  namespace: cattery-runners
+  createNamespace: true
+  serviceAccount:
+    create: true
+    name: cattery-runner
+    # rules: [...]   # optional Role for the runner pods, e.g. container hooks
+  podTemplates:
+    runner-dind:
+      spec:
+        serviceAccountName: cattery-runner
+        containers:
+          - name: runner
+            image: ghcr.io/actions/actions-runner:2.333.0
+            env:
+              - name: DOCKER_HOST
+                value: tcp://localhost:2375
+          - name: dind
+            image: docker:dind
+            args: ["--host=tcp://0.0.0.0:2375", "--tls=false"]
+            securityContext:
+              privileged: true
+```
+
+`runners.podTemplates` renders core/v1 PodTemplate objects that tray types
+reference through `podTemplateRef`; cattery injects its agent into the
+container named `runner`. The chart refuses to render when an in-cluster
+provider's `namespace` differs from `runners.namespace`, since the RBAC would
+otherwise land in the wrong place.
+
+**Another cluster.** Mount credentials for the target cluster through
+`secretFiles` and point the provider at them, either as a kubeconfig
+(`kubeconfig` + `context`) or as an API server with a bearer token, which
+avoids cloud auth plugins the image does not ship:
+
+```yaml
+secretFiles:
+  target-token:
+    mountPath: /cattery/secrets/target/token
+    existingSecret: target-cluster
+    existingSecretKey: token
+  target-ca:
+    mountPath: /cattery/secrets/target/ca.crt
+    existingSecret: target-cluster
+    existingSecretKey: ca.crt
+
+config:
+  providers:
+    - name: k8s-remote
+      type: kubernetes
+      server: https://10.0.0.1:6443
+      tokenFile: /cattery/secrets/target/token
+      caFile: /cattery/secrets/target/ca.crt
+      namespace: cattery-runners
+```
+
+Such providers get no RBAC, token mount or `runners` objects from this chart;
+create the equivalent of the `runner-jobs` Role for the token's service
+account in the target cluster. See
+[docs/configuration.md](https://github.com/paritytech/cattery/blob/main/docs/configuration.md)
+for the full list of provider and tray type fields.
+
 ## Configuration
 
 All fields under `config` are rendered verbatim into `/etc/cattery/config.yaml`
@@ -155,6 +257,10 @@ CRDs installed in the cluster).
 | `config.providers`                    | `[]`                           | List of provider configs.                       |
 | `config.trayTypes`                    | `[]`                           | List of tray type configs.                      |
 | `config.coordination.backend`         | `memory`                       | Leader election: `memory` / `mongo` / `k8s`.    |
+| `runners.namespace`                   | `""` (release namespace)       | Namespace of the runner Jobs; in-cluster providers must use the same. |
+| `runners.createNamespace`             | `false`                        | Create `runners.namespace` when it differs from the release namespace. |
+| `runners.serviceAccount.create`       | `false`                        | ServiceAccount for runner pods (`runners.serviceAccount.name`, default `<fullname>-runner`) with optional Role `rules`. |
+| `runners.podTemplates`                | `{}`                           | core/v1 PodTemplates for `podTemplateRef` tray types, in `runners.namespace`. |
 | `secretFiles`                         | `{}`                           | Files mounted into the container from Secrets.  |
 | `env` / `envFrom`                     | `[]` / `[]`                    | Extra env vars on the container.                |
 | `extraVolumes` / `extraVolumeMounts`  | `[]` / `[]`                    | Escape hatch for arbitrary volume mounts.       |
@@ -165,8 +271,8 @@ CRDs installed in the cluster).
 | `serviceMonitor.enabled`              | `false`                        | Requires Prometheus Operator.                   |
 | `serviceAccount.create`               | `true`                         |                                                 |
 | `serviceAccount.annotations`          | `{}`                           | e.g. GKE Workload Identity binding.             |
-| `serviceAccount.automountServiceAccountToken` | `false`                | Forced on for the `k8s` coordination backend.   |
-| `rbac.create`                         | `true`                         | Lease RBAC, created for the `k8s` backend.      |
+| `serviceAccount.automountServiceAccountToken` | `false`                | Forced on for the `k8s` coordination backend and in-cluster `kubernetes` providers. |
+| `rbac.create`                         | `true`                         | Lease RBAC for the `k8s` backend; Job/pod RBAC in `runners.namespace` for in-cluster `kubernetes` providers. |
 | `resources`                           | `{}`                           |                                                 |
 | `livenessProbe.enabled`               | `true`                         |                                                 |
 | `readinessProbe.enabled`              | `true`                         |                                                 |
@@ -174,6 +280,15 @@ CRDs installed in the cluster).
 | `priorityClassName`                   | `""`                           |                                                 |
 | `revisionHistoryLimit`                | `5`                            |                                                 |
 | `terminationGracePeriodSeconds`       | `30`                           |                                                 |
+
+## Testing
+
+Template-level tests live in `tests/` and run with the
+[helm-unittest](https://github.com/helm-unittest/helm-unittest) plugin
+(`helm unittest charts/cattery`, or without installing anything:
+`docker run --rm -v "$PWD/charts:/apps" helmunittest/helm-unittest cattery`).
+CI also applies the rendered runner RBAC to a kind cluster and runs the
+kubernetes provider's integration tests as that ServiceAccount.
 
 ## Upgrading
 

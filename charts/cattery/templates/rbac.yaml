@@ -29,3 +29,46 @@ subjects:
     name: {{ include "cattery.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
+{{- if and (include "cattery.hasInClusterKubernetesProvider" .) .Values.rbac.create }}
+{{- include "cattery.checkRunnersNamespace" . }}
+---
+# Runner Jobs for a "kubernetes" tray provider that targets this cluster (see
+# lib/trays/providers/kubernetesProvider.go). cattery creates one batch/v1 Job
+# per tray, watches its pod until it runs and deletes the Job afterwards;
+# podtemplates are read for tray types that use podTemplateRef. Lives in
+# runners.namespace; tray types that override config.namespace to yet another
+# namespace need an equivalent Role + RoleBinding (and PodTemplates) there.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cattery.fullname" . }}-runner-jobs
+  namespace: {{ include "cattery.runnersNamespace" . }}
+  labels:
+    {{- include "cattery.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["podtemplates"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cattery.fullname" . }}-runner-jobs
+  namespace: {{ include "cattery.runnersNamespace" . }}
+  labels:
+    {{- include "cattery.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cattery.fullname" . }}-runner-jobs
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cattery.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

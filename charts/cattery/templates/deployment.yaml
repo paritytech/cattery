@@ -30,8 +30,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "cattery.serviceAccountName" . }}
-      {{- if eq (include "cattery.coordinationBackend" .) "k8s" }}
-      # The k8s coordination backend calls the Kubernetes API (Leases).
+      {{- if include "cattery.needsKubeApi" . }}
+      # The k8s coordination backend (Leases) and the kubernetes tray provider
+      # (Jobs) call the Kubernetes API.
       automountServiceAccountToken: true
       {{- else }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
@@ -56,11 +57,12 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- $k8sCoord := eq (include "cattery.coordinationBackend" .) "k8s" }}
-          {{- if or .Values.env $k8sCoord }}
+          {{- $kubeApi := include "cattery.needsKubeApi" . }}
+          {{- if or .Values.env $kubeApi }}
           env:
-            {{- if $k8sCoord }}
-            # Lease namespace for the k8s coordination backend.
+            {{- if $kubeApi }}
+            # Lease namespace for the k8s coordination backend and default
+            # runner namespace for the kubernetes tray provider.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

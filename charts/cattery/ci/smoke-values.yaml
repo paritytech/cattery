@@ -10,6 +10,15 @@ config:
   providers:
     - name: docker-local
       type: docker
+    - name: k8s-local
+      type: kubernetes
+      namespace: cattery-runners   # = runners.namespace below
+      deployTimeout: 3m
+    - name: k8s-remote            # another cluster: no RBAC/token from this chart
+      type: kubernetes
+      server: https://10.0.0.1:6443
+      tokenFile: /cattery/secrets/target/token
+      caFile: /cattery/secrets/target/ca.crt
   trayTypes:
     - name: basic
       provider: docker-local
@@ -18,6 +27,59 @@ config:
       maxTrays: 2
       config:
         image: ghcr.io/actions/actions-runner:latest
+    - name: k8s-small
+      provider: k8s-local
+      githubOrg: testorg
+      runnerGroupId: 1
+      maxTrays: 3
+      config:
+        image: ghcr.io/actions/actions-runner:latest
+        serviceAccountName: cattery-runner
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+    - name: k8s-large
+      provider: k8s-local
+      githubOrg: testorg
+      runnerGroupId: 1
+      maxTrays: 1
+      config:
+        podTemplateRef: runner-large
+    - name: k8s-remote
+      provider: k8s-remote
+      githubOrg: testorg
+      runnerGroupId: 1
+      maxTrays: 1
+      config:
+        image: ghcr.io/actions/actions-runner:latest
+
+runners:
+  namespace: cattery-runners
+  createNamespace: true
+  serviceAccount:
+    create: true
+    name: cattery-runner
+    rules:
+      - apiGroups: [""]
+        resources: ["pods", "pods/exec", "pods/log"]
+        verbs: ["get", "list", "watch", "create", "delete"]
+  podTemplates:
+    runner-large:
+      metadata:
+        labels:
+          Team: CI   # mixed case survives: rendered with toYaml, not through cattery's loader
+      spec:
+        serviceAccountName: cattery-runner
+        nodeSelector:
+          kubernetes.io/os: linux
+        containers:
+          - name: runner
+            image: ghcr.io/actions/actions-runner:latest
+            resources:
+              requests:
+                cpu: "4"
+                memory: 8Gi
 
 secretFiles:
   testorg-pk:

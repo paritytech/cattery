@@ -1,0 +1,21 @@
+{{- range $name, $tpl := .Values.runners.podTemplates }}
+---
+# Referenced from config.trayTypes[].config.podTemplateRef (kubernetes
+# provider). Rendered with toYaml, so the case of label, nodeSelector and
+# other map keys is preserved; cattery's own config loader lowercases every
+# map key under trayType.config.
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "cattery.runnersNamespace" $ }}
+  labels:
+    {{- include "cattery.labels" $ | nindent 4 }}
+template:
+  {{- with $tpl.metadata }}
+  metadata:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  spec:
+    {{- required (printf "runners.podTemplates.%s.spec is required" $name) $tpl.spec | toYaml | nindent 4 }}
+{{- end }}
