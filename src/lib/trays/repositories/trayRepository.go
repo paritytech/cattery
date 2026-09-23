@@ -22,4 +22,10 @@ type TrayRepository interface {
 	// statusChanged is older than the corresponding duration. A status absent
 	// from the map is not checked.
 	GetStale(ctx context.Context, thresholds map[trays.TrayStatus]time.Duration) ([]*trays.Tray, error)
+	// FinishJob atomically clears the row's jobStartedAt and returns the row
+	// as it was *before* the clear, so the caller can bill the elapsed runner
+	// time to the tray's repository. The read-and-clear is a single operation:
+	// concurrent or retried teardowns see a zero JobStartedAt and so account
+	// for the job exactly once. Returns (nil, nil) if the row is missing.
+	FinishJob(ctx context.Context, trayId string) (*trays.Tray, error)
 }

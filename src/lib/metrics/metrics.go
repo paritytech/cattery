@@ -38,6 +38,16 @@ var (
 		Help: "Number of errors while handling scale set messages (job started/completed, scaling)",
 	}, []string{"org", "tray_type"})
 
+	jobSecondsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cattery_job_seconds_total",
+		Help: "Runner seconds consumed by finished jobs, by repository",
+	}, []string{"org", "tray_type", "repository"})
+
+	jobsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cattery_jobs_total",
+		Help: "Number of finished jobs, by repository",
+	}, []string{"org", "tray_type", "repository"})
+
 	// Gauges
 
 	scaleSetPendingJobs = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -73,7 +83,7 @@ var (
 	registeredTraysDesc = prometheus.NewDesc(
 		"cattery_registered_trays",
 		"Number of currently registered trays",
-		[]string{"org", "tray_type"}, nil,
+		[]string{"org", "tray_type", "repository"}, nil,
 	)
 )
 
@@ -133,6 +143,14 @@ func ScaleSetRegisteredRunnersSet(org string, trayType string, count int) {
 	scaleSetRegisteredRunners.WithLabelValues(org, trayType).Set(float64(count))
 }
 
+// JobFinished records one finished job's runner time against its repository.
+// Called once per tray from TrayManager.DeleteTray, which every teardown path
+// funnels through, so preempted and stale-reaped jobs are counted too.
+func JobFinished(org string, trayType string, repository string, seconds float64) {
+	jobSecondsTotal.WithLabelValues(org, trayType, repository).Add(seconds)
+	jobsTotal.WithLabelValues(org, trayType, repository).Inc()
+}
+
 // trayCollector queries the database on each Prometheus scrape.
 type trayCollector struct {
 	lister TrayLister
@@ -152,15 +170,18 @@ func (c *trayCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	counts := make(map[[2]string]int)
+	// A tray that has not been assigned a job yet has no repository; it is
+	// reported under the empty label rather than dropped, since it still
+	// occupies a runner.
+	counts := make(map[[3]string]int)
 	for _, t := range allTrays {
 		if t.Status != trays.TrayStatusDeleting {
-			counts[[2]string{t.GitHubOrgName, t.TrayTypeName}]++
+			counts[[3]string{t.GitHubOrgName, t.TrayTypeName, t.Repository}]++
 		}
 	}
 
 	for key, count := range counts {
-		ch <- prometheus.MustNewConstMetric(registeredTraysDesc, prometheus.GaugeValue, float64(count), key[0], key[1])
+		ch <- prometheus.MustNewConstMetric(registeredTraysDesc, prometheus.GaugeValue, float64(count), key[0], key[1], key[2])
 	}
 }
 

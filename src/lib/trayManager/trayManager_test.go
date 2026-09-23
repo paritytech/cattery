@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -781,4 +782,100 @@ func TestStaleConfigWithDefaults(t *testing.T) {
 		assert.Equal(t, 30*time.Second, out.PollInterval)
 		assert.Equal(t, config.DefaultStaleThresholds, out.Thresholds)
 	})
+}
+
+// --- Per-repository job accounting ---
+
+// gatherCounter reads a counter's current value straight from the default
+// registry, so these tests assert on the metric Cattery actually exposes
+// rather than on a mock's bookkeeping.
+func gatherCounter(t *testing.T, name string, labels map[string]string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	assert.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			matched := 0
+			for _, lp := range m.GetLabel() {
+				if want, ok := labels[lp.GetName()]; ok && want == lp.GetValue() {
+					matched++
+				}
+			}
+			if matched == len(labels) {
+				return m.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
+}
+
+func jobSeconds(t *testing.T, org, trayType, repo string) float64 {
+	t.Helper()
+	return gatherCounter(t, "cattery_job_seconds_total",
+		map[string]string{"org": org, "tray_type": trayType, "repository": repo})
+}
+
+func TestDeleteTray_RecordsConsumedRunnerSeconds(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		TrayTypeName:  "big",
+		ProviderName:  "docker",
+		GitHubOrgName: "acct-org",
+		Repository:    "acct-repo",
+		JobStartedAt:  time.Now().Add(-30 * time.Second),
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: &mockProvider{name: "docker"}})
+
+	before := jobSeconds(t, "acct-org", "big", "acct-repo")
+	_, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.NoError(t, err)
+
+	assert.InDelta(t, 30.0, jobSeconds(t, "acct-org", "big", "acct-repo")-before, 2.0)
+}
+
+func TestDeleteTray_RetriedDeleteRecordsJobOnce(t *testing.T) {
+	// Cleanup failure leaves the row in "deleting" for the stale handler to
+	// retry, so DeleteTray can run twice on the same tray. The job's runner
+	// time must be counted exactly once.
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		TrayTypeName:  "big",
+		ProviderName:  "docker",
+		GitHubOrgName: "once-org",
+		Repository:    "once-repo",
+		JobStartedAt:  time.Now().Add(-10 * time.Second),
+	}
+	prov := &mockProvider{name: "docker", cleanErr: errors.New("boom")}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
+
+	before := jobSeconds(t, "once-org", "big", "once-repo")
+	_, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.NoError(t, err)
+	_, err = tm.DeleteTray(context.Background(), "tray-1")
+	assert.NoError(t, err)
+
+	assert.InDelta(t, 10.0, jobSeconds(t, "once-org", "big", "once-repo")-before, 2.0)
+}
+
+func TestDeleteTray_TrayWithoutJobRecordsNothing(t *testing.T) {
+	// Creation-failure cleanup deletes trays that never ran a job. They have
+	// no start time and must not be counted against any repository.
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		TrayTypeName:  "big",
+		ProviderName:  "docker",
+		GitHubOrgName: "nojob-org",
+	}
+	tm := newTestManager(repo, &mockProviderFactory{provider: &mockProvider{name: "docker"}})
+
+	_, err := tm.DeleteTray(context.Background(), "tray-1")
+	assert.NoError(t, err)
+
+	assert.Equal(t, 0.0, jobSeconds(t, "nojob-org", "big", ""))
 }
