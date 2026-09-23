@@ -8,7 +8,7 @@ Cattery follows a **server/agent** architecture:
 
 ```
 GitHub Actions                Cattery Server               Infrastructure
- (Scale Set API)                  |                    (Docker / GCE / Nomad)
+ (Scale Set API)                  |              (Docker / GCE / Nomad / Kubernetes)
        |                          |                              |
        |-- job demand ----------->|                              |
        |                          |-- provision tray ----------->|
@@ -32,7 +32,7 @@ A tray that sits in any non-running status for longer than a configurable thresh
 
 ## Features
 
-- **Multi-provider** — Ships with Docker, Google Compute Engine and Nomad providers, new providers can be added
+- **Multi-provider** — Ships with Docker, Google Compute Engine, Nomad and Kubernetes providers, new providers can be added
 - **Scale-to-zero** — Runners are only provisioned when jobs are queued
 - **Ephemeral runners** — Each job gets a fresh, isolated environment via JIT configuration
 - **Multi-org support** — Manage runners across multiple GitHub organizations from a single server
@@ -45,7 +45,7 @@ A tray that sits in any non-running status for longer than a configurable thresh
 - Go 1.26+
 - MongoDB
 - A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) installed on your organization with these organization permissions: Self-hosted runners (read and write, for the runner scale set and JIT runner configuration), Actions (read and write, to re-run failed jobs), Checks (read) and Pull requests (read) for the preemption recovery checks
-- Docker, GCP credentials, or a Nomad cluster depending on your provider choice
+- Docker, GCP credentials, a Nomad cluster or a Kubernetes cluster depending on your provider choice
 
 ## Quick start
 

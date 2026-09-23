@@ -72,6 +72,10 @@ func GetProvider(providerName string) (TrayProvider, error) {
 		if p := NewNomadProvider(providerName, provider); p != nil {
 			result = p
 		}
+	case "kubernetes":
+		if p := NewKubernetesProvider(providerName, provider); p != nil {
+			result = p
+		}
 	default:
 		return nil, errors.New("unknown provider type: " + provider["type"])
 	}

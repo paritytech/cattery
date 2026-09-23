@@ -131,6 +131,13 @@ func LoadConfig(configPath *string) (*CatteryConfig, error) {
 			var nc NomadTrayConfig
 			decodeError = mapstructure.Decode(trayType.Config, &nc)
 			trayType.Config = nc
+		case "kubernetes":
+			var kc KubernetesTrayConfig
+			decodeError = mapstructure.Decode(trayType.Config, &kc)
+			if decodeError == nil {
+				decodeError = kc.Validate(trayType.Name)
+			}
+			trayType.Config = kc
 		//case "scaleway":
 		default:
 

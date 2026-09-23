@@ -104,8 +104,11 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
-      # A bare kind cluster is enough: the election tests only use the built-in
-      # coordination.k8s.io Lease API and connect out-of-cluster via the
+      # A bare kind cluster is enough. The election tests only use the built-in
+      # coordination.k8s.io Lease API; the kubernetes provider tests create
+      # Jobs in the default namespace and pull registry.k8s.io/pause plus the
+      # published cattery image (override with CATTERY_TEST_AGENT_IMAGE after
+      # `kind load docker-image`). Both connect out-of-cluster via the
       # kubeconfig kind-action writes to ~/.kube/config.
       - name: Start kind cluster
         uses: helm/kind-action@v1
