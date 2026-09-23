@@ -807,3 +807,110 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+
+// TestUpdateStatusStampsJobStartedAt verifies that the Running transition
+// (only SetJob makes it) records when the job began. The accounting in
+// DeleteTray cannot use statusChanged, which later updates overwrite.
+func TestUpdateStatusStampsJobStartedAt(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+	insertTestTrays(t, collection, []*TestTray{
+		createTestTray("tray-1", "test-type", trays.TrayStatusRegistered, 0)})
+
+	running, err := repo.UpdateStatus(context.Background(), "tray-1", trays.TrayStatusRunning, 1, 2, 0, "some-repo", "build", "ci")
+	if err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+	if running.JobStartedAt.IsZero() {
+		t.Fatal("expected JobStartedAt to be stamped on the Running transition")
+	}
+
+	// The subsequent Deleting update must not clobber it: DeleteTray performs
+	// exactly this update before reading the start time back.
+	deleting, err := repo.UpdateStatus(context.Background(), "tray-1", trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
+	if err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+	if !deleting.JobStartedAt.Equal(running.JobStartedAt) {
+		t.Errorf("JobStartedAt changed across the Deleting update: %v -> %v",
+			running.JobStartedAt, deleting.JobStartedAt)
+	}
+}
+
+// TestUpdateStatusDoesNotStampJobStartedAtForOtherStatuses guards the inverse:
+// a tray that never ran a job must have no start time, so DeleteTray skips it.
+func TestUpdateStatusDoesNotStampJobStartedAtForOtherStatuses(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+	insertTestTrays(t, collection, []*TestTray{
+		createTestTray("tray-1", "test-type", trays.TrayStatusCreating, 0)})
+
+	registered, err := repo.UpdateStatus(context.Background(), "tray-1", trays.TrayStatusRegistered, 0, 0, 7, "", "", "")
+	if err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+	if !registered.JobStartedAt.IsZero() {
+		t.Errorf("expected no JobStartedAt for a tray without a job, got %v", registered.JobStartedAt)
+	}
+}
+
+// TestFinishJobReadsAndClearsAtomically is the exactly-once guarantee: the
+// first call sees the start time, the second sees nothing. Without this, a
+// tray whose cleanup failed would be billed again by the stale handler's retry.
+func TestFinishJobReadsAndClearsAtomically(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+	insertTestTrays(t, collection, []*TestTray{
+		createTestTray("tray-1", "test-type", trays.TrayStatusRegistered, 0)})
+
+	if _, err := repo.UpdateStatus(context.Background(), "tray-1", trays.TrayStatusRunning, 1, 2, 0, "some-repo", "build", "ci"); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+
+	first, err := repo.FinishJob(context.Background(), "tray-1")
+	if err != nil {
+		t.Fatalf("FinishJob failed: %v", err)
+	}
+	if first == nil || first.JobStartedAt.IsZero() {
+		t.Fatal("first FinishJob should return the tray with its start time")
+	}
+	if first.Repository != "some-repo" {
+		t.Errorf("expected repository to survive FinishJob, got %q", first.Repository)
+	}
+
+	second, err := repo.FinishJob(context.Background(), "tray-1")
+	if err != nil {
+		t.Fatalf("second FinishJob failed: %v", err)
+	}
+	if second == nil {
+		t.Fatal("second FinishJob should still return the row")
+	}
+	if !second.JobStartedAt.IsZero() {
+		t.Errorf("second FinishJob should see a cleared start time, got %v", second.JobStartedAt)
+	}
+}
+
+func TestFinishJobMissingRow(t *testing.T) {
+	client, collection := setupTestCollection(t)
+	defer client.Disconnect(context.Background())
+
+	repo := NewMongodbTrayRepository()
+	repo.Connect(collection)
+
+	tray, err := repo.FinishJob(context.Background(), "nonexistent")
+	if err != nil {
+		t.Fatalf("FinishJob on a missing row should not error, got %v", err)
+	}
+	if tray != nil {
+		t.Errorf("expected nil tray for a missing row, got %v", tray)
+	}
+}

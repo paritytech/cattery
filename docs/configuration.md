@@ -93,7 +93,7 @@ trayTypes:
 | Key                  | Type   | Required | Description                                                                                                              |
 |----------------------|--------|----------|--------------------------------------------------------------------------------------------------------------------------|
 | listenAddress        | string | yes      | Host:port for the HTTP server to bind (e.g., 0.0.0.0:5137).                                                             |
-| statusListenAddress  | string | no       | Separate host:port for the /status and /metrics endpoints. If empty or equal to listenAddress, served on the agent port. |
+| statusListenAddress  | string | no       | Separate host:port for the /status and /metrics endpoints. If empty or equal to listenAddress, served on the agent port. See [metrics.md](metrics.md). |
 | advertiseUrl         | string | yes      | Public base URL where the server is reachable. Passed to agents.                                                         |
 | agentSecret          | string | no       | Bearer token the server requires on every `/agent/*` request. **Leave empty:** the agent does not send this token yet, so setting it rejects every agent registration. |
 

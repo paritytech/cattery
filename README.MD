@@ -135,6 +135,10 @@ See [charts/cattery/values.yaml](charts/cattery/values.yaml) for the available v
 
 See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering server, database, stale tray cleanup, leader election, GitHub App, providers, and tray types.
 
+## Metrics
+
+See [docs/metrics.md](docs/metrics.md) for the metrics exposed on `/metrics`, including per-repository runner consumption.
+
 ## License
 
 [MIT](LICENSE)
