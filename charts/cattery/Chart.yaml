@@ -2,6 +2,10 @@ apiVersion: v2
 name: cattery
 description: Scheduler and lifecycle manager for GitHub Actions self-hosted runners
 type: application
+# Bump `version` and `appVersion` together once a cattery release that ships
+# the kubernetes provider exists (later than 0.3.5): the chart publishes on a
+# version change, and it must not publish while its default image tag
+# (appVersion) cannot run the configuration its values document.
 version: 0.3.0
 appVersion: "0.2.0"
 home: https://github.com/paritytech/cattery

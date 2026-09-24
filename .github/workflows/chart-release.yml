@@ -24,7 +24,10 @@ concurrency:
 env:
   CHART_PATH: charts/cattery
   CHART_NAME: cattery
-  HELM_VERSION: v3.16.3
+  # helm-unittest 1.x declares platformHooks in its plugin.yaml, which Helm
+  # understands from 3.18 on; older versions refuse to load the plugin.
+  HELM_VERSION: v3.21.4
+  HELM_UNITTEST_VERSION: 1.1.2
 
 jobs:
   lint:
@@ -45,6 +48,14 @@ jobs:
 
       - name: helm template (smoke values)
         run: helm template smoke "${CHART_PATH}" -f "${CHART_PATH}/ci/smoke-values.yaml" > /dev/null
+
+      # Template-level unit tests (charts/cattery/tests): gating of RBAC and
+      # the service account token, the runners.namespace guard, the runner
+      # ServiceAccount and PodTemplate rendering.
+      - name: helm unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git --version "${HELM_UNITTEST_VERSION}"
+          helm unittest "${CHART_PATH}"
 
   check-version:
     name: check for version bump
@@ -125,6 +136,15 @@ jobs:
             git -C repo switch -c "${PAGES_BRANCH}"
           else
             git worktree add --orphan -b "${PAGES_BRANCH}" repo
+          fi
+
+          # A published version is immutable: never overwrite an existing
+          # package, whatever the version comparison above concluded (a
+          # rebase merge or a manual dispatch can reach here for a version
+          # that is already out).
+          if [ -f "repo/${CHART_NAME}-${VERSION}.tgz" ]; then
+            echo "${CHART_NAME} ${VERSION} is already published; not overwriting it."
+            exit 0
           fi
 
           # add the new package alongside existing ones (older versions are kept)

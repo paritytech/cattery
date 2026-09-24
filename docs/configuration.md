@@ -47,6 +47,9 @@ providers:
     token: <nomad-acl-token>
     namespace: runners
 
+  - name: k8s-prod
+    type: kubernetes
+
 trayTypes:
   - name: cattery-docker-local
     provider: docker-local
@@ -84,6 +87,19 @@ trayTypes:
       runnerFolder: /cattery
       script: |
         echo "extra setup for $TRAY_NAME"
+
+  - name: cattery-k8s
+    provider: k8s-prod
+    githubOrg: my-org
+    runnerGroupId: 3
+    maxTrays: 20
+    shutdown: false
+    config:
+      image: ghcr.io/actions/actions-runner:2.333.0
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
 ```
 
 ### Config sections
@@ -147,7 +163,7 @@ Common fields for all providers:
 | Key  | Type   | Required | Description                                         |
 |------|--------|----------|-----------------------------------------------------|
 | name | string | yes      | Provider name to reference from trayTypes.          |
-| type | enum   | yes      | Provider type. Currently implemented: docker, google (GCE), nomad. |
+| type | enum   | yes      | Provider type. Currently implemented: docker, google (GCE), nomad, kubernetes. |
 
 Provider-specific fields:
 
@@ -174,6 +190,30 @@ Provider-specific fields:
   | region    | string | no       | Nomad region. Defaults to the agent's region.                                                     |
   | tlsCaFile | string | no       | Path to a PEM CA bundle for verifying the Nomad agent's TLS certificate.                          |
   | insecure  | bool   | no       | Skip TLS verification. Dev-only. Accepts `true`/`false`, quoted or not.                          |
+
+- kubernetes
+
+  Cattery runs each tray as a **batch/v1 Job** in a Kubernetes cluster: the one it runs in or any other. The Job's pod runs the cattery agent, which an init container injects, so stock runner images such as `ghcr.io/actions/actions-runner` work unmodified. The pod shape is described per tray type (see the kubernetes config section below). All keys are optional.
+
+  Cluster access is one of three modes:
+
+  - **In-cluster** (nothing set): the pod's service account. Outside a cluster, e.g. on a dev box, the ambient kubeconfig (`KUBECONFIG` or `~/.kube/config`) is used instead.
+  - **Kubeconfig** (`kubeconfig` and/or `context`): a kubeconfig file, for example one mounted from a Secret.
+  - **Server** (`server` plus `token`/`tokenFile` and `caFile`/`insecure`): a target cluster's API server with a bearer token, typically a service account token from that cluster. Use it when a kubeconfig would need a cloud auth plugin the cattery image does not ship.
+
+  | Key           | Type     | Required | Description                                                                                       |
+  |---------------|----------|----------|---------------------------------------------------------------------------------------------------|
+  | kubeconfig    | string   | no       | Path to a kubeconfig file.                                                                        |
+  | context       | string   | no       | Kubeconfig context to use (with `kubeconfig`, or with the ambient kubeconfig).                    |
+  | server        | string   | no       | API server URL of the target cluster, e.g. `https://10.0.0.1:6443`. Mutually exclusive with `kubeconfig`/`context`. |
+  | tokenFile     | string   | no       | `server` only. Path to a file holding the bearer token; re-read by the client, so rotated tokens keep working. |
+  | token         | string   | no       | `server` only. Inline bearer token; prefer `tokenFile`.                                           |
+  | caFile        | string   | no       | `server` only. PEM bundle to verify the API server's certificate.                                 |
+  | insecure      | bool     | no       | `server` only. Skip TLS verification. Dev-only. Mutually exclusive with `caFile`.                 |
+  | namespace     | string   | no       | Namespace the Jobs are created in. Defaults to the server's own namespace in-cluster, to the context's namespace with a kubeconfig, and to `default` with `server`. Tray types can override it. |
+  | deployTimeout | duration | no       | How long cattery waits for a tray's pod to be `Running` before giving up on the tray. Default `5m`. Keep it at or below `stale.thresholds.creating`. |
+
+  **RBAC.** In every namespace trays are created in, the identity cattery uses (its service account, the kubeconfig user, or the token's service account) needs `create`, `get` and `delete` on `jobs.batch`, `get`, `list` and `watch` on `pods`, and `get` on `podtemplates` when tray types use `podTemplateRef`. The Helm chart provisions this, and a ServiceAccount for the runner pods, for in-cluster providers in its `runners.namespace`.
 
 #### trayTypes
 Defines one or more tray "profiles" that the Tray Manager can maintain.
@@ -272,6 +312,49 @@ Provider-specific config under trayType.config:
   **Resource shapes.** Resources, driver, constraints and reschedule policy are baked into the parent job spec — they cannot be set per-dispatch. To run trays at different sizes, register multiple parameterized parent jobs and reference them by `jobId` from different trayTypes.
 
   **`extraMetadata` and Nomad meta.** Any keys in the trayType's `extraMetadata` are forwarded as Nomad dispatch meta alongside `tray_name` / `bootstrap_token` / `cattery_url`. The provider-owned keys are written *last* and cannot be clobbered by `extraMetadata`. Nomad rejects dispatch meta keys that are not declared in the parent job's `meta_required` or `meta_optional`, so any keys you add via `extraMetadata` must also be declared `meta_optional` in the parameterized parent job.
+
+- kubernetes config
+
+  Each tray is a Job named after the tray id with `backoffLimit: 0`, `podReplacementPolicy: Failed` and `restartPolicy: Never`: a pod that fails or is evicted is never replaced, because a second agent registering under the same tray id would break the one-tray-one-job model (jobs lost that way are re-run by the workflow restarter on a new tray). `ttlSecondsAfterFinished` lets Kubernetes garbage-collect finished Jobs that cattery failed to delete.
+
+  The pod shape comes from one of two mutually exclusive sources: the typed fields below (`image` required), or `podTemplateRef`, the name of a `core/v1` PodTemplate object in the tray namespace whose `template` is used as-is (labels, annotations and spec). With `podTemplateRef` every typed pod-shape field is ignored (a warning is logged at start-up). Use a PodTemplate for anything the typed fields cannot express — sidecars (e.g. Docker-in-Docker for jobs that use `container:` or `services:`), volumes, affinity, security contexts, runtime classes — and whenever the case of map keys matters: cattery's config loader lowercases every map key in this file (`nodeSelector`, `labels`, `annotations`, `resources`), while a PodTemplate object is stored exactly as written. The Helm chart renders PodTemplates from its `runners.podTemplates` value.
+
+  | Key                          | Type     | Required      | Description                                                                                        |
+  |------------------------------|----------|---------------|----------------------------------------------------------------------------------------------------|
+  | agentVersion                 | string   | no            | How the agent binary gets into the pod. `server` (default): an init container downloads it from `<advertiseUrl>/agent/download`, so the agent always matches the running server. Any other value is a tag of `docker.io/paritytech/cattery` whose `/usr/local/bin/cattery` the init container copies (e.g. `0.2.0`, `latest`). |
+  | agentImage                   | string   | no            | Init container image override. Server mode needs `sh`, `wget` and CA certificates (default `docker.io/paritytech/cattery:latest`); tag mode needs `/usr/local/bin/cattery` and `cp` (default `docker.io/paritytech/cattery:<agentVersion>`). Builds from `main` are published as `docker.io/paritypr/cattery:<commit sha>`; pin those here. |
+  | agentResources               | object   | no            | `requests` / `limits` of the injected init container. Default requests `50m` CPU and `32Mi` memory, limits `500m` and `128Mi`, so the pod stays admissible under ResourceQuotas that require every container to declare resources; they do not add to the pod's scheduling footprint. |
+  | runnerFolder                 | string   | no            | Where `<folder>/bin/Runner.Listener` lives in the runner image; also the runner container's working directory unless the template sets one. Default `/home/runner` (the `ghcr.io/actions/actions-runner` layout). |
+  | runnerContainer              | string   | no            | `podTemplateRef` only: the container that runs the agent when the template has several. Default `runner`; a template with exactly one container always uses that one. |
+  | namespace                    | string   | no            | Overrides the provider namespace for this tray type. Needs RBAC (and PodTemplates) in that namespace. |
+  | ttlSecondsAfterFinished      | int      | no            | Job TTL after it finishes. Default `3600`; `0` deletes immediately.                               |
+  | activeDeadlineSeconds        | int      | no            | Hard bound on the whole tray lifetime, idle time included; a job still running when it expires is killed. Unset (`0`) by default. |
+  | image                        | string   | typed mode    | Runner image. Must contain the Actions runner under `runnerFolder` and `pkill` (procps), which the agent uses to stop the runner. |
+  | imagePullPolicy              | string   | no            | `Always`, `IfNotPresent` or `Never`.                                                              |
+  | imagePullSecrets             | []string | no            | Names of image pull secrets in the tray namespace.                                                |
+  | serviceAccountName           | string   | no            | Service account of the runner pod.                                                                |
+  | automountServiceAccountToken | bool     | no            | Default `false`: jobs run third-party code and get no API token unless asked for.                 |
+  | resources                    | object   | no            | `requests` / `limits` maps of resource name to quantity. Quantities are strings in Kubernetes syntax: `cpu: "2"`, `cpu: 500m`, `memory: 4Gi`. |
+  | nodeSelector                 | map      | no            | Node selector.                                                                                    |
+  | tolerations                  | list     | no            | Tolerations with `key`, `operator` (`Exists` or `Equal`), `value`, `effect` (`NoSchedule`, `PreferNoSchedule` or `NoExecute`) and `tolerationSeconds`. |
+  | labels, annotations          | map      | no            | Extra pod labels and annotations. Cattery's own labels win on conflict.                          |
+  | env                          | list     | no            | Literal env vars for the runner container as `name` / `value` entries; quote values that look like numbers or booleans (`value: "1"`). Values from Secrets or ConfigMaps need a PodTemplate. |
+  | runtimeClassName             | string   | no            | Runtime class, e.g. `gvisor`.                                                                     |
+  | priorityClassName            | string   | no            | Pod priority class.                                                                               |
+  | terminationGracePeriodSeconds | int     | no            | Grace period on pod deletion. Leave the agent a few seconds to unregister.                        |
+  | podTemplateRef               | string   | template mode | Name of a `core/v1` PodTemplate in the tray namespace.                                            |
+
+  **What cattery adds to the pod.** An `emptyDir` volume `cattery-agent` mounted at `/cattery-agent`; an init container `cattery-agent` that stages the binary there; and, on the runner container, `command: ["/cattery-agent/cattery"]`, `args: ["agent", "-i", <tray id>, "-s", <advertiseUrl>, "--runner-folder", <runnerFolder>]`, the env vars `CATTERY_URL` and `CATTERY_AGENT_ID`, the volume mount and, when unset, `workingDir`. The labels `app.kubernetes.io/managed-by=cattery`, `app.kubernetes.io/component=runner`, `cattery.io/tray-id`, `cattery.io/tray-type` and `cattery.io/provider` go on the Job and its pod (`kubectl get pods -l cattery.io/tray-type=<name>`). Typed-mode pods also get `enableServiceLinks: false`.
+
+  **Lifecycle.** `namespace` and `jobName` are stored in the tray's provider data before the Job is created, `jobUid` afterwards. Cattery then watches the pod: `Running` is success (agent registration is the readiness signal from there); an image pull or container configuration error, a `Failed` or `Succeeded` pod and a deleted pod fail the tray immediately; otherwise cattery gives up after `deployTimeout` and reports the last obstacle (typically the scheduler's `0/N nodes are available` message). A failed tray is deleted and recreated on the next demand signal. On cleanup the Job is deleted with background propagation, which removes its pod too; a Job that is already gone is not an error. Deleting the pod sends the agent SIGTERM, so it unregisters with the SigTerm reason and the workflow restarter re-runs the job on a new tray.
+
+  **Notes.**
+  - The tray type name becomes the Job name: it must be a DNS-1123 label of at most 40 characters, so the generated pod name fits in 63.
+  - `extraMetadata` is ignored by this provider; use `env`, `labels` or `annotations`.
+  - `shutdown` has no effect inside a container; set it to `false`.
+  - The injected init container satisfies the `restricted` Pod Security Standard (no privilege escalation, all capabilities dropped, non-root, `RuntimeDefault` seccomp), so it is admissible in namespaces that enforce it; a custom `agentImage` must therefore run as a non-root user. A PodTemplate whose pod-level `securityContext.runAsUser` is `0` still works: the init container is pinned to the published image's uid (65532) instead of inheriting root. The runner container's security context is yours: the typed fields do not expose it, use `podTemplateRef` when a policy requires one.
+  - In server mode the init container downloads with busybox `wget`, which does not verify TLS certificates. Pin `agentVersion` (or `agentImage`) where that matters; note that a `latest` tag also implies `imagePullPolicy: Always` on the init container.
+  - The config is validated at start-up (name, mode, pull policy, quantities, tolerations, env names, durations); a broken tray type refuses to load instead of failing every tray it creates. Like the other providers, unknown keys are ignored.
 
 
 Notes:

@@ -1,0 +1,58 @@
+{{- $ns := include "cattery.runnersNamespace" . -}}
+{{- if and .Values.runners.createNamespace (ne $ns .Release.Namespace) }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "cattery.labels" . | nindent 4 }}
+{{- end }}
+{{- if .Values.runners.serviceAccount.create }}
+---
+# Identity of the runner pods: reference it from
+# config.trayTypes[].config.serviceAccountName. Runner pods execute
+# third-party code, so they never run as the cattery server's account.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cattery.runnerServiceAccountName" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cattery.labels" . | nindent 4 }}
+  {{- with .Values.runners.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- with .Values.runners.serviceAccount.rules }}
+---
+# Permissions the runner pods get in runners.namespace (e.g. for the Actions
+# runner's Kubernetes container hooks). Pods only see them when their tray
+# type also sets automountServiceAccountToken: true.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cattery.runnerServiceAccountName" $ }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cattery.labels" $ | nindent 4 }}
+rules:
+  {{- toYaml . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cattery.runnerServiceAccountName" $ }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cattery.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cattery.runnerServiceAccountName" $ }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cattery.runnerServiceAccountName" $ }}
+    namespace: {{ $ns }}
+{{- end }}
+{{- end }}

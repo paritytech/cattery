@@ -1,0 +1,64 @@
+suite: deployment
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: keeps the service account token off by default
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - notExists:
+          path: spec.template.spec.containers[0].env
+
+  - it: mounts the token and sets POD_NAMESPACE for an in-cluster kubernetes provider
+    set:
+      config.providers:
+        - name: k8s
+          type: kubernetes
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+
+  - it: mounts the token for the k8s coordination backend
+    set:
+      config.coordination.backend: k8s
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+
+  - it: leaves the token off for providers that target another cluster
+    set:
+      config.providers:
+        - name: remote-kubeconfig
+          type: kubernetes
+          kubeconfig: /cattery/secrets/target/kubeconfig
+        - name: remote-server
+          type: kubernetes
+          server: https://10.0.0.1:6443
+          tokenFile: /cattery/secrets/target/token
+        - name: remote-context
+          type: kubernetes
+          context: prod-runners
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - notExists:
+          path: spec.template.spec.containers[0].env
+
+  - it: honours serviceAccount.automountServiceAccountToken when nothing needs the API
+    set:
+      serviceAccount.automountServiceAccountToken: true
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true

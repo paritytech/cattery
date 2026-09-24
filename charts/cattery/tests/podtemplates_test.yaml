@@ -1,0 +1,76 @@
+suite: podtemplates
+templates:
+  - templates/podtemplates.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a PodTemplate per entry in runners.namespace with keys as written
+    set:
+      runners.namespace: cattery-runners
+      runners.podTemplates:
+        runner-large:
+          metadata:
+            labels:
+              Team: CI
+          spec:
+            serviceAccountName: cattery-runner
+            nodeSelector:
+              kubernetes.io/os: linux
+            containers:
+              - name: runner
+                image: ghcr.io/actions/actions-runner:2.333.0
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PodTemplate
+      - equal:
+          path: metadata.name
+          value: runner-large
+      - equal:
+          path: metadata.namespace
+          value: cattery-runners
+      - equal:
+          path: template.metadata.labels
+          value:
+            Team: CI
+      - equal:
+          path: template.spec.serviceAccountName
+          value: cattery-runner
+      - equal:
+          path: template.spec.containers[0].image
+          value: ghcr.io/actions/actions-runner:2.333.0
+
+  - it: renders one document per template and tolerates a missing metadata
+    set:
+      runners.podTemplates:
+        a:
+          spec:
+            containers:
+              - name: runner
+                image: a
+        b:
+          spec:
+            containers:
+              - name: runner
+                image: b
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        notExists:
+          path: template.metadata
+
+  - it: requires a spec
+    set:
+      runners.podTemplates:
+        broken:
+          metadata:
+            labels:
+              team: ci
+    asserts:
+      - failedTemplate:
+          errorPattern: runners.podTemplates.broken.spec is required

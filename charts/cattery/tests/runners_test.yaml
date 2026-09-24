@@ -1,0 +1,98 @@
+suite: runners
+templates:
+  - templates/runners.yaml
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: does not create the namespace when it is the release namespace
+    set:
+      runners.namespace: NAMESPACE
+      runners.createNamespace: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates namespace, service account, role and binding
+    set:
+      runners.namespace: cattery-runners
+      runners.createNamespace: true
+      runners.serviceAccount.create: true
+      runners.serviceAccount.annotations:
+        iam.gke.io/gcp-service-account: runner@example.iam.gserviceaccount.com
+      runners.serviceAccount.rules:
+        - apiGroups: [""]
+          resources: ["pods", "pods/exec", "pods/log"]
+          verbs: ["get", "list", "watch", "create", "delete"]
+    asserts:
+      - hasDocuments:
+          count: 4
+      - documentIndex: 0
+        isKind:
+          of: Namespace
+      - documentIndex: 0
+        equal:
+          path: metadata.name
+          value: cattery-runners
+      - documentIndex: 1
+        isKind:
+          of: ServiceAccount
+      - documentIndex: 1
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cattery-runner
+      - documentIndex: 1
+        equal:
+          path: metadata.namespace
+          value: cattery-runners
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations
+          value:
+            iam.gke.io/gcp-service-account: runner@example.iam.gserviceaccount.com
+      - documentIndex: 2
+        isKind:
+          of: Role
+      - documentIndex: 2
+        equal:
+          path: metadata.namespace
+          value: cattery-runners
+      - documentIndex: 2
+        equal:
+          path: rules[0].resources
+          value: ["pods", "pods/exec", "pods/log"]
+      - documentIndex: 3
+        isKind:
+          of: RoleBinding
+      - documentIndex: 3
+        equal:
+          path: roleRef.name
+          value: RELEASE-NAME-cattery-runner
+      - documentIndex: 3
+        equal:
+          path: subjects[0].name
+          value: RELEASE-NAME-cattery-runner
+      - documentIndex: 3
+        equal:
+          path: subjects[0].namespace
+          value: cattery-runners
+
+  - it: honours a custom service account name and skips the role without rules
+    set:
+      runners.serviceAccount.create: true
+      runners.serviceAccount.name: cattery-runner
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ServiceAccount
+      - equal:
+          path: metadata.name
+          value: cattery-runner
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
+      - notExists:
+          path: metadata.annotations

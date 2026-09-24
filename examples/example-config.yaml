@@ -86,6 +86,21 @@ providers:
     tlsCaFile: path/to/nomad-ca.pem  # optional
     insecure: false          # optional, skip TLS verification (dev only)
 
+  - name: k8s-prod
+    type: kubernetes
+    # All optional. Cluster access, one of:
+    #   - nothing: in-cluster credentials (the pod's service account; the Helm
+    #     chart provisions the RBAC), or the ambient kubeconfig on a dev box
+    #   - a kubeconfig file:
+    #     kubeconfig: /cattery/secrets/target/kubeconfig
+    #     context: prod-runners
+    #   - another cluster's API server with a service account token from it:
+    #     server: https://10.0.0.1:6443
+    #     tokenFile: /cattery/secrets/target/token
+    #     caFile: /cattery/secrets/target/ca.crt   # or insecure: true (dev only)
+    namespace: cattery-runners   # default: the server's own namespace (in-cluster)
+    deployTimeout: 5m            # give up on a tray whose pod is not Running by then
+
 trayTypes:
   # The tray type name is the runner scale set name: target it with
   # `runs-on: <name>` in workflows that can use the runner group.
@@ -142,3 +157,49 @@ trayTypes:
       script: |
         echo "extra setup for $TRAY_NAME"
         # mkfs / mount scratch volume, install build tools, etc.
+
+  # Kubernetes, typed pod shape: one Job (backoffLimit 0) per tray, the
+  # agent is injected by an init container, so the stock runner image works.
+  # Name must be a DNS-1123 label of at most 40 characters (it is the Job name).
+  - name: cattery-k8s
+    provider: k8s-prod
+    githubOrg: my-org
+    runnerGroupId: 3
+    maxTrays: 20
+    shutdown: false          # has no effect in a container
+    config:
+      image: ghcr.io/actions/actions-runner:2.333.0
+      # agentVersion: server (default) downloads the agent from this server;
+      # a tag (0.2.0, latest) copies it from docker.io/paritytech/cattery:<tag>.
+      agentVersion: server
+      runnerFolder: /home/runner   # default; where bin/Runner.Listener lives
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          memory: 4Gi
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      env:
+        - name: RUNNER_TOOL_CACHE
+          value: /home/runner/_tool
+      ttlSecondsAfterFinished: 3600   # k8s garbage-collects finished Jobs cattery missed
+
+  # Kubernetes, pod shape from a core/v1 PodTemplate object (kubectl apply, or
+  # the chart's runners.podTemplates value). Use it for sidecars, volumes,
+  # affinity, security contexts — and for map keys whose case matters, since
+  # this file's keys are lowercased on load. Typed pod fields are ignored here.
+  - name: cattery-k8s-dind
+    provider: k8s-prod
+    githubOrg: my-org
+    runnerGroupId: 3
+    maxTrays: 5
+    config:
+      podTemplateRef: cattery-runner-dind   # in the tray namespace
+      runnerContainer: runner               # which of the template's containers runs the agent

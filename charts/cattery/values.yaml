@@ -75,6 +75,16 @@ config:
   # - name: gce
   #   type: google
   #   project: my-gcp-project
+  # - name: k8s                # trays as Jobs in THIS cluster: in-cluster
+  #   type: kubernetes         # credentials, RBAC and the SA token come from
+  #   namespace: cattery-runners   # this chart; must equal runners.namespace
+  #   # deployTimeout: 5m
+  # - name: k8s-remote         # trays in ANOTHER cluster: a token + CA (or a
+  #   type: kubernetes         # kubeconfig) mounted through secretFiles
+  #   server: https://10.0.0.1:6443
+  #   tokenFile: /cattery/secrets/target/token
+  #   caFile: /cattery/secrets/target/ca.crt
+  #   namespace: cattery-runners
 
   trayTypes: []
   # - name: my-runner
@@ -85,6 +95,83 @@ config:
   #   shutdown: true
   #   config:
   #     image: my-runner-image:latest
+  # - name: k8s-small          # DNS-1123 label, at most 40 characters
+  #   provider: k8s
+  #   githubOrg: my-org
+  #   runnerGroupId: 1
+  #   maxTrays: 10
+  #   config:
+  #     image: ghcr.io/actions/actions-runner:2.333.0
+  #     resources:
+  #       requests: {cpu: "2", memory: 4Gi}
+  # - name: k8s-large
+  #   provider: k8s
+  #   githubOrg: my-org
+  #   runnerGroupId: 1
+  #   maxTrays: 5
+  #   config:
+  #     podTemplateRef: runner-large   # see runners.podTemplates below
+
+# Runner-side objects for a kubernetes provider that targets THIS cluster.
+# Providers that point at another cluster (kubeconfig / context / server) get
+# nothing from this block.
+runners:
+  # Namespace the runner Jobs live in; the runner RBAC, ServiceAccount and
+  # PodTemplates below are created there. Every in-cluster kubernetes provider
+  # must set config.providers[].namespace to the same value (the chart refuses
+  # to render otherwise). Defaults to the release namespace.
+  namespace: ""
+  createNamespace: false
+
+  # Identity of the runner pods, referenced from
+  # config.trayTypes[].config.serviceAccountName. Runner pods execute
+  # third-party code and should not run as the server's account or as the
+  # namespace's default account.
+  serviceAccount:
+    create: false
+    name: ""            # defaults to <release fullname>-runner
+    annotations: {}     # e.g. GKE Workload Identity
+    # Role rules granted to that account in runners.namespace; empty creates
+    # no Role. Pods only see them when the tray type also sets
+    # automountServiceAccountToken: true. The Actions runner's Kubernetes
+    # container hooks (jobs with `container:` / `services:` without Docker)
+    # need roughly:
+    # rules:
+    #   - apiGroups: [""]
+    #     resources: ["pods", "pods/exec", "pods/log"]
+    #     verbs: ["get", "list", "watch", "create", "delete"]
+    #   - apiGroups: ["batch"]
+    #     resources: ["jobs"]
+    #     verbs: ["get", "list", "create", "delete"]
+    #   - apiGroups: [""]
+    #     resources: ["secrets"]
+    #     verbs: ["get", "list", "create", "delete"]
+    rules: []
+
+  # core/v1 PodTemplate objects for tray types that use
+  # config.podTemplateRef: the key is the object name, the value is a pod
+  # template (metadata.labels/annotations + spec). Use these for anything the
+  # typed trayType.config fields cannot express — sidecars such as
+  # docker-in-docker, volumes, affinity, security contexts — and for map keys
+  # whose case matters: unlike config.trayTypes[].config, which cattery's
+  # loader lowercases, these are rendered verbatim. cattery injects its agent
+  # into the container named `runner` (or the only container) and forces
+  # restartPolicy Never.
+  podTemplates: {}
+  # podTemplates:
+  #   runner-large:
+  #     metadata:
+  #       labels:
+  #         team: ci
+  #     spec:
+  #       serviceAccountName: cattery-runner
+  #       nodeSelector:
+  #         cloud.google.com/gke-spot: "true"
+  #       containers:
+  #         - name: runner
+  #           image: ghcr.io/actions/actions-runner:2.333.0
+  #           resources:
+  #             requests: {cpu: "8", memory: 32Gi}
 
 # Extra arbitrary files mounted into the container.
 #
@@ -113,14 +200,18 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
-  # Cattery only calls the Kubernetes API for the "k8s" coordination backend,
-  # which forces the token on regardless of this setting. Otherwise keep it off.
+  # Cattery calls this cluster's API for the "k8s" coordination backend and
+  # for a "kubernetes" tray provider that uses in-cluster credentials; either
+  # forces the token on regardless of this setting. Otherwise keep it off.
   automountServiceAccountToken: false
 
-# RBAC for the "k8s" coordination backend. When config.coordination.backend is
-# "k8s", this chart creates a Role + RoleBinding granting get/create/update on
-# coordination.k8s.io Leases in the release namespace. Set false to manage that
-# RBAC yourself. Ignored by the memory and mongo backends.
+# RBAC created only for what the config needs:
+#   - config.coordination.backend "k8s": a Role + RoleBinding in the release
+#     namespace granting get/create/update/delete on coordination.k8s.io Leases.
+#   - a "kubernetes" provider with in-cluster credentials: a Role + RoleBinding
+#     in runners.namespace granting create/get/delete on batch Jobs,
+#     get/list/watch on pods and get on podtemplates.
+# Set false to manage that RBAC yourself.
 rbac:
   create: true
 
