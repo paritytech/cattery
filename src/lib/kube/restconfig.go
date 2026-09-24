@@ -123,9 +123,23 @@ func fromKubeconfig(rules *clientcmd.ClientConfigLoadingRules, contextName strin
 	if err != nil {
 		return nil, "", fmt.Errorf("load kubeconfig: %w", err)
 	}
-	ns, _, err := cc.Namespace()
-	if err != nil || ns == "" {
-		ns = "default"
+
+	// The namespace is read off the selected context directly. client-go's
+	// Namespace() would, for a context without one, fall back to the
+	// namespace of the service-account mount whenever the process runs in a
+	// cluster, which would point a remote-cluster provider at this pod's
+	// namespace instead of the target cluster's "default".
+	raw, err := cc.RawConfig()
+	if err != nil {
+		return nil, "", fmt.Errorf("read kubeconfig: %w", err)
+	}
+	name := contextName
+	if name == "" {
+		name = raw.CurrentContext
+	}
+	ns := "default"
+	if c := raw.Contexts[name]; c != nil && c.Namespace != "" {
+		ns = c.Namespace
 	}
 	return cfg, ns, nil
 }

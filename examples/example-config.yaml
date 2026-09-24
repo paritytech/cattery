@@ -192,7 +192,7 @@ trayTypes:
       ttlSecondsAfterFinished: 3600   # k8s garbage-collects finished Jobs cattery missed
 
   # Kubernetes, pod shape from a core/v1 PodTemplate object (kubectl apply, or
-  # the chart's runnerPodTemplates value). Use it for sidecars, volumes,
+  # the chart's runners.podTemplates value). Use it for sidecars, volumes,
   # affinity, security contexts — and for map keys whose case matters, since
   # this file's keys are lowercased on load. Typed pod fields are ignored here.
   - name: cattery-k8s-dind

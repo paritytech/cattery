@@ -138,6 +138,15 @@ jobs:
             git worktree add --orphan -b "${PAGES_BRANCH}" repo
           fi
 
+          # A published version is immutable: never overwrite an existing
+          # package, whatever the version comparison above concluded (a
+          # rebase merge or a manual dispatch can reach here for a version
+          # that is already out).
+          if [ -f "repo/${CHART_NAME}-${VERSION}.tgz" ]; then
+            echo "${CHART_NAME} ${VERSION} is already published; not overwriting it."
+            exit 0
+          fi
+
           # add the new package alongside existing ones (older versions are kept)
           cp dist/*.tgz repo/
 

@@ -85,6 +85,25 @@ func TestAgentInitContainer_CopyMode(t *testing.T) {
 	assert.Empty(t, c.Env)
 }
 
+// The init container is not configurable, so it must pass the "restricted"
+// Pod Security Standard on its own.
+func TestAgentInitContainer_RestrictedSecurityContext(t *testing.T) {
+	for _, serverMode := range []bool{true, false} {
+		c := agentInitContainer(agentSpec{Image: "img", ServerMode: serverMode})
+		sc := c.SecurityContext
+		require.NotNil(t, sc)
+		require.NotNil(t, sc.AllowPrivilegeEscalation)
+		assert.False(t, *sc.AllowPrivilegeEscalation)
+		require.NotNil(t, sc.Capabilities)
+		assert.Equal(t, []corev1.Capability{"ALL"}, sc.Capabilities.Drop)
+		require.NotNil(t, sc.RunAsNonRoot)
+		assert.True(t, *sc.RunAsNonRoot)
+		require.NotNil(t, sc.SeccompProfile)
+		assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, sc.SeccompProfile.Type)
+		assert.Nil(t, sc.RunAsUser, "uid is left to the image so uid-range policies keep working")
+	}
+}
+
 func TestPodTemplateFromTypedConfig(t *testing.T) {
 	grace := int64(45)
 	tolSeconds := int64(30)
@@ -252,6 +271,32 @@ func TestInjectAgent_PreservesWorkingDirAndSidecars(t *testing.T) {
 	assert.Equal(t, "setup", tpl.Spec.InitContainers[1].Name)
 }
 
+// A template may legitimately run its pod as root; the init container must
+// then not inherit uid 0, or its own runAsNonRoot check fails at the kubelet.
+func TestInjectAgent_PodLevelRootPinsInitUID(t *testing.T) {
+	template := func(sc *corev1.PodSecurityContext) *corev1.PodTemplateSpec {
+		return &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			SecurityContext: sc,
+			Containers:      []corev1.Container{{Name: "runner", Image: "runner:1"}},
+		}}
+	}
+
+	tpl := template(&corev1.PodSecurityContext{RunAsUser: ptrTo(int64(0))})
+	require.NoError(t, injectAgent(tpl, 0, baseAgentSpec()))
+	init := tpl.Spec.InitContainers[0]
+	require.NotNil(t, init.SecurityContext.RunAsUser)
+	assert.Equal(t, int64(agentImageUID), *init.SecurityContext.RunAsUser)
+	assert.True(t, *init.SecurityContext.RunAsNonRoot)
+
+	tpl = template(&corev1.PodSecurityContext{RunAsUser: ptrTo(int64(1001))})
+	require.NoError(t, injectAgent(tpl, 0, baseAgentSpec()))
+	assert.Nil(t, tpl.Spec.InitContainers[0].SecurityContext.RunAsUser, "a non-root pod uid is inherited as-is")
+
+	tpl = template(nil)
+	require.NoError(t, injectAgent(tpl, 0, baseAgentSpec()))
+	assert.Nil(t, tpl.Spec.InitContainers[0].SecurityContext.RunAsUser, "without a pod uid the image's user applies")
+}
+
 func TestInjectAgent_Errors(t *testing.T) {
 	t.Run("index out of range", func(t *testing.T) {
 		tpl := &corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "runner"}}}}
@@ -365,6 +410,38 @@ func TestBuildTrayJob_JobSpecKnobs(t *testing.T) {
 	job, err = buildTrayJob(baseJobParams(t, kc, typedTemplate(t, kc), 0))
 	require.NoError(t, err)
 	assert.Nil(t, job.Spec.ActiveDeadlineSeconds, "0 means no deadline")
+}
+
+func TestBuildTrayJob_AgentResources(t *testing.T) {
+	kc := typedK8sConfig(t, map[string]any{"image": "runner:1"})
+	job, err := buildTrayJob(baseJobParams(t, kc, typedTemplate(t, kc), 0))
+	require.NoError(t, err)
+	init := findContainer(job.Spec.Template.Spec.InitContainers, agentInitContainerName)
+	require.NotNil(t, init)
+	assert.True(t, init.Resources.Requests.Cpu().Equal(resource.MustParse("50m")), "default requests keep quota-governed namespaces admissible")
+	assert.True(t, init.Resources.Requests.Memory().Equal(resource.MustParse("32Mi")))
+	assert.True(t, init.Resources.Limits.Cpu().Equal(resource.MustParse("500m")))
+	assert.True(t, init.Resources.Limits.Memory().Equal(resource.MustParse("128Mi")))
+
+	kc = typedK8sConfig(t, map[string]any{
+		"image":          "runner:1",
+		"agentresources": map[string]any{"requests": map[string]any{"cpu": "10m"}, "limits": map[string]any{"memory": "64Mi"}},
+	})
+	job, err = buildTrayJob(baseJobParams(t, kc, typedTemplate(t, kc), 0))
+	require.NoError(t, err)
+	init = findContainer(job.Spec.Template.Spec.InitContainers, agentInitContainerName)
+	assert.True(t, init.Resources.Requests.Cpu().Equal(resource.MustParse("10m")))
+	assert.True(t, init.Resources.Requests.Memory().IsZero(), "explicit resources are used verbatim, not merged with the defaults")
+	assert.True(t, init.Resources.Limits.Memory().Equal(resource.MustParse("64Mi")))
+	assert.True(t, init.Resources.Limits.Cpu().IsZero())
+
+	kc = typedK8sConfig(t, map[string]any{
+		"image":          "runner:1",
+		"agentresources": map[string]any{"limits": map[string]any{"memory": "lots"}},
+	})
+	_, err = buildTrayJob(baseJobParams(t, kc, typedTemplate(t, kc), 0))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agentResources.limits")
 }
 
 func TestBuildTrayJob_TemplateMode(t *testing.T) {

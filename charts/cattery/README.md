@@ -113,8 +113,8 @@ extraVolumeMounts:
 The `kubernetes` provider runs each tray as a batch/v1 Job. It can target the
 cluster the server runs in or any other cluster.
 
-**Same cluster.** A provider without `kubeconfig` or `server` uses the pod's
-service account. The chart then mounts the token and, with `rbac.create`,
+**Same cluster.** A provider without `kubeconfig`, `context` or `server` uses
+the pod's service account. The chart then mounts the token and, with `rbac.create`,
 creates a Role + RoleBinding in `runners.namespace` for Jobs
 (create/get/delete), pods (get/list/watch) and podtemplates (get). The
 `runners` block also provisions what the runner pods themselves need:

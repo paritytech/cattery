@@ -50,6 +50,12 @@ func TestNewRestConfig_ExplicitPath(t *testing.T) {
 
 func TestNewRestConfig_ContextOverride(t *testing.T) {
 	path := writeKubeconfig(t)
+	// A remote context without a namespace must resolve to the remote
+	// cluster's "default", never to the namespace this process runs in.
+	// client-go's Namespace() only substitutes the local namespace when a
+	// service-account token is mounted at its fixed path, which a unit test
+	// cannot arrange; the implementation reads the context directly and this
+	// asserts the contract, not the regression.
 
 	cfg, ns, err := NewRestConfig(Options{Kubeconfig: path, Context: "beta"})
 	require.NoError(t, err)

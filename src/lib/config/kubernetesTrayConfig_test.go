@@ -132,6 +132,7 @@ func TestKubernetesTrayConfig_Validate(t *testing.T) {
 		{name: "name too long", trayTypeName: strings.Repeat("a", MaxKubernetesTrayTypeNameLength+1), kc: KubernetesTrayConfig{Image: "img"}, wantErr: "longer than"},
 		{name: "bad pull policy", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", ImagePullPolicy: "Sometimes"}, wantErr: "imagePullPolicy"},
 		{name: "bad quantity", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", Resources: KubernetesResources{Limits: map[string]string{"memory": "4 gigs"}}}, wantErr: "resources.limits.memory"},
+		{name: "bad agent quantity", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", AgentResources: KubernetesResources{Requests: map[string]string{"cpu": "fast"}}}, wantErr: "agentResources.requests.cpu"},
 		{name: "bad toleration operator", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", Tolerations: []KubernetesToleration{{Key: "k", Operator: "Like"}}}, wantErr: "tolerations[0].operator"},
 		{name: "bad toleration effect", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", Tolerations: []KubernetesToleration{{Key: "k", Effect: "Never"}}}, wantErr: "tolerations[0].effect"},
 		{name: "env without name", trayTypeName: "k8s", kc: KubernetesTrayConfig{Image: "img", Env: []KubernetesEnvVar{{Value: "x"}}}, wantErr: "env[0].name"},

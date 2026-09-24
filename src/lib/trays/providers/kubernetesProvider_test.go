@@ -219,15 +219,20 @@ func TestK8sStartDeploy_AlreadyExists(t *testing.T) {
 		require.NoError(t, p.StartDeploy(context.Background(), tray))
 		assert.Equal(t, "existing-uid", tray.ProviderData[kubernetesProviderDataJobUID])
 	})
-	t.Run("refuses a job that is not ours", func(t *testing.T) {
-		existing := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "k8s-small-0123456789abcdef", Namespace: testK8sNamespace, UID: "someone-elses"}}
-		_, p := newFakeK8sProvider(t, time.Minute, existing)
+	t.Run("refuses a job that is not ours, and cleanup leaves it alone", func(t *testing.T) {
+		client, p := newFakeK8sProvider(t, time.Minute, foreignJob("k8s-small-0123456789abcdef"))
 		tray, _ := typedTray(t, nil)
 
 		err := p.StartDeploy(context.Background(), tray)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not belong")
 		assert.Empty(t, tray.ProviderData[kubernetesProviderDataJobUID])
+
+		// trayManager deletes the tray after a failed StartDeploy; that must
+		// not take the foreign Job with it.
+		require.NoError(t, p.CleanTray(context.Background(), tray))
+		_, err = client.BatchV1().Jobs(testK8sNamespace).Get(context.Background(), tray.Id, metav1.GetOptions{})
+		assert.NoError(t, err, "the foreign job must still exist")
 	})
 }
 
@@ -519,8 +524,17 @@ func TestK8sWaitDeploy_IgnoresBookmarksAndForeignEvents(t *testing.T) {
 // CleanTray
 // ---------------------------------------------------------------------------
 
+// existingJob is a Job that was created for the tray of the same name.
 func existingJob(name string) *batchv1.Job {
-	return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testK8sNamespace, UID: "uid-1"}}
+	return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
+		Name: name, Namespace: testK8sNamespace, UID: "uid-1",
+		Labels: map[string]string{labelTrayID: name},
+	}}
+}
+
+// foreignJob is a same-named Job that cattery did not create.
+func foreignJob(name string) *batchv1.Job {
+	return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testK8sNamespace, UID: "someone-elses"}}
 }
 
 func captureDelete(client *fake.Clientset) *metav1.DeleteOptions {
@@ -550,13 +564,28 @@ func TestK8sCleanTray_DeletesJobWithBackgroundPropagationAndUIDPrecondition(t *t
 	assert.True(t, apierrors.IsNotFound(err))
 }
 
-func TestK8sCleanTray_NoUIDNoPrecondition(t *testing.T) {
-	tray := deployedTray(t)
+func TestK8sCleanTray_NoUIDVerifiesOwnershipAndPinsFetchedUID(t *testing.T) {
+	tray := deployedTray(t) // no UID recorded
 	client, p := newFakeK8sProvider(t, time.Minute, existingJob(tray.Id))
 	opts := captureDelete(client)
 
 	require.NoError(t, p.CleanTray(context.Background(), tray))
-	assert.Nil(t, opts.Preconditions)
+
+	assert.Contains(t, actionVerbs(client, "jobs"), "get")
+	require.NotNil(t, opts.Preconditions)
+	require.NotNil(t, opts.Preconditions.UID)
+	assert.Equal(t, types.UID("uid-1"), *opts.Preconditions.UID)
+}
+
+func TestK8sCleanTray_LeavesForeignJobAlone(t *testing.T) {
+	tray := deployedTray(t) // no UID recorded
+	client, p := newFakeK8sProvider(t, time.Minute, foreignJob(tray.Id))
+
+	require.NoError(t, p.CleanTray(context.Background(), tray))
+
+	assert.NotContains(t, actionVerbs(client, "jobs"), "delete")
+	_, err := client.BatchV1().Jobs(testK8sNamespace).Get(context.Background(), tray.Id, metav1.GetOptions{})
+	assert.NoError(t, err, "the job must still exist")
 }
 
 func TestK8sCleanTray_NotFoundIsSuccess(t *testing.T) {

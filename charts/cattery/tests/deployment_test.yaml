@@ -45,6 +45,9 @@ tests:
           type: kubernetes
           server: https://10.0.0.1:6443
           tokenFile: /cattery/secrets/target/token
+        - name: remote-context
+          type: kubernetes
+          context: prod-runners
     asserts:
       - equal:
           path: spec.template.spec.automountServiceAccountToken

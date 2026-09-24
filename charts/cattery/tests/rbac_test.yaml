@@ -109,7 +109,7 @@ tests:
       - hasDocuments:
           count: 4
 
-  - it: renders nothing for a provider that targets another cluster
+  - it: renders nothing for providers that target another cluster
     set:
       config.providers:
         - name: remote-server
@@ -119,6 +119,10 @@ tests:
         - name: remote-kubeconfig
           type: kubernetes
           kubeconfig: /cattery/secrets/target/kubeconfig
+        - name: remote-context
+          type: kubernetes
+          context: prod-runners
+          namespace: other
     asserts:
       - hasDocuments:
           count: 0

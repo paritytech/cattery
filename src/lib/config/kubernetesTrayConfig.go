@@ -64,6 +64,10 @@ type KubernetesTrayConfig struct {
 	// mode the image needs sh, wget and CA certificates; in tag mode it needs
 	// /usr/local/bin/cattery and cp.
 	AgentImage string `yaml:"agentImage"`
+	// AgentResources are the init container's requests/limits. Empty means
+	// small defaults (see the provider), which keep the pod admissible under
+	// ResourceQuotas that require every container to declare resources.
+	AgentResources KubernetesResources `yaml:"agentResources"`
 	// RunnerFolder is where <folder>/bin/Runner.Listener lives in the runner
 	// image. Empty means DefaultKubernetesRunnerFolder.
 	RunnerFolder string `yaml:"runnerFolder"`
@@ -171,10 +175,16 @@ func (kc KubernetesTrayConfig) Validate(trayTypeName string) error {
 	if !kubernetesPullPolicies[kc.ImagePullPolicy] {
 		return fail("imagePullPolicy %q must be Always, IfNotPresent or Never", kc.ImagePullPolicy)
 	}
-	for section, list := range map[string]map[string]string{"requests": kc.Resources.Requests, "limits": kc.Resources.Limits} {
+	quantities := map[string]map[string]string{
+		"resources.requests":      kc.Resources.Requests,
+		"resources.limits":        kc.Resources.Limits,
+		"agentResources.requests": kc.AgentResources.Requests,
+		"agentResources.limits":   kc.AgentResources.Limits,
+	}
+	for section, list := range quantities {
 		for name, raw := range list {
 			if _, err := resource.ParseQuantity(raw); err != nil {
-				return fail("resources.%s.%s: %q is not a quantity: %v", section, name, raw, err)
+				return fail("%s.%s: %q is not a quantity: %v", section, name, raw, err)
 			}
 		}
 	}

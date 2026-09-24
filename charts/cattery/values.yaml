@@ -110,11 +110,11 @@ config:
   #   runnerGroupId: 1
   #   maxTrays: 5
   #   config:
-  #     podTemplateRef: runner-large   # see runnerPodTemplates below
+  #     podTemplateRef: runner-large   # see runners.podTemplates below
 
 # Runner-side objects for a kubernetes provider that targets THIS cluster.
-# Providers that point at another cluster (kubeconfig / server) get nothing
-# from this block.
+# Providers that point at another cluster (kubeconfig / context / server) get
+# nothing from this block.
 runners:
   # Namespace the runner Jobs live in; the runner RBAC, ServiceAccount and
   # PodTemplates below are created there. Every in-cluster kubernetes provider

@@ -371,6 +371,12 @@ func followWatch(ctx context.Context, w watch.Interface, trayID string, check fu
 // CleanTray deletes the tray's Job and, through background propagation, its
 // pod. Safe on a tray StartDeploy never finished: the Job name is derived
 // from the tray id when ProviderData lacks it, and NotFound is success.
+//
+// The delete is always pinned to the Job's UID. When StartDeploy did not
+// record one (it failed before or during the create, or it found a same-named
+// Job that is not ours), the Job is read first and only deleted when it
+// carries this tray's label, so cleanup after a failed deploy can never take
+// somebody else's Job with it.
 func (k *KubernetesProvider) CleanTray(ctx context.Context, tray *trays.Tray) error {
 	name := tray.ProviderData[kubernetesProviderDataJobName]
 	if name == "" {
@@ -378,13 +384,30 @@ func (k *KubernetesProvider) CleanTray(ctx context.Context, tray *trays.Tray) er
 	}
 	ns := k.namespaceFor(tray)
 
+	uid := types.UID(tray.ProviderData[kubernetesProviderDataJobUID])
+	if uid == "" {
+		existing, err := k.client.BatchV1().Jobs(ns).Get(ctx, name, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			k.logger.Tracef("Job %s/%s does not exist; nothing to do", ns, name)
+			return nil
+		case err != nil:
+			k.logger.Errorf("Failed to read job %s/%s for tray %s: %v", ns, name, tray.Id, err)
+			return err
+		case existing.Labels[labelTrayID] != tray.Id:
+			k.logger.Warnf("Job %s/%s does not belong to tray %s (%s=%q); leaving it alone",
+				ns, name, tray.Id, labelTrayID, existing.Labels[labelTrayID])
+			return nil
+		}
+		uid = existing.UID
+	}
+
 	// batch/v1 Jobs orphan their pods on delete unless a propagation policy
 	// is set (kubectl sets one; the API default is orphan).
 	policy := metav1.DeletePropagationBackground
 	opts := metav1.DeleteOptions{PropagationPolicy: &policy}
-	if uid := tray.ProviderData[kubernetesProviderDataJobUID]; uid != "" {
-		u := types.UID(uid)
-		opts.Preconditions = &metav1.Preconditions{UID: &u}
+	if uid != "" {
+		opts.Preconditions = &metav1.Preconditions{UID: &uid}
 	}
 
 	err := k.client.BatchV1().Jobs(ns).Delete(ctx, name, opts)

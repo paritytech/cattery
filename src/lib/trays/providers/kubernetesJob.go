@@ -30,6 +30,10 @@ const (
 	agentSourceBinaryPath = "/usr/local/bin/cattery"
 	agentImageRepository  = "docker.io/paritytech/cattery"
 	agentImageLatestTag   = "latest"
+	// agentImageUID is the user the published cattery image runs as (see
+	// Dockerfile). Used only to keep the init container non-root when the
+	// pod itself is configured to run as root.
+	agentImageUID = 65532
 
 	envCatteryURL     = "CATTERY_URL"
 	envCatteryAgentID = "CATTERY_AGENT_ID"
@@ -60,6 +64,23 @@ done
 chmod 0755 /cattery-agent/cattery
 `
 
+// defaultAgentResources are the init container's requests/limits when the
+// tray config sets none. Copying or downloading a ~20 MB binary needs next to
+// nothing, but a ResourceQuota that governs requests or limits rejects any
+// pod with a container that declares none. Init container resources do not
+// add to the pod's scheduling footprint (the effective request is the larger
+// of the init and app container sums).
+var defaultAgentResources = corev1.ResourceRequirements{
+	Requests: corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("50m"),
+		corev1.ResourceMemory: resource.MustParse("32Mi"),
+	},
+	Limits: corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("500m"),
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	},
+}
+
 // fatalWaitingReasons are container waiting states that never resolve on
 // their own; WaitDeploy fails fast on them instead of waiting for the timeout.
 var fatalWaitingReasons = map[string]bool{
@@ -78,6 +99,8 @@ type agentSpec struct {
 	// Image is the init container image; ServerMode selects download vs copy.
 	Image      string
 	ServerMode bool
+	// Resources are the init container's requests/limits.
+	Resources corev1.ResourceRequirements
 }
 
 // jobBuildParams feeds buildTrayJob.
@@ -128,12 +151,25 @@ func resolveAgentImage(kc config.KubernetesTrayConfig) (image string, serverMode
 }
 
 // agentInitContainer stages the agent binary into the shared volume.
+//
+// The operator cannot configure this container, so it has to be admissible
+// wherever the runner pod is: its security context satisfies the
+// "restricted" Pod Security Standard. runAsUser is deliberately left to the
+// image (the published one runs as 65532) so uid-range policies such as
+// OpenShift's still apply; a custom agentImage must run as non-root.
 func agentInitContainer(a agentSpec) corev1.Container {
 	c := corev1.Container{
-		Name:  agentInitContainerName,
-		Image: a.Image,
+		Name:      agentInitContainerName,
+		Image:     a.Image,
+		Resources: *a.Resources.DeepCopy(),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: agentVolumeName, MountPath: agentMountPath},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptrTo(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			RunAsNonRoot:             ptrTo(true),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 	if a.ServerMode {
@@ -214,6 +250,23 @@ func podTemplateFromTypedConfig(kc config.KubernetesTrayConfig) (corev1.PodTempl
 	}, nil
 }
 
+// agentResources returns the init container's resources: the tray config's
+// agentResources when set, else defaultAgentResources.
+func agentResources(kc config.KubernetesTrayConfig) (corev1.ResourceRequirements, error) {
+	if len(kc.AgentResources.Requests) == 0 && len(kc.AgentResources.Limits) == 0 {
+		return *defaultAgentResources.DeepCopy(), nil
+	}
+	requests, err := toResourceList(kc.AgentResources.Requests)
+	if err != nil {
+		return corev1.ResourceRequirements{}, fmt.Errorf("agentResources.requests: %w", err)
+	}
+	limits, err := toResourceList(kc.AgentResources.Limits)
+	if err != nil {
+		return corev1.ResourceRequirements{}, fmt.Errorf("agentResources.limits: %w", err)
+	}
+	return corev1.ResourceRequirements{Requests: requests, Limits: limits}, nil
+}
+
 // toResourceList parses a requests/limits map ("cpu": "2", "memory": "4Gi").
 func toResourceList(m map[string]string) (corev1.ResourceList, error) {
 	if len(m) == 0 {
@@ -271,7 +324,14 @@ func injectAgent(tpl *corev1.PodTemplateSpec, runnerIdx int, a agentSpec) error 
 		Name:         agentVolumeName,
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
-	tpl.Spec.InitContainers = append([]corev1.Container{agentInitContainer(a)}, tpl.Spec.InitContainers...)
+	initContainer := agentInitContainer(a)
+	if sc := tpl.Spec.SecurityContext; sc != nil && sc.RunAsUser != nil && *sc.RunAsUser == 0 {
+		// The pod runs as root by the operator's choice. The init container
+		// would inherit uid 0 and fail its own runAsNonRoot check at the
+		// kubelet, so pin it to the published image's user instead.
+		initContainer.SecurityContext.RunAsUser = ptrTo(int64(agentImageUID))
+	}
+	tpl.Spec.InitContainers = append([]corev1.Container{initContainer}, tpl.Spec.InitContainers...)
 
 	runner := &tpl.Spec.Containers[runnerIdx]
 	runner.Command = []string{agentBinaryPath}
@@ -327,12 +387,17 @@ func buildTrayJob(p jobBuildParams) (*batchv1.Job, error) {
 		runnerFolder = config.DefaultKubernetesRunnerFolder
 	}
 	image, serverMode := resolveAgentImage(p.Config)
-	err := injectAgent(tpl, p.RunnerIdx, agentSpec{
+	resources, err := agentResources(p.Config)
+	if err != nil {
+		return nil, err
+	}
+	err = injectAgent(tpl, p.RunnerIdx, agentSpec{
 		TrayID:       p.TrayID,
 		ServerURL:    p.ServerURL,
 		RunnerFolder: runnerFolder,
 		Image:        image,
 		ServerMode:   serverMode,
+		Resources:    resources,
 	})
 	if err != nil {
 		return nil, err
