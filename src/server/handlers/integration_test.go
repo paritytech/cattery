@@ -287,7 +287,7 @@ func TestIntegration_PingTerminatesStaleAgent(t *testing.T) {
 	var pingResp messages.PingResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&pingResp))
 	assert.True(t, pingResp.Terminate)
-	assert.Contains(t, pingResp.Message, "not changed in 15 minutes")
+	assert.Contains(t, pingResp.Message, "not changed in 15m0s")
 }
 
 func TestIntegration_PingDoesNotTerminateRunningTray(t *testing.T) {

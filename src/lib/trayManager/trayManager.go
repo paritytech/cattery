@@ -16,13 +16,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// RunnerStatusSource answers whether GitHub considers a runner busy. It is the
+// RunnerStatusSource answers what GitHub knows about a runner. It is the
 // authority on "is this tray doing work?", independent of cattery's own tray
 // status.
 type RunnerStatusSource interface {
-	// IsRunnerBusy reports whether the runner is executing a job. It must
+	// GetRunnerState reports the runner's busy and online flags. It must
 	// return githubClient.ErrRunnerNotFound when GitHub has no such runner.
-	IsRunnerBusy(orgName string, runnerId int64) (bool, error)
+	GetRunnerState(orgName string, runnerId int64) (githubClient.RunnerState, error)
 }
 
 // PollerHealth reports when a tray type's scale set listener last heard from
@@ -326,8 +326,14 @@ type KeepReason string
 const (
 	// KeepReasonNone means no guard objected to deleting the tray.
 	KeepReasonNone KeepReason = ""
-	// KeepReasonBusy means GitHub reports the runner as executing a job.
+	// KeepReasonBusy means GitHub reports the runner as online and executing
+	// a job.
 	KeepReasonBusy KeepReason = "runner busy on github"
+	// KeepReasonBusyOffline means GitHub reports the runner as executing a job
+	// but no longer online. That is ambiguous — a network blip on a live job
+	// looks the same as a VM that has vanished — so the tray is kept, but
+	// under the hard limit rather than indefinitely.
+	KeepReasonBusyOffline KeepReason = "runner busy but offline on github"
 	// KeepReasonBlindListener means the tray type's listener has not polled
 	// recently, so the tray status it feeds cannot be trusted.
 	KeepReasonBlindListener KeepReason = "scale set listener not polling"
@@ -367,42 +373,76 @@ func (tm *TrayManager) KeepStale(tray *trays.Tray, cfg config.StaleConfig) (bool
 	age := time.Since(tray.StatusChanged)
 	pastHardLimit := cfg.HardThreshold > 0 && age > cfg.HardThreshold
 
-	if tm.listenerBlind(tray, cfg.PollerGrace) {
+	// Ask GitHub first. It is the only participant that knows whether a job is
+	// running, and it stays right whatever our listener is doing — so a
+	// listener outage must not make us keep trays GitHub calls idle. Kept
+	// trays still count towards MaxTrays, so over-keeping starves scale-up.
+	if tm.runnerStatus == nil {
+		return tm.keepWithoutGitHub(tray, cfg, age, pastHardLimit)
+	}
+
+	state, err := tm.runnerStatus.GetRunnerState(tray.GitHubOrgName, tray.GitHubRunnerId)
+	switch {
+	case err == nil && state.Busy && state.Online:
+		// Deliberately not bounded by the hard limit: a job is running, and
+		// CI jobs legitimately run for hours.
+		return true, KeepReasonBusy
+
+	case err == nil && state.Busy:
+		// Busy but offline. Keep it, because a live job behind a network blip
+		// looks like this, but bound it so a registration GitHub never cleans
+		// up cannot hold a tray slot forever.
 		if pastHardLimit {
-			log.Warnf("Tray %s: listener for '%s' still not polling after %s, deleting anyway",
-				tray.Id, tray.TrayTypeName, age.Truncate(time.Second))
+			log.Warnf("Tray %s: runner still busy-but-offline on GitHub after %s, deleting anyway",
+				tray.Id, age.Truncate(time.Second))
 			return false, KeepReasonNone
 		}
-		return true, KeepReasonBlindListener
-	}
+		return true, KeepReasonBusyOffline
 
-	if tm.runnerStatus == nil {
-		return false, KeepReasonNone
-	}
-
-	busy, err := tm.runnerStatus.IsRunnerBusy(tray.GitHubOrgName, tray.GitHubRunnerId)
-	switch {
-	case err == nil && busy:
-		// No hard limit here on purpose: GitHub says a job is running.
-		return true, KeepReasonBusy
 	case err == nil:
+		// GitHub says idle. Authoritative, whatever our listener thinks.
 		return false, KeepReasonNone
+
 	case errors.Is(err, githubClient.ErrRunnerNotFound):
 		// GitHub has forgotten the runner, so it is certainly not working.
 		return false, KeepReasonNone
-	case pastHardLimit:
-		log.Warnf("Tray %s: runner status still unavailable after %s, deleting anyway: %v",
+	}
+
+	// The check itself failed, so we genuinely do not know. "Could not tell"
+	// is not "idle", so keep the tray — but only up to the hard limit, or a
+	// permanently broken check would leak VMs.
+	if pastHardLimit {
+		log.Warnf("Tray %s: runner state still unavailable after %s, deleting anyway: %v",
 			tray.Id, age.Truncate(time.Second), err)
 		return false, KeepReasonNone
-	default:
-		if githubClient.IsForbidden(err) {
-			log.Warnf("Tray %s: runner busy check forbidden — the GitHub App needs "+
-				"organization 'Self-hosted runners: read': %v", tray.Id, err)
-		} else {
-			log.Warnf("Tray %s: runner busy check failed, keeping tray: %v", tray.Id, err)
-		}
-		return true, KeepReasonUnknown
 	}
+	if githubClient.IsForbidden(err) {
+		log.Warnf("Tray %s: runner state check forbidden — the GitHub App needs "+
+			"organization 'Self-hosted runners: read': %v", tray.Id, err)
+	} else {
+		log.Warnf("Tray %s: runner state check failed, keeping tray: %v", tray.Id, err)
+	}
+	if tm.listenerBlind(tray, cfg.PollerGrace) {
+		// Both signals are down together, which is the shape of a network
+		// outage between cattery and GitHub. Report the more specific cause.
+		return true, KeepReasonBlindListener
+	}
+	return true, KeepReasonUnknown
+}
+
+// keepWithoutGitHub decides when no runner status source is configured. The
+// listener liveness signal is then the only guard: a tray type whose listener
+// has stopped polling cannot have produced a trustworthy tray status.
+func (tm *TrayManager) keepWithoutGitHub(tray *trays.Tray, cfg config.StaleConfig, age time.Duration, pastHardLimit bool) (bool, KeepReason) {
+	if !tm.listenerBlind(tray, cfg.PollerGrace) {
+		return false, KeepReasonNone
+	}
+	if pastHardLimit {
+		log.Warnf("Tray %s: listener for '%s' still not polling after %s, deleting anyway",
+			tray.Id, tray.TrayTypeName, age.Truncate(time.Second))
+		return false, KeepReasonNone
+	}
+	return true, KeepReasonBlindListener
 }
 
 // listenerBlind reports whether the tray type's listener has gone quiet for

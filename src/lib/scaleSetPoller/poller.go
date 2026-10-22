@@ -61,6 +61,10 @@ func (p *Poller) History() *History {
 func (p *Poller) Run(ctx context.Context) error {
 	p.logger.Info("Starting scale set poller")
 
+	// Whatever happens below, this poller stops being evidence of liveness the
+	// moment Run returns.
+	defer p.clearPolled()
+
 	if err := p.client.EnsureScaleSet(ctx); err != nil {
 		return fmt.Errorf("failed to ensure scale set: %w", err)
 	}
@@ -80,10 +84,11 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	scaler := &catteryScaler{poller: p}
 
-	// A session exists, so the listener is live from here on; without this the
-	// first long-poll (~50s) would look like 50s of silence to the reaper.
-	p.markPolled()
-
+	// Deliberately no stamp here. Creating a session proves only that the
+	// control-plane call worked, not that messages are flowing, and runPoller
+	// re-enters Run every 30s after a failure — so stamping here would make a
+	// listener that fails every single poll look perfectly live. Until the
+	// first poll returns, LastSuccessfulPoll reports "no opinion".
 	l, err := listener.New(
 		&sessionAdapter{client: p.client, poller: p},
 		listener.Config{
@@ -105,8 +110,21 @@ func (p *Poller) markPolled() {
 	p.lastPoll.Store(time.Now().UnixNano())
 }
 
+// clearPolled drops the liveness stamp.
+//
+// Called when Run returns, so a replica that has stopped polling a tray type
+// reports "no opinion" instead of a frozen timestamp. Without this a poller
+// that lost leadership, or whose session ended, would keep answering with a
+// stale time and the reaper would read that as a blind listener forever.
+func (p *Poller) clearPolled() {
+	p.lastPoll.Store(0)
+}
+
 // LastSuccessfulPoll returns when this listener last completed a message poll.
-// The second return is false before the first poll of the current session.
+//
+// The second return is false when this poller has no opinion: it has not
+// completed a poll since the current session started, or it is not running.
+// Callers must not read that as an unhealthy listener.
 func (p *Poller) LastSuccessfulPoll() (time.Time, bool) {
 	ns := p.lastPoll.Load()
 	if ns == 0 {

@@ -21,7 +21,7 @@ stale:
     registering: 5m
     registered: 15m
     deleting: 15m
-  pollerGrace: 3m
+  pollerGrace: 6m
   hardThreshold: 6h
 
 coordination:
@@ -113,7 +113,7 @@ Optional. Configures the cleanup loop that deletes trays stuck in a non-running 
 |---------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
 | pollInterval  | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
 | thresholds    | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
-| pollerGrace   | duration                | no       | How long a tray type's scale set listener may go without a successful message poll before its trays stop being reaped. Default `3m`.            |
+| pollerGrace   | duration                | no       | How long a tray type's scale set listener may go without a successful message poll before it is treated as blind. Must exceed the worst-case single poll (~4m33s). Default `6m`. |
 | hardThreshold | duration                | no       | Age past which a candidate is deleted even when the guards below cannot give a straight answer. Default `6h`.                                    |
 
 Durations use Go syntax (`30s`, `5m`, `1h30m`).
@@ -122,16 +122,27 @@ Durations use Go syntax (`30s`, `5m`, `1h30m`).
 
 A tray leaves `registered` only when its scale set listener delivers a `JobStarted` message. A listener stuck mid-poll therefore leaves a tray that is running a job looking exactly like a tray that is idle, and deleting it destroys the VM under a live job — the job then fails about ten minutes later with *"The self-hosted runner lost communication with the server"*.
 
-Before deleting a candidate, cattery checks:
+Before deleting a candidate, cattery asks GitHub what the runner is doing. GitHub is authoritative here and stays right whatever the listener is doing, so it is consulted first:
 
-1. **Is the listener still polling?** If the tray type's listener has not completed a poll within `pollerGrace`, the tray status cannot be trusted and the tray is kept. Idle listeners poll roughly every 50 seconds, so a gap of minutes means something is wrong. Decided locally, with no GitHub call.
-2. **Does GitHub say the runner is busy?** A busy runner is kept for as long as it stays busy, however long the job runs. A runner GitHub reports as idle, or has no record of, is deleted.
+| GitHub reports        | Result                                                      |
+|-----------------------|-------------------------------------------------------------|
+| online, busy          | Kept for as long as it stays busy, with no time limit       |
+| online, idle          | Deleted                                                     |
+| no such runner        | Deleted                                                     |
+| busy, but offline     | Kept, bounded by `hardThreshold`                            |
+| check failed          | Kept, bounded by `hardThreshold`                            |
 
-A check that errors counts as "unknown", not as "idle", and keeps the tray. Guards 1 and 2 are both bounded by `hardThreshold` so a permanently broken guard degrades into plain threshold-based deletion instead of leaking VMs; a runner GitHub positively reports as busy is exempt from that bound.
+A tray kept this way still counts towards the tray type's `maxTrays`, which is why only a positively busy, online runner is kept without a bound. "Busy but offline" is ambiguous — a live job behind a network blip looks the same as a VM that has vanished — so it is kept, but not forever.
+
+`pollerGrace` is the second signal. When the busy check itself fails, cattery also looks at whether the tray type's listener is still polling; both being down together is the shape of a network outage between cattery and GitHub, and is reported as `scale set listener not polling` rather than the generic unknown. The listener signal never overrides GitHub: a listener outage must not make cattery hoard trays GitHub calls idle.
+
+Idle listeners poll roughly every 50 seconds, so a gap of minutes means something is wrong. Keep `pollerGrace` above the worst case for a single poll (three 90s attempts plus backoff, about 4m33s) or one slow call will read as a dead listener; a test pins this relationship.
+
+When no GitHub credentials are available to the reaper, the listener signal is the only guard and is used on its own, also bounded by `hardThreshold`.
 
 Trays kept this way are counted by `cattery_stale_trays_kept_count{reason=...}`. A sustained rate there means tray status is routinely lagging, which almost always means a listener is not polling.
 
-The same checks gate the agent ping path: an agent whose tray has sat in a non-running status past its threshold is told to shut down on its next ping, unless one of the guards above keeps it.
+The same checks gate the agent ping path: an agent whose tray has sat in a non-running status past its threshold is told to shut down on its next ping, unless one of the checks above keeps it. Runner state is cached briefly so the two paths share lookups instead of doubling the API calls.
 
 #### coordination
 Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.

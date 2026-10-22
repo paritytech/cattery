@@ -30,6 +30,8 @@ func newRetryableClient(entry *log.Entry) *retryablehttp.Client {
 	rc.Logger = newSlogLogger(entry)
 	rc.HTTPClient.Timeout = pollRequestTimeout
 	rc.RetryMax = pollRetryMax
+	rc.RetryWaitMin = pollRetryWaitMin
+	rc.RetryWaitMax = pollRetryWaitMax
 	return rc
 }
 
@@ -52,10 +54,21 @@ const (
 	// Nothing upstream reports a retry, so the listener looked healthy
 	// throughout while the tray it was tracking sat untouched and was reaped
 	// as stale.
-	//
-	// 2 retries at 90s bounds one exhausted call at roughly 4.5 minutes plus
-	// backoff, below every staleness threshold.
 	pollRetryMax = 2
+
+	// Backoff between attempts. Pinned rather than left to the library so the
+	// worst-case budget below is a property of this file, not of a dependency
+	// default that can change under us.
+	pollRetryWaitMin = time.Second
+	pollRetryWaitMax = 5 * time.Second
+
+	// MaxPollDuration is the worst case for one GetMessage call:
+	// (pollRetryMax+1) attempts at pollRequestTimeout, plus the backoff waits
+	// between them (1s, 2s) — about 4m33s.
+	//
+	// config.DefaultStalePollerGrace must stay above this, or a single
+	// legitimately-exhausted call would be misread as a dead listener.
+	MaxPollDuration = (pollRetryMax+1)*pollRequestTimeout + pollRetryWaitMin + 2*pollRetryWaitMin
 )
 
 // logrusHandler bridges slog into logrus so that third-party libraries using

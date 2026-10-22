@@ -81,7 +81,8 @@ func Start() {
 		trayRepository,
 		providers.DefaultFactory{},
 		trayManager.WithPollerHealth(ssm),
-		trayManager.WithRunnerStatus(orgRunnerStatus{}),
+		trayManager.WithRunnerStatus(
+			trayManager.NewCachedRunnerStatus(orgRunnerStatus{}, trayManager.DefaultRunnerStateTTL)),
 	)
 
 	// Register DB-backed metrics collector
@@ -197,12 +198,12 @@ func runLeaderTask(ctx context.Context, wg *sync.WaitGroup, elector election.Ele
 // inside githubClient, so this stays cheap to construct per call.
 type orgRunnerStatus struct{}
 
-func (orgRunnerStatus) IsRunnerBusy(orgName string, runnerId int64) (bool, error) {
+func (orgRunnerStatus) GetRunnerState(orgName string, runnerId int64) (githubClient.RunnerState, error) {
 	gc, err := githubClient.NewGithubClientWithOrgName(orgName)
 	if err != nil {
-		return false, err
+		return githubClient.RunnerState{}, err
 	}
-	return gc.IsRunnerBusy(runnerId)
+	return gc.GetRunnerState(runnerId)
 }
 
 // runPoller runs a tray type's scale set listener until ctx is cancelled —

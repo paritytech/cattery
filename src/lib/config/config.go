@@ -222,7 +222,9 @@ type StaleConfig struct {
 	// listener is blind and "registered" may simply be out of date.
 	//
 	// Idle listeners poll every ~50s (GitHub holds each long-poll that long),
-	// so a gap of minutes means something is wrong.
+	// so a gap of minutes means something is wrong. Keep it above
+	// scaleSetClient.MaxPollDuration, or a single slow-but-legitimate call
+	// will be mistaken for a dead listener.
 	PollerGrace time.Duration `yaml:"pollerGrace"`
 
 	// HardThreshold bounds how long the guards may keep a candidate alive when
@@ -239,7 +241,14 @@ type StaleConfig struct {
 const DefaultStalePollInterval = time.Minute
 
 // DefaultStalePollerGrace is used when StaleConfig.PollerGrace is zero.
-const DefaultStalePollerGrace = 3 * time.Minute
+//
+// It must exceed the worst case for a single message poll, otherwise one slow
+// call reads as a dead listener. That worst case is
+// scaleSetClient.MaxPollDuration (4m33s: three 90s attempts plus backoff), and
+// TestPollerGraceExceedsMaxPollDuration pins the relationship so neither side
+// can drift. 6m leaves roughly 90s of headroom while still flagging a stuck
+// listener well before the 15m "registered" threshold.
+const DefaultStalePollerGrace = 6 * time.Minute
 
 // DefaultStaleHardThreshold is used when StaleConfig.HardThreshold is zero.
 // Long enough to cover the longest CI job plus slack, so an inconclusive

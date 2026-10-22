@@ -7,6 +7,7 @@ import (
 	"cattery/lib/trays"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,14 +17,30 @@ import (
 // --- Guard mocks ---
 
 type stubRunnerStatus struct {
-	busy  bool
-	err   error
-	calls int
+	mu      sync.Mutex
+	state   githubClient.RunnerState
+	err     error
+	calls   int
+	seenIDs []int64
 }
 
-func (s *stubRunnerStatus) IsRunnerBusy(_ string, _ int64) (bool, error) {
+func (s *stubRunnerStatus) GetRunnerState(_ string, id int64) (githubClient.RunnerState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
-	return s.busy, s.err
+	s.seenIDs = append(s.seenIDs, id)
+	return s.state, s.err
+}
+
+func (s *stubRunnerStatus) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// online is the common case: a runner GitHub can see, busy or not.
+func online(busy bool) githubClient.RunnerState {
+	return githubClient.RunnerState{Busy: busy, Online: true}
 }
 
 type stubPollerHealth struct {
@@ -56,7 +73,7 @@ func registeredTray(age time.Duration) *trays.Tray {
 
 func TestKeepStale_NoRunnerIdIsDeleted(t *testing.T) {
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
-		WithRunnerStatus(&stubRunnerStatus{busy: true}))
+		WithRunnerStatus(&stubRunnerStatus{state: online(true)}))
 
 	tray := registeredTray(20 * time.Minute)
 	tray.GitHubRunnerId = 0
@@ -68,7 +85,7 @@ func TestKeepStale_NoRunnerIdIsDeleted(t *testing.T) {
 }
 
 func TestKeepStale_BusyRunnerIsKept(t *testing.T) {
-	rs := &stubRunnerStatus{busy: true}
+	rs := &stubRunnerStatus{state: online(true)}
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
 		WithRunnerStatus(rs))
 
@@ -76,12 +93,12 @@ func TestKeepStale_BusyRunnerIsKept(t *testing.T) {
 
 	assert.True(t, keep)
 	assert.Equal(t, KeepReasonBusy, reason)
-	assert.Equal(t, 1, rs.calls)
+	assert.Equal(t, 1, rs.callCount())
 }
 
 func TestKeepStale_IdleRunnerIsDeleted(t *testing.T) {
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
-		WithRunnerStatus(&stubRunnerStatus{busy: false}))
+		WithRunnerStatus(&stubRunnerStatus{state: online(false)}))
 
 	keep, reason := tm.KeepStale(registeredTray(20*time.Minute), staleCfg())
 
@@ -93,7 +110,7 @@ func TestKeepStale_IdleRunnerIsDeleted(t *testing.T) {
 // bounds inconclusive guards, not a positive "busy".
 func TestKeepStale_BusyRunnerIgnoresHardThreshold(t *testing.T) {
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
-		WithRunnerStatus(&stubRunnerStatus{busy: true}))
+		WithRunnerStatus(&stubRunnerStatus{state: online(true)}))
 
 	cfg := staleCfg()
 	keep, reason := tm.KeepStale(registeredTray(cfg.HardThreshold+time.Hour), cfg)
@@ -133,22 +150,71 @@ func TestKeepStale_UnknownStatusGivesUpAtHardThreshold(t *testing.T) {
 	assert.False(t, keep)
 }
 
-func TestKeepStale_BlindListenerKeepsTrayWithoutAskingGitHub(t *testing.T) {
+// Review finding: the blind-listener guard must not outrank GitHub. A kept
+// tray still counts towards MaxTrays, so keeping trays GitHub calls idle
+// starves scale-up for the whole outage.
+func TestKeepStale_BlindListenerDoesNotOverrideIdleRunner(t *testing.T) {
 	cfg := staleCfg()
-	rs := &stubRunnerStatus{busy: false}
+	rs := &stubRunnerStatus{state: online(false)}
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
 		WithRunnerStatus(rs),
 		WithPollerHealth(&stubPollerHealth{last: time.Now().Add(-cfg.PollerGrace - time.Minute), ok: true}))
 
 	keep, reason := tm.KeepStale(registeredTray(20*time.Minute), cfg)
 
+	assert.False(t, keep, "GitHub says idle, so the tray goes even with a blind listener")
+	assert.Equal(t, KeepReasonNone, reason)
+	assert.Equal(t, 1, rs.callCount(), "GitHub must be consulted, not short-circuited")
+}
+
+// Both signals failing together is the shape of a cattery-to-GitHub outage.
+func TestKeepStale_BlindListenerAndFailedCheckKeepsTray(t *testing.T) {
+	cfg := staleCfg()
+	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
+		WithRunnerStatus(&stubRunnerStatus{err: errors.New("connection timed out")}),
+		WithPollerHealth(&stubPollerHealth{last: time.Now().Add(-cfg.PollerGrace - time.Minute), ok: true}))
+
+	keep, reason := tm.KeepStale(registeredTray(20*time.Minute), cfg)
+
 	assert.True(t, keep)
-	assert.Equal(t, KeepReasonBlindListener, reason)
-	assert.Zero(t, rs.calls, "a blind listener is decided locally, with no GitHub call")
+	assert.Equal(t, KeepReasonBlindListener, reason, "the more specific cause should be reported")
+}
+
+// Review finding: deleting at the hard limit without asking GitHub would kill
+// a running job, contradicting "a busy runner is exempt from that bound".
+func TestKeepStale_BusyRunnerSurvivesHardLimitWithBlindListener(t *testing.T) {
+	cfg := staleCfg()
+	rs := &stubRunnerStatus{state: online(true)}
+	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
+		WithRunnerStatus(rs),
+		WithPollerHealth(&stubPollerHealth{last: time.Now().Add(-24 * time.Hour), ok: true}))
+
+	keep, reason := tm.KeepStale(registeredTray(cfg.HardThreshold+time.Hour), cfg)
+
+	assert.True(t, keep, "a running job must survive a blind listener past the hard limit")
+	assert.Equal(t, KeepReasonBusy, reason)
+	assert.Equal(t, 1, rs.callCount())
+}
+
+// Review finding: an offline-but-busy runner must not pin a tray slot
+// indefinitely, because kept trays consume MaxTrays.
+func TestKeepStale_BusyOfflineRunnerIsBounded(t *testing.T) {
+	cfg := staleCfg()
+	offlineBusy := githubClient.RunnerState{Busy: true, Online: false}
+
+	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
+		WithRunnerStatus(&stubRunnerStatus{state: offlineBusy}))
+
+	keep, reason := tm.KeepStale(registeredTray(20*time.Minute), cfg)
+	assert.True(t, keep, "a live job behind a network blip looks like this")
+	assert.Equal(t, KeepReasonBusyOffline, reason)
+
+	keep, _ = tm.KeepStale(registeredTray(cfg.HardThreshold+time.Minute), cfg)
+	assert.False(t, keep, "but it must not hold the slot forever")
 }
 
 func TestKeepStale_HealthyListenerDefersToGitHub(t *testing.T) {
-	rs := &stubRunnerStatus{busy: false}
+	rs := &stubRunnerStatus{state: online(false)}
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
 		WithRunnerStatus(rs),
 		WithPollerHealth(&stubPollerHealth{last: time.Now().Add(-10 * time.Second), ok: true}))
@@ -156,13 +222,13 @@ func TestKeepStale_HealthyListenerDefersToGitHub(t *testing.T) {
 	keep, _ := tm.KeepStale(registeredTray(20*time.Minute), staleCfg())
 
 	assert.False(t, keep)
-	assert.Equal(t, 1, rs.calls)
+	assert.Equal(t, 1, rs.callCount())
 }
 
 // With leader election the poller for a tray type can live on another replica,
 // so "no local answer" must not disable the reaper.
 func TestKeepStale_UnknownListenerDefersToGitHub(t *testing.T) {
-	rs := &stubRunnerStatus{busy: false}
+	rs := &stubRunnerStatus{state: online(false)}
 	tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{},
 		WithRunnerStatus(rs),
 		WithPollerHealth(&stubPollerHealth{ok: false}))
@@ -170,7 +236,7 @@ func TestKeepStale_UnknownListenerDefersToGitHub(t *testing.T) {
 	keep, _ := tm.KeepStale(registeredTray(20*time.Minute), staleCfg())
 
 	assert.False(t, keep)
-	assert.Equal(t, 1, rs.calls)
+	assert.Equal(t, 1, rs.callCount())
 }
 
 func TestKeepStale_BlindListenerGivesUpAtHardThreshold(t *testing.T) {
@@ -222,7 +288,7 @@ func TestHandleStale_DoesNotDeleteTrayRunningAJob(t *testing.T) {
 		// why the tray still reads "registered".
 		WithPollerHealth(&stubPollerHealth{last: time.Now().Add(-15 * time.Minute), ok: true}),
 		// GitHub knows the runner is building docs.
-		WithRunnerStatus(&stubRunnerStatus{busy: true}))
+		WithRunnerStatus(&stubRunnerStatus{state: online(true)}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -259,7 +325,7 @@ func TestHandleStale_StillDeletesIdleTray(t *testing.T) {
 
 	tm := NewTrayManager(repo, &mockProviderFactory{provider: provider},
 		WithPollerHealth(&stubPollerHealth{last: time.Now(), ok: true}),
-		WithRunnerStatus(&stubRunnerStatus{busy: false}))
+		WithRunnerStatus(&stubRunnerStatus{state: online(false)}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
