@@ -175,7 +175,7 @@ func TestAgentPing_StaleNonRunningTray(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	assert.NoError(t, err)
 	assert.True(t, resp.Terminate)
-	assert.Contains(t, resp.Message, "not changed in 15 minutes")
+	assert.Contains(t, resp.Message, "not changed in 15m0s")
 }
 
 func TestAgentPing_RecentNonRunningTray(t *testing.T) {

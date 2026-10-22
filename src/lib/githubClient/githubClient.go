@@ -63,6 +63,38 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	return err
 }
 
+// ErrRunnerNotFound is returned by IsRunnerBusy when GitHub has no runner with
+// the given ID. A runner GitHub does not know about cannot be running a job.
+var ErrRunnerNotFound = errors.New("runner not found")
+
+// IsRunnerBusy reports whether GitHub currently considers the runner to be
+// executing a job.
+//
+// This is the authoritative answer to "is this tray doing work?", and unlike
+// cattery's own tray status it does not depend on the scale set listener
+// having received a JobStarted message. The stale-tray reaper and the agent
+// ping handler both consult it before destroying a tray, so a listener that
+// has gone blind cannot cause a running job to be killed.
+//
+// Requires the GitHub App to hold organization "Self-hosted runners: read"
+// (or "Administration: read"). Without it the call returns a 403, which
+// IsForbidden reports; callers must treat that as "unknown", never as
+// "not busy".
+func (gc *GithubClient) IsRunnerBusy(runnerId int64) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	runner, resp, err := gc.client.Actions.GetOrganizationRunner(ctx, gc.Org.Name, runnerId)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return false, ErrRunnerNotFound
+		}
+		return false, err
+	}
+
+	return runner.GetBusy(), nil
+}
+
 type WorkflowRunInfo struct {
 	Status     string
 	Conclusion string

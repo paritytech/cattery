@@ -21,6 +21,8 @@ stale:
     registering: 5m
     registered: 15m
     deleting: 15m
+  pollerGrace: 3m
+  hardThreshold: 6h
 
 coordination:
   backend: memory
@@ -105,14 +107,31 @@ trayTypes:
 | database | string | yes      | Database name (e.g., cattery).                                |
 
 #### stale
-Optional. Configures the cleanup loop that deletes trays stuck in a non-running status. A tray whose status has not changed for longer than its threshold is deleted (the provider resource is cleaned up and the record removed). `running` trays are never stale.
+Optional. Configures the cleanup loop that deletes trays stuck in a non-running status. A tray whose status has not changed for longer than its threshold is a candidate for deletion (the provider resource is cleaned up and the record removed). `running` trays are never stale.
 
-| Key          | Type                    | Required | Description                                                                                                                                     |
-|--------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| pollInterval | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
-| thresholds   | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
+| Key           | Type                    | Required | Description                                                                                                                                     |
+|---------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| pollInterval  | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
+| thresholds    | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
+| pollerGrace   | duration                | no       | How long a tray type's scale set listener may go without a successful message poll before its trays stop being reaped. Default `3m`.            |
+| hardThreshold | duration                | no       | Age past which a candidate is deleted even when the guards below cannot give a straight answer. Default `6h`.                                    |
 
-Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, an agent whose tray has sat in `registered` (idle, no job) for 15 minutes is told to shut down on its next ping.
+Durations use Go syntax (`30s`, `5m`, `1h30m`).
+
+##### Why a candidate is not always deleted
+
+A tray leaves `registered` only when its scale set listener delivers a `JobStarted` message. A listener stuck mid-poll therefore leaves a tray that is running a job looking exactly like a tray that is idle, and deleting it destroys the VM under a live job — the job then fails about ten minutes later with *"The self-hosted runner lost communication with the server"*.
+
+Before deleting a candidate, cattery checks:
+
+1. **Is the listener still polling?** If the tray type's listener has not completed a poll within `pollerGrace`, the tray status cannot be trusted and the tray is kept. Idle listeners poll roughly every 50 seconds, so a gap of minutes means something is wrong. Decided locally, with no GitHub call.
+2. **Does GitHub say the runner is busy?** A busy runner is kept for as long as it stays busy, however long the job runs. A runner GitHub reports as idle, or has no record of, is deleted.
+
+A check that errors counts as "unknown", not as "idle", and keeps the tray. Guards 1 and 2 are both bounded by `hardThreshold` so a permanently broken guard degrades into plain threshold-based deletion instead of leaking VMs; a runner GitHub positively reports as busy is exempt from that bound.
+
+Trays kept this way are counted by `cattery_stale_trays_kept_count{reason=...}`. A sustained rate there means tray status is routinely lagging, which almost always means a listener is not polling.
+
+The same checks gate the agent ping path: an agent whose tray has sat in a non-running status past its threshold is told to shut down on its next ping, unless one of the guards above keeps it.
 
 #### coordination
 Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.

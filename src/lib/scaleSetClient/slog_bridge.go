@@ -3,6 +3,7 @@ package scaleSetClient
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
 	log "github.com/sirupsen/logrus"
@@ -21,11 +22,41 @@ import (
 //
 // Pre-setting Logger here makes scaleset's nil guard a no-op and our bridge
 // stays in place. *slog.Logger satisfies retryablehttp.LeveledLogger.
+//
+// The timeout and retry budget are set here too, because the library defaults
+// leave the listener blind for far too long. See pollRequestTimeout.
 func newRetryableClient(entry *log.Entry) *retryablehttp.Client {
 	rc := retryablehttp.NewClient()
 	rc.Logger = newSlogLogger(entry)
+	rc.HTTPClient.Timeout = pollRequestTimeout
+	rc.RetryMax = pollRetryMax
 	return rc
 }
+
+const (
+	// pollRequestTimeout caps a single HTTP attempt against the Actions
+	// broker.
+	//
+	// Left at zero, actions/scaleset applies its own 5-minute default
+	// (common_client.go), which is six times the ~50s GitHub actually holds an
+	// idle long-poll open. A connection that dies silently therefore burns a
+	// full 5 minutes before the client gives up.
+	//
+	// 90s is comfortably above the observed hold time and well under it.
+	pollRequestTimeout = 90 * time.Second
+
+	// pollRetryMax caps retries within one request.
+	//
+	// retryablehttp defaults to 4, so a single GetMessage could spend
+	// 5 attempts x 5 minutes before the listener loop saw any error at all.
+	// Nothing upstream reports a retry, so the listener looked healthy
+	// throughout while the tray it was tracking sat untouched and was reaped
+	// as stale.
+	//
+	// 2 retries at 90s bounds one exhausted call at roughly 4.5 minutes plus
+	// backoff, below every staleness threshold.
+	pollRetryMax = 2
+)
 
 // logrusHandler bridges slog into logrus so that third-party libraries using
 // slog (e.g. actions/scaleset / go-retryablehttp) respect cattery's log level

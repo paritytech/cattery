@@ -204,14 +204,48 @@ type DatabaseConfig struct {
 // that status is considered stale. Statuses not present in the map are not
 // checked. "running" should not be set — running trays are never stale.
 //
+// A tray passing a threshold is a candidate, not a verdict. Before deleting
+// it the reaper asks GitHub whether the runner is busy and checks whether the
+// tray type's listener is still receiving messages, because a tray only
+// leaves "registered" when a JobStarted message arrives — a listener that has
+// gone blind leaves a working tray looking idle. PollerGrace and
+// HardThreshold tune those two guards.
+//
 // Defaults are applied in StaleConfig.WithDefaults when fields are zero.
 type StaleConfig struct {
 	PollInterval time.Duration            `yaml:"pollInterval"`
 	Thresholds   map[string]time.Duration `yaml:"thresholds"`
+
+	// PollerGrace is how long a tray type's scale set listener may go without
+	// a successful message poll before its trays stop being reaped. Below
+	// this, tray status is considered fresh enough to act on; above it, the
+	// listener is blind and "registered" may simply be out of date.
+	//
+	// Idle listeners poll every ~50s (GitHub holds each long-poll that long),
+	// so a gap of minutes means something is wrong.
+	PollerGrace time.Duration `yaml:"pollerGrace"`
+
+	// HardThreshold bounds how long the guards may keep a candidate alive when
+	// they cannot get a straight answer — the GitHub busy check erroring, or a
+	// listener that never recovers. Past this age a tray is deleted anyway, so
+	// a broken guard cannot leak VMs indefinitely.
+	//
+	// It does not apply to a tray GitHub positively reports as busy: that tray
+	// is running a job, however long the job takes.
+	HardThreshold time.Duration `yaml:"hardThreshold"`
 }
 
 // DefaultStalePollInterval is used when StaleConfig.PollInterval is zero.
 const DefaultStalePollInterval = time.Minute
+
+// DefaultStalePollerGrace is used when StaleConfig.PollerGrace is zero.
+const DefaultStalePollerGrace = 3 * time.Minute
+
+// DefaultStaleHardThreshold is used when StaleConfig.HardThreshold is zero.
+// Long enough to cover the longest CI job plus slack, so an inconclusive
+// guard never destroys real work; short enough that a leaked VM is measured
+// in hours, not days.
+const DefaultStaleHardThreshold = 6 * time.Hour
 
 // DefaultStaleThresholds is used when StaleConfig.Thresholds is empty.
 // Creating/Registering are tight: a VM that hasn't booted+registered within
@@ -232,6 +266,12 @@ func (s StaleConfig) WithDefaults() StaleConfig {
 	}
 	if len(out.Thresholds) == 0 {
 		out.Thresholds = DefaultStaleThresholds
+	}
+	if out.PollerGrace <= 0 {
+		out.PollerGrace = DefaultStalePollerGrace
+	}
+	if out.HardThreshold <= 0 {
+		out.HardThreshold = DefaultStaleHardThreshold
 	}
 	return out
 }

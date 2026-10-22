@@ -3,6 +3,7 @@ package server
 import (
 	"cattery/lib/config"
 	"cattery/lib/election"
+	"cattery/lib/githubClient"
 	"cattery/lib/metrics"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
@@ -60,10 +61,28 @@ func Start() {
 
 	var database = client.Database(config.Get().Database.Database)
 
-	// Initialize tray manager and repository
+	// Initialize scale set pollers — one per TrayType.
+	// The JIT registry is populated alongside, so the agent register handler can
+	// generate JIT configs on any replica without depending on the (leader-only)
+	// poller for that tray type.
+	ssm := scaleSetPoller.NewManager()
+	jitRegistry := scaleSetClient.NewJitRegistry()
+
+	// Initialize tray manager and repository.
+	//
+	// The two guards keep the tray lifecycle from destroying a VM that is
+	// running a job: a tray only leaves "registered" when its listener
+	// delivers a JobStarted, so a stuck listener makes working trays look
+	// idle. ssm answers "is that listener still polling?" and the GitHub
+	// client answers "is this runner actually busy?".
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
-	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
+	tm := trayManager.NewTrayManager(
+		trayRepository,
+		providers.DefaultFactory{},
+		trayManager.WithPollerHealth(ssm),
+		trayManager.WithRunnerStatus(orgRunnerStatus{}),
+	)
 
 	// Register DB-backed metrics collector
 	metrics.RegisterTrayCollector(tm)
@@ -72,13 +91,6 @@ func Start() {
 	var restartManagerRepository = restarterRepo.NewMongodbRestarterRepository()
 	restartManagerRepository.Connect(database.Collection("restarters"))
 	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
-
-	// Initialize scale set pollers — one per TrayType.
-	// The JIT registry is populated alongside, so the agent register handler can
-	// generate JIT configs on any replica without depending on the (leader-only)
-	// poller for that tray type.
-	ssm := scaleSetPoller.NewManager()
-	jitRegistry := scaleSetClient.NewJitRegistry()
 
 	// Leader election decides which replica runs each tray type's poller. The
 	// tray HTTP plane (served via jitRegistry above) runs on every replica
@@ -178,6 +190,19 @@ func runLeaderTask(ctx context.Context, wg *sync.WaitGroup, elector election.Ele
 			logger.Errorf("Leader election for '%s' exited: %v", key, err)
 		}
 	}()
+}
+
+// orgRunnerStatus adapts the per-organization GitHub clients to the single
+// RunnerStatusSource the tray manager consumes. Clients are cached per org
+// inside githubClient, so this stays cheap to construct per call.
+type orgRunnerStatus struct{}
+
+func (orgRunnerStatus) IsRunnerBusy(orgName string, runnerId int64) (bool, error) {
+	gc, err := githubClient.NewGithubClientWithOrgName(orgName)
+	if err != nil {
+		return false, err
+	}
+	return gc.IsRunnerBusy(runnerId)
 }
 
 // runPoller runs a tray type's scale set listener until ctx is cancelled —

@@ -25,6 +25,16 @@ type Poller struct {
 	trayManager *trayManager.TrayManager
 	history     *History
 	logger      *log.Entry
+
+	// lastPoll is the Unix-nano time of the most recent successful message
+	// poll. It is the liveness signal the stale-tray reaper reads: a tray only
+	// leaves "registered" when this listener delivers a JobStarted, so while
+	// polling is stuck the tray status cannot be trusted.
+	//
+	// Note this tracks the GetMessage call as a whole. The underlying HTTP
+	// client retries internally, so a single call can be stuck for several
+	// timeouts without the listener loop ever seeing an error.
+	lastPoll atomic.Int64
 }
 
 func NewPoller(
@@ -70,8 +80,12 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	scaler := &catteryScaler{poller: p}
 
+	// A session exists, so the listener is live from here on; without this the
+	// first long-poll (~50s) would look like 50s of silence to the reaper.
+	p.markPolled()
+
 	l, err := listener.New(
-		&sessionAdapter{client: p.client},
+		&sessionAdapter{client: p.client, poller: p},
 		listener.Config{
 			ScaleSetID: scaleSetID,
 			MaxRunners: p.trayType.MaxTrays,
@@ -86,13 +100,36 @@ func (p *Poller) Run(ctx context.Context) error {
 	return l.Run(ctx, scaler)
 }
 
+// markPolled records that the listener just heard from GitHub.
+func (p *Poller) markPolled() {
+	p.lastPoll.Store(time.Now().UnixNano())
+}
+
+// LastSuccessfulPoll returns when this listener last completed a message poll.
+// The second return is false before the first poll of the current session.
+func (p *Poller) LastSuccessfulPoll() (time.Time, bool) {
+	ns := p.lastPoll.Load()
+	if ns == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, ns), true
+}
+
 // sessionAdapter adapts our ScaleSetClient to the listener.Client interface.
 type sessionAdapter struct {
 	client *scaleSetClient.ScaleSetClient
+	poller *Poller
 }
 
 func (s *sessionAdapter) GetMessage(ctx context.Context, lastMessageID, maxCapacity int) (*scaleset.RunnerScaleSetMessage, error) {
-	return s.client.Poll(ctx, lastMessageID, maxCapacity)
+	msg, err := s.client.Poll(ctx, lastMessageID, maxCapacity)
+	if err != nil {
+		return nil, err
+	}
+	// Includes an empty poll: GitHub answering "no messages" still proves the
+	// listener can see the queue.
+	s.poller.markPolled()
+	return msg, nil
 }
 
 func (s *sessionAdapter) DeleteMessage(ctx context.Context, messageID int) error {

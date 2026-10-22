@@ -23,6 +23,11 @@ var (
 		Help: "Number of stale trays cleaned up",
 	}, []string{"org", "tray_type"})
 
+	staleTraysKeptCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cattery_stale_trays_kept_count",
+		Help: "Number of stale trays kept alive by a guard instead of being cleaned up",
+	}, []string{"org", "tray_type", "reason"})
+
 	preemptedTraysCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cattery_preempted_trays_count",
 		Help: "Number of preempted trays",
@@ -85,6 +90,13 @@ func StaleTraysAdd(org string, trayType string, count int) {
 
 func StaleTraysInc(org string, trayType string) {
 	StaleTraysAdd(org, trayType, 1)
+}
+
+// StaleTraysKeptInc counts a tray that passed its staleness threshold but was
+// spared. A sustained rate here means tray status is routinely lagging — most
+// likely a scale set listener that is not polling.
+func StaleTraysKeptInc(org string, trayType string, reason string) {
+	staleTraysKeptCount.WithLabelValues(org, trayType, reason).Inc()
 }
 
 // PreemptedTrays
