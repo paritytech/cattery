@@ -3,10 +3,12 @@ package trayManager
 import (
 	"cattery/lib/githubClient"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v84/github"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -129,4 +131,58 @@ func TestCachedRunnerStatus_ConcurrentUseIsSafe(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// A 403 means the GitHub App is missing a permission. That will not fix itself
+// between ticks, and a forbidden check keeps the tray, so re-querying every
+// minute for the whole hard threshold is hours of guaranteed-failing calls.
+func TestCachedRunnerStatus_CachesForbidden(t *testing.T) {
+	inner := &stubRunnerStatus{err: forbiddenErr()}
+	c := NewCachedRunnerStatus(inner, time.Minute)
+
+	for range 5 {
+		_, err := c.GetRunnerState("paritytech", 42)
+		assert.True(t, githubClient.IsForbidden(err),
+			"the caller must still see a forbidden error, not a cache miss")
+	}
+
+	assert.Equal(t, 1, inner.callCount(), "a deterministic refusal is asked once per window")
+}
+
+// The permission being granted must be picked up without a restart.
+func TestCachedRunnerStatus_ForbiddenIsRecheckedAfterExpiry(t *testing.T) {
+	inner := &stubRunnerStatus{err: forbiddenErr()}
+	c := NewCachedRunnerStatus(inner, time.Minute)
+
+	_, err := c.GetRunnerState("paritytech", 42)
+	assert.Error(t, err)
+
+	c.expireAll()
+	inner.setErr(nil)
+	inner.setState(online(true))
+
+	state, err := c.GetRunnerState("paritytech", 42)
+	assert.NoError(t, err)
+	assert.True(t, state.Busy)
+}
+
+// Transient failures keep the old behaviour: retry promptly, because a retry
+// is what resolves them.
+func TestCachedRunnerStatus_TransientErrorsStillNotCached(t *testing.T) {
+	inner := &stubRunnerStatus{err: errors.New("connection timed out")}
+	c := NewCachedRunnerStatus(inner, time.Minute)
+
+	for range 3 {
+		_, err := c.GetRunnerState("paritytech", 42)
+		assert.Error(t, err)
+	}
+
+	assert.Equal(t, 3, inner.callCount())
+}
+
+func forbiddenErr() error {
+	return &github.ErrorResponse{
+		Response: &http.Response{StatusCode: http.StatusForbidden},
+		Message:  "Resource not accessible by integration",
+	}
 }

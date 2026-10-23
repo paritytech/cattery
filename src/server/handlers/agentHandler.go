@@ -261,7 +261,7 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 			// Counted on the same series as the reaper's keeps: both are the
 			// same disagreement between tray status and reality, and an
 			// operator watching for a lagging listener should see either.
-			metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason))
+			metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason), metrics.KeptPathPing)
 			writeResponse(responseWriter, pingResponse, logger)
 			return
 		}

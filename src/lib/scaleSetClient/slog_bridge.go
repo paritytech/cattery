@@ -3,6 +3,7 @@ package scaleSetClient
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -32,7 +33,29 @@ func newRetryableClient(entry *log.Entry) *retryablehttp.Client {
 	rc.RetryMax = pollRetryMax
 	rc.RetryWaitMin = pollRetryWaitMin
 	rc.RetryWaitMax = pollRetryWaitMax
+	rc.Backoff = boundedBackoff
 	return rc
+}
+
+// boundedBackoff is retryablehttp's DefaultBackoff with its one unbounded path
+// closed off.
+//
+// DefaultBackoff returns a Retry-After header verbatim for 429 and 503,
+// skipping the RetryWaitMax clamp that governs every other case. GitHub sends
+// Retry-After on rate limits, and the header may be an HTTP-date minutes or
+// hours in the future, so a single GetMessage could otherwise block far past
+// MaxPollDuration — the bound config.DefaultStalePollerGrace is derived from.
+//
+// Clamping means we retry sooner than GitHub asked. That is acceptable here
+// because the budget is only pollRetryMax retries: once they are spent the
+// listener returns an error and runPoller waits 30s before recreating the
+// session, which backs off far more than the clamped wait saved.
+func boundedBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+	wait := retryablehttp.DefaultBackoff(min, max, attemptNum, resp)
+	if wait > max {
+		return max
+	}
+	return wait
 }
 
 const (
@@ -64,11 +87,12 @@ const (
 
 	// MaxPollDuration is the worst case for one GetMessage call:
 	// (pollRetryMax+1) attempts at pollRequestTimeout, plus the backoff waits
-	// between them (1s, 2s) — about 4m33s.
+	// between them. boundedBackoff caps every wait at pollRetryWaitMax, so
+	// pollRetryMax waits of that size is the ceiling — about 4m40s.
 	//
 	// config.DefaultStalePollerGrace must stay above this, or a single
 	// legitimately-exhausted call would be misread as a dead listener.
-	MaxPollDuration = (pollRetryMax+1)*pollRequestTimeout + pollRetryWaitMin + 2*pollRetryWaitMin
+	MaxPollDuration = (pollRetryMax+1)*pollRequestTimeout + pollRetryMax*pollRetryWaitMax
 )
 
 // logrusHandler bridges slog into logrus so that third-party libraries using

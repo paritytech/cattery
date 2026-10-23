@@ -26,7 +26,7 @@ var (
 	staleTraysKeptCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cattery_stale_trays_kept_count",
 		Help: "Number of stale trays kept alive by a guard instead of being cleaned up",
-	}, []string{"org", "tray_type", "reason"})
+	}, []string{"org", "tray_type", "reason", "path"})
 
 	preemptedTraysCount = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cattery_preempted_trays_count",
@@ -92,11 +92,19 @@ func StaleTraysInc(org string, trayType string) {
 	StaleTraysAdd(org, trayType, 1)
 }
 
+// Paths that can spare a stale tray. Both enforce the same rule on the same
+// ~60s cadence, so one stuck tray with a live agent is counted by both; the
+// label keeps them separable instead of silently doubling a single series.
+const (
+	KeptPathReaper = "reaper"
+	KeptPathPing   = "ping"
+)
+
 // StaleTraysKeptInc counts a tray that passed its staleness threshold but was
 // spared. A sustained rate here means tray status is routinely lagging — most
 // likely a scale set listener that is not polling.
-func StaleTraysKeptInc(org string, trayType string, reason string) {
-	staleTraysKeptCount.WithLabelValues(org, trayType, reason).Inc()
+func StaleTraysKeptInc(org string, trayType string, reason string, path string) {
+	staleTraysKeptCount.WithLabelValues(org, trayType, reason, path).Inc()
 }
 
 // PreemptedTrays

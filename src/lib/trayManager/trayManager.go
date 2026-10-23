@@ -306,7 +306,7 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			for _, tray := range stale {
 				if keep, reason := tm.KeepStale(tray, cfg); keep {
 					log.Infof("Keeping stale tray %s (status=%s): %s", tray.Id, tray.Status, reason)
-					metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason))
+					metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason), metrics.KeptPathReaper)
 					continue
 				}
 				log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)

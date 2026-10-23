@@ -23,9 +23,9 @@ const DefaultRunnerStateTTL = 30 * time.Second
 // Entries are keyed by org and runner ID. Two kinds of answer are deliberately
 // never cached:
 //
-//   - Errors. A failed check keeps the tray alive, so retrying promptly is
-//     what resolves it; caching the failure would extend every outage by the
-//     TTL.
+//   - Transient errors. A failed check keeps the tray alive, so retrying
+//     promptly is what resolves it; caching the failure would extend every
+//     outage by the TTL. A 403 is the exception — see ForbiddenTTL.
 //   - Idle runners. Caching "idle" is unsafe and nearly pointless. Unsafe,
 //     because a tray can be read idle, pick up a job moments later, and — if
 //     its listener is blind, so the tray status never moves — be deleted
@@ -49,8 +49,20 @@ type runnerKey struct {
 
 type cachedRunnerState struct {
 	state   githubClient.RunnerState
+	err     error
 	expires time.Time
 }
+
+// ForbiddenTTL is how long a 403 is remembered.
+//
+// Unlike a timeout, a 403 is deterministic: the GitHub App is missing
+// organization "Self-hosted runners: read" and will keep saying no until
+// someone changes the App. A forbidden check keeps the tray, so without this
+// every affected tray would be re-queried by both the reaper and the ping
+// path every minute for the full hard threshold — hours of guaranteed-failing
+// calls. It is still re-checked often enough to notice the permission being
+// granted.
+const ForbiddenTTL = 5 * time.Minute
 
 // NewCachedRunnerStatus wraps source with a TTL cache. A non-positive ttl
 // selects DefaultRunnerStateTTL.
@@ -72,7 +84,7 @@ func (c *CachedRunnerStatus) GetRunnerState(orgName string, runnerId int64) (git
 	c.mu.Lock()
 	if entry, ok := c.entries[key]; ok && now.Before(entry.expires) {
 		c.mu.Unlock()
-		return entry.state, nil
+		return entry.state, entry.err
 	}
 	c.mu.Unlock()
 
@@ -81,6 +93,11 @@ func (c *CachedRunnerStatus) GetRunnerState(orgName string, runnerId int64) (git
 	// call is cheaper than that contention.
 	state, err := c.inner.GetRunnerState(orgName, runnerId)
 	if err != nil {
+		if githubClient.IsForbidden(err) {
+			c.mu.Lock()
+			c.entries[key] = cachedRunnerState{err: err, expires: now.Add(ForbiddenTTL)}
+			c.mu.Unlock()
+		}
 		return githubClient.RunnerState{}, err
 	}
 

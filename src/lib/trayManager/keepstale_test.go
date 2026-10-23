@@ -32,6 +32,12 @@ func (s *stubRunnerStatus) GetRunnerState(_ string, id int64) (githubClient.Runn
 	return s.state, s.err
 }
 
+func (s *stubRunnerStatus) setErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
+}
+
 func (s *stubRunnerStatus) setState(state githubClient.RunnerState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
