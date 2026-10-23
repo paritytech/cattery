@@ -25,6 +25,16 @@ type Poller struct {
 	trayManager *trayManager.TrayManager
 	history     *History
 	logger      *log.Entry
+
+	// lastPoll is the Unix-nano time of the most recent successful message
+	// poll. It is the liveness signal the stale-tray reaper reads: a tray only
+	// leaves "registered" when this listener delivers a JobStarted, so while
+	// polling is stuck the tray status cannot be trusted.
+	//
+	// Note this tracks the GetMessage call as a whole. The underlying HTTP
+	// client retries internally, so a single call can be stuck for several
+	// timeouts without the listener loop ever seeing an error.
+	lastPoll atomic.Int64
 }
 
 func NewPoller(
@@ -51,6 +61,10 @@ func (p *Poller) History() *History {
 func (p *Poller) Run(ctx context.Context) error {
 	p.logger.Info("Starting scale set poller")
 
+	// Whatever happens below, this poller stops being evidence of liveness the
+	// moment Run returns.
+	defer p.clearPolled()
+
 	if err := p.client.EnsureScaleSet(ctx); err != nil {
 		return fmt.Errorf("failed to ensure scale set: %w", err)
 	}
@@ -70,8 +84,13 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	scaler := &catteryScaler{poller: p}
 
+	// Deliberately no stamp here. Creating a session proves only that the
+	// control-plane call worked, not that messages are flowing, and runPoller
+	// re-enters Run every 30s after a failure — so stamping here would make a
+	// listener that fails every single poll look perfectly live. Until the
+	// first poll returns, LastSuccessfulPoll reports "no opinion".
 	l, err := listener.New(
-		&sessionAdapter{client: p.client},
+		&sessionAdapter{client: p.client, poller: p},
 		listener.Config{
 			ScaleSetID: scaleSetID,
 			MaxRunners: p.trayType.MaxTrays,
@@ -86,13 +105,49 @@ func (p *Poller) Run(ctx context.Context) error {
 	return l.Run(ctx, scaler)
 }
 
+// markPolled records that the listener just heard from GitHub.
+func (p *Poller) markPolled() {
+	p.lastPoll.Store(time.Now().UnixNano())
+}
+
+// clearPolled drops the liveness stamp.
+//
+// Called when Run returns, so a replica that has stopped polling a tray type
+// reports "no opinion" instead of a frozen timestamp. Without this a poller
+// that lost leadership, or whose session ended, would keep answering with a
+// stale time and the reaper would read that as a blind listener forever.
+func (p *Poller) clearPolled() {
+	p.lastPoll.Store(0)
+}
+
+// LastSuccessfulPoll returns when this listener last completed a message poll.
+//
+// The second return is false when this poller has no opinion: it has not
+// completed a poll since the current session started, or it is not running.
+// Callers must not read that as an unhealthy listener.
+func (p *Poller) LastSuccessfulPoll() (time.Time, bool) {
+	ns := p.lastPoll.Load()
+	if ns == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, ns), true
+}
+
 // sessionAdapter adapts our ScaleSetClient to the listener.Client interface.
 type sessionAdapter struct {
 	client *scaleSetClient.ScaleSetClient
+	poller *Poller
 }
 
 func (s *sessionAdapter) GetMessage(ctx context.Context, lastMessageID, maxCapacity int) (*scaleset.RunnerScaleSetMessage, error) {
-	return s.client.Poll(ctx, lastMessageID, maxCapacity)
+	msg, err := s.client.Poll(ctx, lastMessageID, maxCapacity)
+	if err != nil {
+		return nil, err
+	}
+	// Includes an empty poll: GitHub answering "no messages" still proves the
+	// listener can see the queue.
+	s.poller.markPolled()
+	return msg, nil
 }
 
 func (s *sessionAdapter) DeleteMessage(ctx context.Context, messageID int) error {

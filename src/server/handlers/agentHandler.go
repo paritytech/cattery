@@ -214,6 +214,10 @@ func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
 	http.ServeFile(responseWriter, r, execPath)
 }
 
+// agentPingFallbackThreshold applies when the tray's status has no configured
+// staleness threshold. It matches the historical hardcoded value.
+const agentPingFallbackThreshold = 15 * time.Minute
+
 func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {
 	logger := log.WithFields(log.Fields{
 		"handler": "agent",
@@ -239,8 +243,30 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
-		errMsg := fmt.Sprintf("Tray '%s' status not changed in 15 minutes", tray.Id)
+	// Same rule as the stale-tray reaper, and the same trap: a tray leaves
+	// "registered" only when the scale set listener delivers a JobStarted, so
+	// a stuck listener makes a tray running a job look idle. Terminating on
+	// status alone kills the job. KeepStale consults GitHub and the listener
+	// before agreeing.
+	cfg := config.Get().Stale.WithDefaults()
+	threshold := cfg.Thresholds[tray.Status.String()]
+	if threshold <= 0 {
+		threshold = agentPingFallbackThreshold
+	}
+
+	if time.Since(tray.StatusChanged) > threshold {
+		if keep, reason := h.TrayManager.KeepStale(tray, cfg); keep {
+			logger.Infof("Tray '%s' status unchanged for over %s but keeping it: %s",
+				tray.Id, threshold, reason)
+			// Counted on the same series as the reaper's keeps: both are the
+			// same disagreement between tray status and reality, and an
+			// operator watching for a lagging listener should see either.
+			metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason), metrics.KeptPathPing)
+			writeResponse(responseWriter, pingResponse, logger)
+			return
+		}
+
+		errMsg := fmt.Sprintf("Tray '%s' status not changed in %s", tray.Id, threshold)
 		logger.Error(errMsg)
 
 		pingResponse.Terminate = true

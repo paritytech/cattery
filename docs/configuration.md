@@ -21,6 +21,8 @@ stale:
     registering: 5m
     registered: 15m
     deleting: 15m
+  pollerGrace: 6m
+  hardThreshold: 6h
 
 coordination:
   backend: memory
@@ -105,14 +107,52 @@ trayTypes:
 | database | string | yes      | Database name (e.g., cattery).                                |
 
 #### stale
-Optional. Configures the cleanup loop that deletes trays stuck in a non-running status. A tray whose status has not changed for longer than its threshold is deleted (the provider resource is cleaned up and the record removed). `running` trays are never stale.
+Optional. Configures the cleanup loop that deletes trays stuck in a non-running status. A tray whose status has not changed for longer than its threshold is a candidate for deletion (the provider resource is cleaned up and the record removed). `running` trays are never stale.
 
-| Key          | Type                    | Required | Description                                                                                                                                     |
-|--------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| pollInterval | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
-| thresholds   | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
+| Key           | Type                    | Required | Description                                                                                                                                     |
+|---------------|-------------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| pollInterval  | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
+| thresholds    | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
+| pollerGrace   | duration                | no       | How long a tray type's scale set listener may go without a successful message poll before it is treated as blind. Must exceed the worst-case single poll (~4m33s). Default `6m`. |
+| hardThreshold | duration                | no       | Age past which a candidate is deleted even when the guards below cannot give a straight answer. Default `6h`.                                    |
 
-Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, an agent whose tray has sat in `registered` (idle, no job) for 15 minutes is told to shut down on its next ping.
+Durations use Go syntax (`30s`, `5m`, `1h30m`).
+
+##### Why a candidate is not always deleted
+
+A tray leaves `registered` only when its scale set listener delivers a `JobStarted` message. A listener stuck mid-poll therefore leaves a tray that is running a job looking exactly like a tray that is idle, and deleting it destroys the VM under a live job — the job then fails about ten minutes later with *"The self-hosted runner lost communication with the server"*.
+
+Before deleting a candidate, cattery asks GitHub what the runner is doing. GitHub is authoritative here and stays right whatever the listener is doing, so it is consulted first:
+
+| GitHub reports        | Result                                                      |
+|-----------------------|-------------------------------------------------------------|
+| online, busy          | Kept for as long as it stays busy, with no time limit       |
+| online, idle          | Deleted                                                     |
+| no such runner        | Deleted                                                     |
+| busy, but offline     | Kept, bounded by `hardThreshold`                            |
+| check failed          | Kept, bounded by `hardThreshold`                            |
+
+A tray kept this way still counts towards the tray type's `maxTrays`, which is why only a positively busy, online runner is kept without a bound. "Busy but offline" is ambiguous — a live job behind a network blip looks the same as a VM that has vanished — so it is kept, but not forever.
+
+`pollerGrace` is the second signal. When the busy check itself fails, cattery also looks at whether the tray type's listener is still polling; both being down together is the shape of a network outage between cattery and GitHub, and is reported as `scale set listener not polling` rather than the generic unknown. The listener signal never overrides GitHub: a listener outage must not make cattery hoard trays GitHub calls idle.
+
+Idle listeners poll roughly every 50 seconds, so a gap of minutes means something is wrong. Keep `pollerGrace` above the worst case for a single poll (three 90s attempts plus backoff, about 4m40s) or one slow call will read as a dead listener; a test pins this relationship.
+
+When no GitHub credentials are available to the reaper, the listener signal is the only guard and is used on its own, also bounded by `hardThreshold`.
+
+The same checks gate the agent ping path. There are two independent ways a tray dies — the reaper deletes the VM through the cloud API, and `AgentPing` answers an agent with `terminate` so it shuts itself down — and both used to act on tray status alone. They now share one decision, so fixing the reaper alone cannot leave the ping path killing the job.
+
+Both paths count a spared tray on `cattery_stale_trays_kept_count{org, tray_type, reason, path}`. A tray only reaches either path after its status has sat still past its threshold, so a guard sparing it means cattery's own view of that tray had gone wrong; in healthy operation the counter stays near zero and a sustained rate means status is routinely lagging.
+
+The `reason` label says which failure you have — `runner busy on github` is a listener missing `JobStarted`, `scale set listener not polling` is an outage between cattery and GitHub, `runner busy but offline on github` is VMs disappearing, `runner status unknown` is GitHub API trouble.
+
+The `path` label is either `reaper` or `ping`. Both enforce the same rule on a roughly 60s cadence, so a stuck tray whose agent is still alive is counted by both and increments about twice a minute, while one whose VM is already gone only increments on `reaper`. Filter by `path` to count checks, or sum across it to count decisions; either way this measures tray-minutes spared, not distinct trays.
+
+Runner state is cached for 30 seconds so the two paths share lookups instead of doubling the API calls. What gets cached is deliberately narrow:
+
+- **Busy results**, because a busy tray stays a candidate for as long as its job runs and is therefore asked about repeatedly.
+- **403 responses**, for 5 minutes. A 403 means the GitHub App is missing organization "Self-hosted runners: read", which will not change between ticks; since a failed check keeps the tray, re-querying every minute would mean hours of guaranteed-failing calls against the hard threshold. It is still re-checked often enough to notice the permission being granted.
+- **Nothing else.** An idle result is not cached: that would be unsafe, because a tray read as idle can pick up a job moments later and, with a blind listener leaving its status unchanged, be deleted against the stale verdict — and nearly pointless, because an idle verdict leads to deletion so that tray is never queried again. Other failures are not cached either, since they are usually transient and a prompt retry is what clears them.
 
 #### coordination
 Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.

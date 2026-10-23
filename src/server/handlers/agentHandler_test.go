@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"cattery/lib/config"
+	"cattery/lib/githubClient"
 	"cattery/lib/messages"
 	"cattery/lib/restarter"
 	restarterRepo "cattery/lib/restarter/repositories"
@@ -20,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -175,7 +177,7 @@ func TestAgentPing_StaleNonRunningTray(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	assert.NoError(t, err)
 	assert.True(t, resp.Terminate)
-	assert.Contains(t, resp.Message, "not changed in 15 minutes")
+	assert.Contains(t, resp.Message, "not changed in 15m0s")
 }
 
 func TestAgentPing_RecentNonRunningTray(t *testing.T) {
@@ -572,4 +574,63 @@ func TestAuthenticateAgent_WrongSecret(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// The kept-tray counter must cover both killers. The reaper and the ping path
+// enforce the same rule, so an operator watching for a lagging listener should
+// see keeps from either of them on one series.
+func TestAgentPing_KeptTrayIsCounted(t *testing.T) {
+	before := keptTrayCount(t)
+
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:             "tray-1",
+		TrayTypeName:   "t1",
+		GitHubOrgName:  "paritytech",
+		GitHubRunnerId: 99,
+		Status:         trays.TrayStatusRegistered,
+		StatusChanged:  time.Now().Add(-20 * time.Minute),
+	}
+
+	h := setupHandlers(repo)
+	h.TrayManager = trayManager.NewTrayManager(repo, &mockProviderFactory{},
+		trayManager.WithRunnerStatus(busyRunnerStatus{}))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var resp messages.PingResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.False(t, resp.Terminate, "a busy runner must not be told to shut down")
+
+	assert.Equal(t, before+1, keptTrayCount(t),
+		"the keep should be counted, as the reaper's keeps are")
+}
+
+type busyRunnerStatus struct{}
+
+func (busyRunnerStatus) GetRunnerState(string, int64) (githubClient.RunnerState, error) {
+	return githubClient.RunnerState{Busy: true, Online: true}, nil
+}
+
+// keptTrayCount sums cattery_stale_trays_kept_count across all label sets.
+func keptTrayCount(t *testing.T) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+
+	var total float64
+	for _, f := range families {
+		if f.GetName() != "cattery_stale_trays_kept_count" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			total += m.GetCounter().GetValue()
+		}
+	}
+	return total
 }

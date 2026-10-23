@@ -2,11 +2,13 @@ package trayManager
 
 import (
 	"cattery/lib/config"
+	"cattery/lib/githubClient"
 	"cattery/lib/metrics"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,16 +16,57 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RunnerStatusSource answers what GitHub knows about a runner. It is the
+// authority on "is this tray doing work?", independent of cattery's own tray
+// status.
+type RunnerStatusSource interface {
+	// GetRunnerState reports the runner's busy and online flags. It must
+	// return githubClient.ErrRunnerNotFound when GitHub has no such runner.
+	GetRunnerState(orgName string, runnerId int64) (githubClient.RunnerState, error)
+}
+
+// PollerHealth reports when a tray type's scale set listener last heard from
+// GitHub. The second return is false when this replica has no answer, which
+// is not the same as the listener being unhealthy.
+type PollerHealth interface {
+	LastSuccessfulPoll(trayTypeName string) (time.Time, bool)
+}
+
 type TrayManager struct {
 	trayRepository  repositories.TrayRepository
 	providerFactory providers.TrayProviderFactory
+
+	// Both are optional. Unset, the tray lifecycle behaves as it did before
+	// the guards existed: a tray past its threshold is deleted on local status
+	// alone.
+	runnerStatus RunnerStatusSource
+	pollerHealth PollerHealth
 }
 
-func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory) *TrayManager {
-	return &TrayManager{
+// Option configures optional TrayManager dependencies.
+type Option func(*TrayManager)
+
+// WithRunnerStatus supplies the GitHub busy check used before destroying a
+// tray that looks stale.
+func WithRunnerStatus(rs RunnerStatusSource) Option {
+	return func(tm *TrayManager) { tm.runnerStatus = rs }
+}
+
+// WithPollerHealth supplies the listener liveness check used before destroying
+// a tray that looks stale.
+func WithPollerHealth(ph PollerHealth) Option {
+	return func(tm *TrayManager) { tm.pollerHealth = ph }
+}
+
+func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory, opts ...Option) *TrayManager {
+	tm := &TrayManager{
 		trayRepository:  trayRepository,
 		providerFactory: providerFactory,
 	}
+	for _, opt := range opts {
+		opt(tm)
+	}
+	return tm
 }
 
 func (tm *TrayManager) createTrays(ctx context.Context, trayType *config.TrayType, count int) error {
@@ -234,7 +277,12 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 	cfg := config.Get().Stale.WithDefaults()
 	thresholds := resolveStaleThresholds(cfg.Thresholds)
 
-	log.Infof("Stale handler starting: pollInterval=%s thresholds=%v", cfg.PollInterval, formatThresholds(thresholds))
+	log.Infof("Stale handler starting: pollInterval=%s thresholds=%v pollerGrace=%s hardThreshold=%s",
+		cfg.PollInterval, formatThresholds(thresholds), cfg.PollerGrace, cfg.HardThreshold)
+	if tm.runnerStatus == nil {
+		log.Warn("Stale handler has no GitHub runner status source: trays will be " +
+			"deleted on local status alone, which can destroy a VM running a job")
+	}
 
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
@@ -256,6 +304,11 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			}
 
 			for _, tray := range stale {
+				if keep, reason := tm.KeepStale(tray, cfg); keep {
+					log.Infof("Keeping stale tray %s (status=%s): %s", tray.Id, tray.Status, reason)
+					metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason), metrics.KeptPathReaper)
+					continue
+				}
 				log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
 				if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
 					log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
@@ -264,6 +317,146 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// KeepReason explains why a tray that looks stale was kept alive.
+// The empty value means it was not kept.
+type KeepReason string
+
+const (
+	// KeepReasonNone means no guard objected to deleting the tray.
+	KeepReasonNone KeepReason = ""
+	// KeepReasonBusy means GitHub reports the runner as online and executing
+	// a job.
+	KeepReasonBusy KeepReason = "runner busy on github"
+	// KeepReasonBusyOffline means GitHub reports the runner as executing a job
+	// but no longer online. That is ambiguous — a network blip on a live job
+	// looks the same as a VM that has vanished — so the tray is kept, but
+	// under the hard limit rather than indefinitely.
+	KeepReasonBusyOffline KeepReason = "runner busy but offline on github"
+	// KeepReasonBlindListener means the tray type's listener has not polled
+	// recently, so the tray status it feeds cannot be trusted.
+	KeepReasonBlindListener KeepReason = "scale set listener not polling"
+	// KeepReasonUnknown means the busy check could not reach a verdict.
+	KeepReasonUnknown KeepReason = "runner status unknown"
+)
+
+// KeepStale reports whether a tray that has passed its staleness threshold
+// must be kept anyway.
+//
+// It exists because tray status is a lagging indicator. A tray moves to
+// "running" only when the scale set listener delivers a JobStarted message,
+// so a listener stuck mid-poll leaves a tray that is building code looking
+// like a tray that is doing nothing. Deleting on status alone destroys the
+// VM under a live job, and the job fails ~10 minutes later with "the
+// self-hosted runner lost communication with the server".
+//
+// Guards, in order:
+//
+//   - A tray with no GitHub runner ID never reached GitHub (status "creating"
+//     or "registering"), so it cannot hold a job and is deleted.
+//   - A blind listener keeps the tray: its status may simply be out of date.
+//   - GitHub reporting the runner busy keeps the tray, with no time limit —
+//     the job is real and may legitimately run for hours.
+//   - A busy check that errors keeps the tray, because "I could not tell" is
+//     not "idle".
+//
+// The last two guards are bounded by Stale.HardThreshold so that a broken
+// guard degrades into the old behaviour rather than leaking VMs forever. A
+// positively-busy runner is exempt from that bound.
+func (tm *TrayManager) KeepStale(tray *trays.Tray, cfg config.StaleConfig) (bool, KeepReason) {
+	// No runner on GitHub means nothing could have been scheduled onto it.
+	if tray.GitHubRunnerId == 0 {
+		return false, KeepReasonNone
+	}
+
+	age := time.Since(tray.StatusChanged)
+	pastHardLimit := cfg.HardThreshold > 0 && age > cfg.HardThreshold
+
+	// Ask GitHub first. It is the only participant that knows whether a job is
+	// running, and it stays right whatever our listener is doing — so a
+	// listener outage must not make us keep trays GitHub calls idle. Kept
+	// trays still count towards MaxTrays, so over-keeping starves scale-up.
+	if tm.runnerStatus == nil {
+		return tm.keepWithoutGitHub(tray, cfg, age, pastHardLimit)
+	}
+
+	state, err := tm.runnerStatus.GetRunnerState(tray.GitHubOrgName, tray.GitHubRunnerId)
+	switch {
+	case err == nil && state.Busy && state.Online:
+		// Deliberately not bounded by the hard limit: a job is running, and
+		// CI jobs legitimately run for hours.
+		return true, KeepReasonBusy
+
+	case err == nil && state.Busy:
+		// Busy but offline. Keep it, because a live job behind a network blip
+		// looks like this, but bound it so a registration GitHub never cleans
+		// up cannot hold a tray slot forever.
+		if pastHardLimit {
+			log.Warnf("Tray %s: runner still busy-but-offline on GitHub after %s, deleting anyway",
+				tray.Id, age.Truncate(time.Second))
+			return false, KeepReasonNone
+		}
+		return true, KeepReasonBusyOffline
+
+	case err == nil:
+		// GitHub says idle. Authoritative, whatever our listener thinks.
+		return false, KeepReasonNone
+
+	case errors.Is(err, githubClient.ErrRunnerNotFound):
+		// GitHub has forgotten the runner, so it is certainly not working.
+		return false, KeepReasonNone
+	}
+
+	// The check itself failed, so we genuinely do not know. "Could not tell"
+	// is not "idle", so keep the tray — but only up to the hard limit, or a
+	// permanently broken check would leak VMs.
+	if pastHardLimit {
+		log.Warnf("Tray %s: runner state still unavailable after %s, deleting anyway: %v",
+			tray.Id, age.Truncate(time.Second), err)
+		return false, KeepReasonNone
+	}
+	if githubClient.IsForbidden(err) {
+		log.Warnf("Tray %s: runner state check forbidden — the GitHub App needs "+
+			"organization 'Self-hosted runners: read': %v", tray.Id, err)
+	} else {
+		log.Warnf("Tray %s: runner state check failed, keeping tray: %v", tray.Id, err)
+	}
+	if tm.listenerBlind(tray, cfg.PollerGrace) {
+		// Both signals are down together, which is the shape of a network
+		// outage between cattery and GitHub. Report the more specific cause.
+		return true, KeepReasonBlindListener
+	}
+	return true, KeepReasonUnknown
+}
+
+// keepWithoutGitHub decides when no runner status source is configured. The
+// listener liveness signal is then the only guard: a tray type whose listener
+// has stopped polling cannot have produced a trustworthy tray status.
+func (tm *TrayManager) keepWithoutGitHub(tray *trays.Tray, cfg config.StaleConfig, age time.Duration, pastHardLimit bool) (bool, KeepReason) {
+	if !tm.listenerBlind(tray, cfg.PollerGrace) {
+		return false, KeepReasonNone
+	}
+	if pastHardLimit {
+		log.Warnf("Tray %s: listener for '%s' still not polling after %s, deleting anyway",
+			tray.Id, tray.TrayTypeName, age.Truncate(time.Second))
+		return false, KeepReasonNone
+	}
+	return true, KeepReasonBlindListener
+}
+
+// listenerBlind reports whether the tray type's listener has gone quiet for
+// longer than grace. A replica with no local poller for the tray type has no
+// opinion and reports false, leaving the decision to the GitHub busy check.
+func (tm *TrayManager) listenerBlind(tray *trays.Tray, grace time.Duration) bool {
+	if tm.pollerHealth == nil || grace <= 0 {
+		return false
+	}
+	last, ok := tm.pollerHealth.LastSuccessfulPoll(tray.TrayTypeName)
+	if !ok {
+		return false
+	}
+	return time.Since(last) > grace
 }
 
 // resolveStaleThresholds converts the string-keyed config map into a
