@@ -6,19 +6,34 @@ import (
 	"time"
 )
 
-// DefaultRunnerStateTTL is how long a cached runner state stays usable.
+// DefaultRunnerStateTTL is how long a cached busy state stays usable.
 //
 // Both callers run on roughly a one-minute cadence (the stale loop ticks every
 // pollInterval, each agent pings every 60s), and during an incident every
-// registered tray hits them at once. A TTL just under that cadence collapses
+// registered tray hits them at once. A TTL around half that cadence collapses
 // the duplicate lookups — notably the reaper and the ping handler asking about
 // the same tray — while staying far shorter than any threshold it feeds.
+//
+// Only busy states are cached, so the risk of a stale entry is bounded to
+// keeping a finished tray for up to one extra TTL. The next lookup deletes it.
 const DefaultRunnerStateTTL = 30 * time.Second
 
-// CachedRunnerStatus memoises runner state for a short window.
+// CachedRunnerStatus memoises *busy* runner state for a short window.
 //
-// Entries are keyed by org and runner ID. Errors are not cached: a failed
-// check keeps the tray alive, so retrying promptly is what resolves it.
+// Entries are keyed by org and runner ID. Two kinds of answer are deliberately
+// never cached:
+//
+//   - Errors. A failed check keeps the tray alive, so retrying promptly is
+//     what resolves it; caching the failure would extend every outage by the
+//     TTL.
+//   - Idle runners. Caching "idle" is unsafe and nearly pointless. Unsafe,
+//     because a tray can be read idle, pick up a job moments later, and — if
+//     its listener is blind, so the tray status never moves — be deleted
+//     against the cached verdict while that job runs. That is precisely the
+//     failure this guard exists to prevent. Nearly pointless, because an idle
+//     verdict leads to deletion, so the tray stops being queried; the repeat
+//     lookups all come from busy trays, which stay candidates for as long as
+//     their job runs.
 type CachedRunnerStatus struct {
 	inner RunnerStatusSource
 	ttl   time.Duration
@@ -70,7 +85,13 @@ func (c *CachedRunnerStatus) GetRunnerState(orgName string, runnerId int64) (git
 	}
 
 	c.mu.Lock()
-	c.entries[key] = cachedRunnerState{state: state, expires: now.Add(c.ttl)}
+	if state.Busy {
+		c.entries[key] = cachedRunnerState{state: state, expires: now.Add(c.ttl)}
+	} else {
+		// Drop any entry we are superseding, so a runner that goes from busy
+		// to idle is not answered from the stale busy entry.
+		delete(c.entries, key)
+	}
 	// Trays are short-lived, so expired keys would otherwise accumulate for
 	// the lifetime of the process.
 	for k, v := range c.entries {
@@ -81,4 +102,16 @@ func (c *CachedRunnerStatus) GetRunnerState(orgName string, runnerId int64) (git
 	c.mu.Unlock()
 
 	return state, nil
+}
+
+// expireAll ages every cached entry out immediately. Test-only: it lets a
+// test exercise TTL expiry without sleeping.
+func (c *CachedRunnerStatus) expireAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	past := time.Now().Add(-time.Nanosecond)
+	for k, v := range c.entries {
+		v.expires = past
+		c.entries[k] = v
+	}
 }

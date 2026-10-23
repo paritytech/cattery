@@ -258,6 +258,10 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 		if keep, reason := h.TrayManager.KeepStale(tray, cfg); keep {
 			logger.Infof("Tray '%s' status unchanged for over %s but keeping it: %s",
 				tray.Id, threshold, reason)
+			// Counted on the same series as the reaper's keeps: both are the
+			// same disagreement between tray status and reality, and an
+			// operator watching for a lagging listener should see either.
+			metrics.StaleTraysKeptInc(tray.GitHubOrgName, tray.TrayTypeName, string(reason))
 			writeResponse(responseWriter, pingResponse, logger)
 			return
 		}
