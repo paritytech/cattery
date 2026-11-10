@@ -241,8 +241,10 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
 		// The status may only be lagging behind a job that is already
-		// running, so GitHub gets the final say, as in the stale handler.
-		if !h.TrayManager.ReleaseRunner(r.Context(), tray) {
+		// running, so the tray goes through the same removal as everywhere
+		// else and the agent is left alone unless GitHub lets its runner go.
+		if _, err := h.TrayManager.DeleteTray(r.Context(), tray.Id); err != nil {
+			logger.Warnf("Tray '%s' status not changed in 15 minutes, but it was not deleted: %v", tray.Id, err)
 			writeResponse(responseWriter, pingResponse, logger)
 			return
 		}

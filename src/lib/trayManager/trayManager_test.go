@@ -102,12 +102,18 @@ type mockRunnerRemover struct {
 	mu    sync.Mutex
 	err   error
 	calls []int64
+	// onRemove, if set, is called inside RemoveRunner so tests can observe the
+	// state the manager had reached when it deregistered the runner.
+	onRemove func()
 }
 
 func (m *mockRunnerRemover) RemoveRunner(_ context.Context, _ string, runnerId int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, runnerId)
+	if m.onRemove != nil {
+		m.onRemove()
+	}
 	return m.err
 }
 
@@ -781,66 +787,117 @@ func TestHandleStale_ContextCancellationStopsLoop(t *testing.T) {
 	assert.Equal(t, before, after, "loop kept running after context cancellation")
 }
 
-// --- ReleaseRunner ---
+// --- Runner deregistration on tray removal ---
 
-func TestReleaseRunner(t *testing.T) {
-	registered := func() *trays.Tray {
-		return &trays.Tray{
-			Id:             "tray-1",
-			TrayTypeName:   "t1",
-			GitHubRunnerId: 99,
-			Status:         trays.TrayStatusRegistered,
-			StatusChanged:  time.Now().Add(-20 * time.Minute),
-		}
+// Every removal starts on GitHub: the runner is deregistered while the tray is
+// still untouched, and only then is the tray marked as deleting and cleaned up.
+func TestDeleteTray_DeregistersRunnerBeforeTouchingTheTray(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id: "tray-1", TrayTypeName: "t1", ProviderName: "docker", GitHubRunnerId: 99, Status: trays.TrayStatusRunning,
 	}
-	withStatus := func(status trays.TrayStatus) *trays.Tray {
-		tray := registered()
-		tray.Status = status
-		return tray
+	prov := &mockProvider{name: "docker"}
+
+	var statusAtRemoval trays.TrayStatus
+	var cleanedAtRemoval int
+	remover := &mockRunnerRemover{}
+	remover.onRemove = func() {
+		statusAtRemoval = repo.Trays["tray-1"].Status
+		prov.mu.Lock()
+		cleanedAtRemoval = len(prov.cleaned)
+		prov.mu.Unlock()
 	}
-	withoutRunner := registered()
-	withoutRunner.GitHubRunnerId = 0
+	tm := NewTrayManager(repo, &mockProviderFactory{provider: prov}, remover)
+
+	_, err := tm.DeleteTray(context.Background(), "tray-1")
+
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{99}, remover.calls)
+	assert.Equal(t, trays.TrayStatusRunning, statusAtRemoval, "the runner must be deregistered before the tray is marked as deleting")
+	assert.Zero(t, cleanedAtRemoval, "the runner must be deregistered before the upstream resource is cleaned up")
+	assert.Equal(t, []string{"tray-1"}, prov.cleaned)
+	assert.Empty(t, repo.Trays)
+}
+
+func TestDeleteTray_RunnerDeregistration(t *testing.T) {
+	busy := scaleSetClient.ErrRunnerBusy
+	unreachable := errors.New("context deadline exceeded")
 
 	tests := []struct {
-		name      string
-		tray      *trays.Tray
-		removeErr error
-		want      bool
-		wantAsked bool
+		name        string
+		status      trays.TrayStatus
+		runnerId    int64
+		removeErr   error
+		wantDeleted bool
+		wantAsked   bool
 	}{
-		{name: "runner deregistered", tray: registered(), want: true, wantAsked: true},
-		{name: "runner executing a job", tray: registered(), removeErr: scaleSetClient.ErrRunnerBusy, want: false, wantAsked: true},
-		{name: "wrapped busy error", tray: registered(), removeErr: fmt.Errorf("remove: %w", scaleSetClient.ErrRunnerBusy), want: false, wantAsked: true},
-		{name: "check failed", tray: registered(), removeErr: errors.New("context deadline exceeded"), want: false, wantAsked: true},
-		{name: "tray type has no client", tray: registered(), removeErr: scaleSetClient.ErrNoClient, want: true, wantAsked: true},
-		{name: "never registered a runner", tray: withoutRunner, removeErr: scaleSetClient.ErrRunnerBusy, want: true},
-		{name: "creating is not checked", tray: withStatus(trays.TrayStatusCreating), removeErr: scaleSetClient.ErrRunnerBusy, want: true},
-		{name: "registering is not checked", tray: withStatus(trays.TrayStatusRegistering), removeErr: scaleSetClient.ErrRunnerBusy, want: true},
-		{name: "deleting is not checked", tray: withStatus(trays.TrayStatusDeleting), removeErr: scaleSetClient.ErrRunnerBusy, want: true},
+		// A registered tray is only assumed to be idle, so it goes only once
+		// its runner is gone.
+		{name: "registered: runner deregistered", status: trays.TrayStatusRegistered, runnerId: 99, wantDeleted: true, wantAsked: true},
+		{name: "registered: runner busy", status: trays.TrayStatusRegistered, runnerId: 99, removeErr: busy, wantAsked: true},
+		{name: "registered: wrapped busy error", status: trays.TrayStatusRegistered, runnerId: 99, removeErr: fmt.Errorf("remove: %w", busy), wantAsked: true},
+		{name: "registered: github unreachable", status: trays.TrayStatusRegistered, runnerId: 99, removeErr: unreachable, wantAsked: true},
+		{name: "registered: tray type has no client", status: trays.TrayStatusRegistered, runnerId: 99, removeErr: scaleSetClient.ErrNoClient, wantDeleted: true, wantAsked: true},
+
+		// A running tray is removed because its job completed or its agent is
+		// leaving, so GitHub's answer never stops the removal.
+		{name: "running: runner deregistered", status: trays.TrayStatusRunning, runnerId: 99, wantDeleted: true, wantAsked: true},
+		{name: "running: runner still busy (agent preempted mid-job)", status: trays.TrayStatusRunning, runnerId: 99, removeErr: busy, wantDeleted: true, wantAsked: true},
+		{name: "running: github unreachable", status: trays.TrayStatusRunning, runnerId: 99, removeErr: unreachable, wantDeleted: true, wantAsked: true},
+
+		// A deleting tray was given up on earlier. Its cleanup retry must not
+		// depend on GitHub.
+		{name: "deleting: runner busy", status: trays.TrayStatusDeleting, runnerId: 99, removeErr: busy, wantDeleted: true, wantAsked: true},
+		{name: "deleting: github unreachable", status: trays.TrayStatusDeleting, runnerId: 99, removeErr: unreachable, wantDeleted: true, wantAsked: true},
+
+		// No runner was registered yet, so there is nothing to ask GitHub.
+		{name: "creating: no runner", status: trays.TrayStatusCreating, removeErr: busy, wantDeleted: true},
+		{name: "registering: no runner", status: trays.TrayStatusRegistering, removeErr: busy, wantDeleted: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			repo := testutil.NewMockTrayRepository()
+			repo.Trays["tray-1"] = &trays.Tray{
+				Id: "tray-1", TrayTypeName: "t1", ProviderName: "docker", GitHubRunnerId: tc.runnerId, Status: tc.status,
+			}
+			prov := &mockProvider{name: "docker"}
 			remover := &mockRunnerRemover{err: tc.removeErr}
-			tm := NewTrayManager(testutil.NewMockTrayRepository(), &mockProviderFactory{}, remover)
+			tm := NewTrayManager(repo, &mockProviderFactory{provider: prov}, remover)
 
-			assert.Equal(t, tc.want, tm.ReleaseRunner(context.Background(), tc.tray))
+			_, err := tm.DeleteTray(context.Background(), "tray-1")
+
+			if tc.wantDeleted {
+				assert.NoError(t, err)
+				assert.Equal(t, []string{"tray-1"}, prov.cleaned)
+				assert.Empty(t, repo.Trays)
+			} else {
+				assert.ErrorIs(t, err, tc.removeErr)
+				assert.Empty(t, prov.cleaned, "a kept tray must not be cleaned up")
+				if assert.Contains(t, repo.Trays, "tray-1") {
+					assert.Equal(t, tc.status, repo.Trays["tray-1"].Status, "a kept tray must be left untouched")
+				}
+			}
 
 			if tc.wantAsked {
 				assert.Equal(t, []int64{99}, remover.calls)
 			} else {
-				assert.Empty(t, remover.calls, "GitHub must not be asked about this tray")
+				assert.Empty(t, remover.calls, "there is no runner to deregister")
 			}
 		})
 	}
 }
 
-func TestReleaseRunner_NoRemoverConfigured(t *testing.T) {
-	tm := newTestManager(testutil.NewMockTrayRepository(), &mockProviderFactory{})
+func TestDeleteTray_NoRemoverConfigured(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", ProviderName: "docker", GitHubRunnerId: 99, Status: trays.TrayStatusRegistered}
+	prov := &mockProvider{name: "docker"}
+	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray := &trays.Tray{Id: "tray-1", GitHubRunnerId: 99, Status: trays.TrayStatusRegistered}
+	_, err := tm.DeleteTray(context.Background(), "tray-1")
 
-	assert.True(t, tm.ReleaseRunner(context.Background(), tray))
+	assert.NoError(t, err)
+	assert.Empty(t, repo.Trays)
 }
 
 // staleTestConfig makes HandleStale poll fast. The threshold itself is never
@@ -920,7 +977,7 @@ func TestHandleStale_DeletesRegisteredTrayOnceRunnerIsDeregistered(t *testing.T)
 
 // A tray already in "deleting" is waiting for a cleanup retry. That retry must
 // not depend on GitHub: the decision to destroy the tray was made earlier.
-func TestHandleStale_RetriesDeletingTrayWithoutAskingGitHub(t *testing.T) {
+func TestHandleStale_RetriesDeletingTrayEvenWhenGitHubFails(t *testing.T) {
 	staleTestConfig(t)
 
 	repo := testutil.NewMockTrayRepository()
@@ -941,8 +998,6 @@ func TestHandleStale_RetriesDeletingTrayWithoutAskingGitHub(t *testing.T) {
 		defer prov.mu.Unlock()
 		return len(prov.cleaned) > 0
 	}, 500*time.Millisecond, 10*time.Millisecond, "cleanup of a deleting tray must be retried")
-
-	assert.Zero(t, remover.callCount())
 }
 
 func TestStaleConfigWithDefaults(t *testing.T) {

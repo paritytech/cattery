@@ -17,11 +17,13 @@ import (
 // ErrRunnerBusy is returned by RemoveRunner while the runner is executing a job.
 var ErrRunnerBusy = errors.New("runner is executing a job")
 
-// removeRunnerTimeout bounds one RemoveRunner call. The scaleset client
-// serialises its calls behind one mutex and its HTTP defaults let a request
-// hang for minutes, so an unbounded removal could hold up JIT config
-// generation (agent registration) for the whole tray type.
-const removeRunnerTimeout = 30 * time.Second
+// removeRunnerTimeout bounds one RemoveRunner call. Every tray removal makes
+// one, including those on the scale set listener's goroutine when a job
+// completes. The scaleset client also serialises its calls behind one mutex
+// and its HTTP defaults let a request hang for minutes, so an unbounded
+// removal could stall the listener and hold up JIT config generation (agent
+// registration) for the whole tray type.
+const removeRunnerTimeout = 15 * time.Second
 
 type ScaleSetClient struct {
 	client   *scaleset.Client
