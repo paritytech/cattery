@@ -86,8 +86,12 @@ var _ restarterRepo.RestarterRepository = (*mockRestarterRepository)(nil)
 // --- Helper to create test handlers ---
 
 func setupHandlers(repo *testutil.MockTrayRepository) *Handlers {
+	return setupHandlersWithRunnerRemover(repo, nil)
+}
+
+func setupHandlersWithRunnerRemover(repo *testutil.MockTrayRepository, remover trayManager.RunnerRemover) *Handlers {
 	return &Handlers{
-		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
+		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}, remover),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
 		ScaleSetManager: scaleSetPoller.NewManager(),
 		JitRegistry:     scaleSetClient.NewJitRegistry(),
@@ -96,7 +100,7 @@ func setupHandlers(repo *testutil.MockTrayRepository) *Handlers {
 
 func setupHandlersWithRestarter(repo *testutil.MockTrayRepository, restarterRepo *mockRestarterRepository) *Handlers {
 	return &Handlers{
-		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}),
+		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{}, nil),
 		RestartManager:  restarter.NewWorkflowRestarter(restarterRepo),
 		ScaleSetManager: scaleSetPoller.NewManager(),
 		JitRegistry:     scaleSetClient.NewJitRegistry(),
@@ -105,11 +109,52 @@ func setupHandlersWithRestarter(repo *testutil.MockTrayRepository, restarterRepo
 
 func setupHandlersWithProvider(repo *testutil.MockTrayRepository, prov *mockProvider) *Handlers {
 	return &Handlers{
-		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{provider: prov}),
+		TrayManager:     trayManager.NewTrayManager(repo, &mockProviderFactory{provider: prov}, nil),
 		RestartManager:  restarter.NewWorkflowRestarter(&mockRestarterRepository{}),
 		ScaleSetManager: scaleSetPoller.NewManager(),
 		JitRegistry:     scaleSetClient.NewJitRegistry(),
 	}
+}
+
+// --- Mock runner remover ---
+
+// mockRunnerRemover implements trayManager.RunnerRemover with a fixed answer.
+type mockRunnerRemover struct {
+	err   error
+	calls []int64
+}
+
+func (m *mockRunnerRemover) RemoveRunner(_ context.Context, _ string, runnerId int64) error {
+	m.calls = append(m.calls, runnerId)
+	return m.err
+}
+
+// pingStaleRegisteredTray pings as an agent whose tray has sat in "registered"
+// for longer than the ping handler tolerates, and returns the decoded answer.
+func pingStaleRegisteredTray(t *testing.T, remover trayManager.RunnerRemover) messages.PingResponse {
+	t.Helper()
+
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:             "tray-1",
+		TrayTypeName:   "t1",
+		GitHubRunnerId: 99,
+		Status:         trays.TrayStatusRegistered,
+		StatusChanged:  time.Now().Add(-20 * time.Minute),
+	}
+	h := setupHandlersWithRunnerRemover(repo, remover)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/ping", h.AgentPing)
+
+	req := httptest.NewRequest("POST", "/agent/tray-1/ping", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp messages.PingResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	return resp
 }
 
 // --- AgentPing tests ---
@@ -199,6 +244,36 @@ func TestAgentPing_RecentNonRunningTray(t *testing.T) {
 	var resp messages.PingResponse
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	assert.NoError(t, err)
+	assert.False(t, resp.Terminate)
+}
+
+// A tray that still reads "registered" may be running a job whose JobStarted
+// message was late or lost. GitHub refuses to deregister such a runner, and
+// the agent must then be left alone instead of being told to kill the job.
+func TestAgentPing_StaleRegisteredTray_BusyRunnerIsNotTerminated(t *testing.T) {
+	remover := &mockRunnerRemover{err: scaleSetClient.ErrRunnerBusy}
+
+	resp := pingStaleRegisteredTray(t, remover)
+
+	assert.False(t, resp.Terminate)
+	assert.Equal(t, []int64{99}, remover.calls)
+}
+
+func TestAgentPing_StaleRegisteredTray_IdleRunnerIsTerminated(t *testing.T) {
+	remover := &mockRunnerRemover{}
+
+	resp := pingStaleRegisteredTray(t, remover)
+
+	assert.True(t, resp.Terminate)
+	assert.Equal(t, []int64{99}, remover.calls, "the runner must be deregistered before the agent is told to stop")
+}
+
+// "Could not ask GitHub" is not "idle".
+func TestAgentPing_StaleRegisteredTray_FailedCheckIsNotTerminated(t *testing.T) {
+	remover := &mockRunnerRemover{err: errors.New("context deadline exceeded")}
+
+	resp := pingStaleRegisteredTray(t, remover)
+
 	assert.False(t, resp.Terminate)
 }
 

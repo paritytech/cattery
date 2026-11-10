@@ -3,6 +3,7 @@ package scaleSetClient
 import (
 	"cattery/lib/config"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,15 @@ import (
 	"github.com/actions/scaleset"
 	log "github.com/sirupsen/logrus"
 )
+
+// ErrRunnerBusy is returned by RemoveRunner while the runner is executing a job.
+var ErrRunnerBusy = errors.New("runner is executing a job")
+
+// removeRunnerTimeout bounds one RemoveRunner call. The scaleset client
+// serialises its calls behind one mutex and its HTTP defaults let a request
+// hang for minutes, so an unbounded removal could hold up JIT config
+// generation (agent registration) for the whole tray type.
+const removeRunnerTimeout = 30 * time.Second
 
 type ScaleSetClient struct {
 	client   *scaleset.Client
@@ -154,6 +164,30 @@ func (sc *ScaleSetClient) GenerateJitRunnerConfig(ctx context.Context, runnerNam
 		Name:       runnerName,
 		WorkFolder: "_work",
 	}, sc.scaleSet.ID)
+}
+
+// RemoveRunner deregisters a runner from GitHub.
+//
+// GitHub refuses while the runner is executing a job, which is reported as
+// ErrRunnerBusy. A runner GitHub no longer knows counts as removed. The check
+// and the removal are a single call on GitHub's side, so a nil return also
+// means no job can be assigned to the runner afterwards.
+func (sc *ScaleSetClient) RemoveRunner(ctx context.Context, runnerId int64) error {
+	ctx, cancel := context.WithTimeout(ctx, removeRunnerTimeout)
+	defer cancel()
+
+	return classifyRemoveRunnerError(sc.client.RemoveRunner(ctx, runnerId))
+}
+
+func classifyRemoveRunnerError(err error) error {
+	switch {
+	case err == nil, errors.Is(err, scaleset.RunnerNotFoundError):
+		return nil
+	case errors.Is(err, scaleset.JobStillRunningError):
+		return ErrRunnerBusy
+	default:
+		return err
+	}
 }
 
 func (sc *ScaleSetClient) Close(ctx context.Context) error {

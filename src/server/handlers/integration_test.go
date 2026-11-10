@@ -126,7 +126,7 @@ func setupIntegrationTestWithFactory(t *testing.T, factory providers.TrayProvide
 	restartRepo.Connect(db.Collection("restarters"))
 
 	// Set up managers
-	tm := trayManager.NewTrayManager(trayRepo, factory)
+	tm := trayManager.NewTrayManager(trayRepo, factory, nil)
 	rm := restarter.NewWorkflowRestarter(restartRepo)
 
 	// Scale set manager holds no pollers here; the agent register handler gets

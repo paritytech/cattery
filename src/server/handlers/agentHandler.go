@@ -240,6 +240,13 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
+		// The status may only be lagging behind a job that is already
+		// running, so GitHub gets the final say, as in the stale handler.
+		if !h.TrayManager.ReleaseRunner(r.Context(), tray) {
+			writeResponse(responseWriter, pingResponse, logger)
+			return
+		}
+
 		errMsg := fmt.Sprintf("Tray '%s' status not changed in 15 minutes", tray.Id)
 		logger.Error(errMsg)
 
