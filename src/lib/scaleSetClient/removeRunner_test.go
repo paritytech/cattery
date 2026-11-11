@@ -24,6 +24,14 @@ func TestClassifyRemoveRunnerError(t *testing.T) {
 		assert.NoError(t, classifyRemoveRunnerError(err))
 	})
 
+	// What the scaleset client returns for a 404 whose body does not name
+	// AgentNotFoundException: the status code survives only as text.
+	t.Run("unrecognised 404 counts as removed", func(t *testing.T) {
+		err := fmt.Errorf(`request DELETE https://x/agents/42 failed(status="404 Not Found"): %w: unknown error`,
+			errors.New("unexpected status code: 404"))
+		assert.NoError(t, classifyRemoveRunnerError(err))
+	})
+
 	t.Run("job still running", func(t *testing.T) {
 		err := fmt.Errorf("request DELETE failed: %w: busy", scaleset.JobStillRunningError)
 		assert.ErrorIs(t, classifyRemoveRunnerError(err), ErrRunnerBusy)

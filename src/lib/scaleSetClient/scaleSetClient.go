@@ -17,13 +17,18 @@ import (
 // ErrRunnerBusy is returned by RemoveRunner while the runner is executing a job.
 var ErrRunnerBusy = errors.New("runner is executing a job")
 
-// removeRunnerTimeout bounds one RemoveRunner call. Every tray removal makes
-// one, including those on the scale set listener's goroutine when a job
-// completes. The scaleset client also serialises its calls behind one mutex
-// and its HTTP defaults let a request hang for minutes, so an unbounded
-// removal could stall the listener and hold up JIT config generation (agent
-// registration) for the whole tray type.
+// removeRunnerTimeout bounds the GitHub request behind one RemoveRunner call.
+// The scaleset client serialises its calls behind one mutex and its HTTP
+// defaults let a request hang for minutes, so an unbounded removal would hold
+// up JIT config generation (agent registration) for the whole tray type.
+//
+// It does not bound the wait for that mutex, which ignores the context: behind
+// a slow call RemoveRunner waits for the lock and then fails at once.
 const removeRunnerTimeout = 15 * time.Second
+
+// runnerEndpointNotFound is how the scaleset client words a 404 it could not
+// map to RunnerNotFoundError. It exposes the status code only as text.
+const runnerEndpointNotFound = "unexpected status code: 404"
 
 type ScaleSetClient struct {
 	client   *scaleset.Client
@@ -187,6 +192,11 @@ func classifyRemoveRunnerError(err error) error {
 		return nil
 	case errors.Is(err, scaleset.JobStillRunningError):
 		return ErrRunnerBusy
+	case strings.Contains(err.Error(), runnerEndpointNotFound):
+		// A 404 without the exception the scaleset client recognises still
+		// means there is no such runner. Passing it on as a failure would keep
+		// a tray whose runner is already gone for good.
+		return nil
 	default:
 		return err
 	}

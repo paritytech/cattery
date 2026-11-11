@@ -284,18 +284,22 @@ func TestAgentPing_StaleRegisteredTray_FailedCheckIsNotTerminated(t *testing.T) 
 
 // --- AgentUnregister tests ---
 
-func TestAgentUnregister_TrayNotFound(t *testing.T) {
+// An agent often unregisters a tray that is already gone: the job-completed
+// message, the stale tray check or the agent's own ping removed it first. The
+// agent retries on 404, so it must be told the unregister succeeded.
+func TestAgentUnregister_TrayAlreadyRemoved(t *testing.T) {
 	repo := testutil.NewMockTrayRepository()
 	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
 
-	req := httptest.NewRequest("POST", "/agent/nonexistent/unregister", nil)
+	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonControllerKill})
+	req := httptest.NewRequest("POST", "/agent/nonexistent/unregister", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestAgentUnregister_InvalidBody(t *testing.T) {
@@ -366,9 +370,10 @@ func TestAgentUnregister_Returns200_EvenWhenCleanupFails(t *testing.T) {
 
 // An agent that unregisters a running tray is leaving whatever GitHub says. A
 // preempted VM goes away mid-job, and GitHub keeps its runner "busy" until it
-// gives up on the job, so a refused deregistration must not keep the tray
-// around: nothing else would ever remove a running tray.
-func TestAgentUnregister_RunningTray_BusyRunnerDoesNotBlockRemoval(t *testing.T) {
+// gives up on the job. The removal must neither be stopped by that nor wait
+// for it: nothing else would ever remove a running tray, and a preempted VM
+// may not live long enough for a second attempt.
+func TestAgentUnregister_RunningTray_IsRemovedWithoutAskingGitHub(t *testing.T) {
 	for _, removeErr := range []error{scaleSetClient.ErrRunnerBusy, errors.New("context deadline exceeded")} {
 		t.Run(removeErr.Error(), func(t *testing.T) {
 			repo := testutil.NewMockTrayRepository()
@@ -391,37 +396,61 @@ func TestAgentUnregister_RunningTray_BusyRunnerDoesNotBlockRemoval(t *testing.T)
 			mux.ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Equal(t, []int64{99}, remover.calls, "deregistration is still attempted first")
+			assert.Empty(t, remover.calls, "GitHub is asked about registered trays only")
 			assert.Empty(t, repo.Trays)
 		})
 	}
 }
 
 // A registered tray follows the same rule for every caller: it stays until
-// GitHub lets its runner go. The agent is told the removal failed and leaves
-// anyway, and the stale handler removes the tray once GitHub agrees.
-func TestAgentUnregister_RegisteredTray_BusyRunnerKeepsTray(t *testing.T) {
-	repo := testutil.NewMockTrayRepository()
-	repo.Trays["tray-1"] = &trays.Tray{
-		Id:             "tray-1",
-		TrayTypeName:   "t1",
-		GitHubRunnerId: 99,
-		Status:         trays.TrayStatusRegistered,
-		ProviderData:   map[string]string{},
+// GitHub lets its runner go. The agent is leaving anyway, so it is answered
+// 200 instead of being made to retry, same as when cleanup fails, and the
+// stale handler removes the tray once GitHub agrees.
+func TestAgentUnregister_RegisteredTray_KeptTrayDoesNotFailTheAgent(t *testing.T) {
+	for _, removeErr := range []error{scaleSetClient.ErrRunnerBusy, errors.New("context deadline exceeded")} {
+		t.Run(removeErr.Error(), func(t *testing.T) {
+			repo := testutil.NewMockTrayRepository()
+			repo.Trays["tray-1"] = &trays.Tray{
+				Id:             "tray-1",
+				TrayTypeName:   "t1",
+				GitHubRunnerId: 99,
+				Status:         trays.TrayStatusRegistered,
+				ProviderData:   map[string]string{},
+			}
+			h := setupHandlersWithRunnerRemover(repo, &mockRunnerRemover{err: removeErr})
+
+			mux := http.NewServeMux()
+			mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+			body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonSigTerm})
+			req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code, "a kept tray must not make the agent retry")
+			require.Contains(t, repo.Trays, "tray-1")
+			assert.Equal(t, trays.TrayStatusRegistered, repo.Trays["tray-1"].Status, "a kept tray must be left untouched")
+		})
 	}
-	h := setupHandlersWithRunnerRemover(repo, &mockRunnerRemover{err: scaleSetClient.ErrRunnerBusy})
+}
+
+// A failure that is not the runner check still reaches the agent, which
+// retries: unlike a kept tray, nothing has decided to leave this one in place.
+func TestAgentUnregister_DeleteFailureIsReported(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", Status: trays.TrayStatusRunning, ProviderData: map[string]string{}}
+	repo.UpdateErr = errors.New("database is down")
+	h := setupHandlers(repo)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
 
-	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonSigTerm})
+	body, _ := json.Marshal(messages.UnregisterRequest{Reason: messages.UnregisterReasonDone})
 	req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	require.Contains(t, repo.Trays, "tray-1")
-	assert.Equal(t, trays.TrayStatusRegistered, repo.Trays["tray-1"].Status, "a kept tray must be left untouched")
 }
 
 // --- AgentInterrupt tests ---

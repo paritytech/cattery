@@ -5,9 +5,11 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
+	"cattery/lib/trayManager"
 	"cattery/lib/trays"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -149,6 +151,14 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 	logger.Tracef("AgentUnregister: %v", r)
 
 	tray, code, errMsg := h.authenticateAgent(r)
+	if code == http.StatusNotFound {
+		// The tray is already gone: a completed job, the stale tray check or
+		// the agent's own ping removed it first. That is all an unregister
+		// asks for, and any other answer makes the agent retry.
+		logger.Debugf("Agent %s unregistered, its tray was already removed", r.PathValue("id"))
+		responseWriter.WriteHeader(http.StatusOK)
+		return
+	}
 	if code != 0 {
 		logger.Warn(errMsg)
 		http.Error(responseWriter, errMsg, code)
@@ -188,7 +198,13 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
-	if deleteErr != nil {
+	switch {
+	case errors.Is(deleteErr, trayManager.ErrTrayKept):
+		// The agent is leaving whatever becomes of its tray, so it is not made
+		// to retry, same as when cleanup fails. The stale tray check removes
+		// the tray once GitHub lets go of the runner.
+		logger.Warnf("Tray is left for the stale tray check: %v", deleteErr)
+	case deleteErr != nil:
 		logger.Errorf("Failed to delete tray: %v", deleteErr)
 		http.Error(responseWriter, "Failed to delete tray", http.StatusInternalServerError)
 		return
