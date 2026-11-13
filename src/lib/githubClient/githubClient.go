@@ -63,6 +63,51 @@ func (gc *GithubClient) RestartFailedJobs(repoName string, workflowId int64) err
 	return err
 }
 
+// ErrRunnerNotFound is returned by GetRunnerState when GitHub has no runner
+// with the given ID. A runner GitHub does not know about cannot be running a
+// job.
+var ErrRunnerNotFound = errors.New("runner not found")
+
+// RunnerState is what GitHub reports about a self-hosted runner.
+//
+// Busy is only meaningful while Online: a runner whose VM has vanished can sit
+// at busy=true until GitHub reaps the registration, so callers must not read
+// an offline busy runner as "a job is running".
+type RunnerState struct {
+	Busy   bool
+	Online bool
+}
+
+// GetRunnerState reports what GitHub currently knows about a runner.
+//
+// This is the authoritative answer to "is this tray doing work?", and unlike
+// cattery's own tray status it does not depend on the scale set listener
+// having received a JobStarted message. The stale-tray reaper and the agent
+// ping handler both consult it before destroying a tray, so a listener that
+// has gone blind cannot cause a running job to be killed.
+//
+// Requires the GitHub App to hold organization "Self-hosted runners: read",
+// which it already needs to manage runner scale sets. Without it the call
+// returns 403, which IsForbidden reports; callers must treat that as
+// "unknown", never as "not busy".
+func (gc *GithubClient) GetRunnerState(runnerId int64) (RunnerState, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), githubAPITimeout)
+	defer cancel()
+
+	runner, resp, err := gc.client.Actions.GetOrganizationRunner(ctx, gc.Org.Name, runnerId)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return RunnerState{}, ErrRunnerNotFound
+		}
+		return RunnerState{}, err
+	}
+
+	return RunnerState{
+		Busy:   runner.GetBusy(),
+		Online: strings.EqualFold(runner.GetStatus(), "online"),
+	}, nil
+}
+
 type WorkflowRunInfo struct {
 	Status     string
 	Conclusion string

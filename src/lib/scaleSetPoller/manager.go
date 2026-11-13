@@ -3,6 +3,7 @@ package scaleSetPoller
 import (
 	"sort"
 	"sync"
+	"time"
 )
 
 type Manager struct {
@@ -26,6 +27,22 @@ func (m *Manager) GetPoller(trayTypeName string) *Poller {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.pollers[trayTypeName]
+}
+
+// LastSuccessfulPoll reports when the listener for a tray type last completed
+// a message poll.
+//
+// The second return is false when this replica has no answer: either no poller
+// is registered for the tray type (with leader election the poller may be on
+// another replica), or its first poll of the session has not finished.
+// "No answer" is not "unhealthy" — callers must not infer a blind listener
+// from it.
+func (m *Manager) LastSuccessfulPoll(trayTypeName string) (time.Time, bool) {
+	p := m.GetPoller(trayTypeName)
+	if p == nil {
+		return time.Time{}, false
+	}
+	return p.LastSuccessfulPoll()
 }
 
 // MessageHistory returns all recent messages across all pollers, newest first.
