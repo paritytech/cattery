@@ -97,6 +97,14 @@ func (m *MongodbTrayRepository) Save(ctx context.Context, tray *trays.Tray) erro
 func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string, status trays.TrayStatus, jobRunId int64, workflowRunId int64, ghRunnerId int64, repository string, jobName string, workflowName string) (*trays.Tray, error) {
 	setQuery := bson.M{"status": status, "statusChanged": time.Now().UTC()}
 
+	// Running is set only by SetJob, i.e. the moment a job is assigned. Stamp
+	// the start time that DeleteTray's per-repository accounting reads back;
+	// statusChanged cannot serve that purpose because every later status
+	// update, including the one DeleteTray itself performs, overwrites it.
+	if status == trays.TrayStatusRunning {
+		setQuery["jobStartedAt"] = time.Now().UTC()
+	}
+
 	if jobRunId != 0 {
 		setQuery["jobRunId"] = jobRunId
 	}
@@ -121,6 +129,28 @@ func (m *MongodbTrayRepository) UpdateStatus(ctx context.Context, trayId string,
 		bson.M{"id": trayId},
 		bson.M{"$set": setQuery},
 		options.FindOneAndUpdate().SetReturnDocument(options.After))
+
+	var result trays.Tray
+	err := dbResult.Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (m *MongodbTrayRepository) FinishJob(ctx context.Context, trayId string) (*trays.Tray, error) {
+	// ReturnDocument(Before) is what makes this a read-and-clear: the caller
+	// gets the jobStartedAt that was there, and no other teardown path can
+	// see it again.
+	dbResult := m.collection.FindOneAndUpdate(
+		ctx,
+		bson.M{"id": trayId},
+		bson.M{"$unset": bson.M{"jobStartedAt": ""}},
+		options.FindOneAndUpdate().SetReturnDocument(options.Before))
 
 	var result trays.Tray
 	err := dbResult.Decode(&result)

@@ -197,6 +197,8 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 // caller. Callers (unregister handler, stale loop) should treat a non-error
 // return as "deletion was requested," not "the upstream resource is gone."
 func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
+	tm.accountFinishedJob(ctx, trayId)
+
 	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
 	if err != nil {
 		return nil, err
@@ -222,6 +224,36 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 	}
 
 	return tray, nil
+}
+
+// accountFinishedJob bills the tray's elapsed runner time to its repository.
+//
+// It sits in DeleteTray because every teardown path funnels through there —
+// job completed, agent unregister on preemption or SigTerm, the stale reaper,
+// and creation-failure cleanup. Accounting in the job-completed handler alone
+// would silently undercount exactly the repositories losing the most work to
+// preemption.
+//
+// FinishJob clears the start time as it reads it, so a tray whose cleanup
+// failed and is retried by the stale handler is counted once. Trays that never
+// ran a job have no start time and are skipped. A failure here must not block
+// deletion: the metric is worth less than the teardown.
+func (tm *TrayManager) accountFinishedJob(ctx context.Context, trayId string) {
+	finished, err := tm.trayRepository.FinishJob(ctx, trayId)
+	if err != nil {
+		log.Errorf("Failed to record finished job for tray %s: %v", trayId, err)
+		return
+	}
+	if finished == nil || finished.JobStartedAt.IsZero() {
+		return
+	}
+
+	metrics.JobFinished(
+		finished.GitHubOrgName,
+		finished.TrayTypeName,
+		finished.Repository,
+		time.Since(finished.JobStartedAt).Seconds(),
+	)
 }
 
 // HandleStale periodically deletes trays stuck in a non-running status for

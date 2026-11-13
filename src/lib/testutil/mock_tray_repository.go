@@ -22,6 +22,7 @@ type MockTrayRepository struct {
 	SetErr      error
 	DeleteErr   error
 	GetErr      error
+	FinishErr   error
 	StaleTrays  []*trays.Tray
 	StaleErr    error
 }
@@ -91,7 +92,27 @@ func (m *MockTrayRepository) UpdateStatus(_ context.Context, trayId string, stat
 		tray.WorkflowName = workflowName
 	}
 	tray.StatusChanged = time.Now()
+	if status == trays.TrayStatusRunning {
+		tray.JobStartedAt = time.Now()
+	}
 	return tray, nil
+}
+
+// FinishJob mirrors the real read-and-clear: the returned copy carries the
+// jobStartedAt that was there, and the stored row no longer has it.
+func (m *MockTrayRepository) FinishJob(_ context.Context, trayId string) (*trays.Tray, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FinishErr != nil {
+		return nil, m.FinishErr
+	}
+	tray, ok := m.Trays[trayId]
+	if !ok {
+		return nil, nil
+	}
+	before := *tray
+	tray.JobStartedAt = time.Time{}
+	return &before, nil
 }
 
 func (m *MockTrayRepository) SetProviderData(_ context.Context, trayId string, data map[string]string) (*trays.Tray, error) {

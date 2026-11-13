@@ -23,6 +23,13 @@ type Tray struct {
 	Status         TrayStatus `bson:"status"`
 	StatusChanged  time.Time  `bson:"statusChanged"`
 
+	// JobStartedAt is when a job was assigned to this tray. It is set by
+	// SetJob and cleared by FinishJob, which is what makes per-repository
+	// runner-time accounting exactly-once across retried teardowns. Zero
+	// means the tray never ran a job, or its job was already accounted for.
+	// Unlike StatusChanged it survives the status update DeleteTray performs.
+	JobStartedAt time.Time `bson:"jobStartedAt,omitempty"`
+
 	ProviderData map[string]string `bson:"providerData"`
 }
 
