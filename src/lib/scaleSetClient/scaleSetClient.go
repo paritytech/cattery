@@ -3,6 +3,7 @@ package scaleSetClient
 import (
 	"cattery/lib/config"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,22 @@ import (
 	"github.com/actions/scaleset"
 	log "github.com/sirupsen/logrus"
 )
+
+// ErrRunnerBusy is returned by RemoveRunner while the runner is executing a job.
+var ErrRunnerBusy = errors.New("runner is executing a job")
+
+// removeRunnerTimeout bounds the GitHub request behind one RemoveRunner call.
+// The scaleset client serialises its calls behind one mutex and its HTTP
+// defaults let a request hang for minutes, so an unbounded removal would hold
+// up JIT config generation (agent registration) for the whole tray type.
+//
+// It does not bound the wait for that mutex, which ignores the context: behind
+// a slow call RemoveRunner waits for the lock and then fails at once.
+const removeRunnerTimeout = 15 * time.Second
+
+// runnerEndpointNotFound is how the scaleset client words a 404 it could not
+// map to RunnerNotFoundError. It exposes the status code only as text.
+const runnerEndpointNotFound = "unexpected status code: 404"
 
 type ScaleSetClient struct {
 	client   *scaleset.Client
@@ -154,6 +171,35 @@ func (sc *ScaleSetClient) GenerateJitRunnerConfig(ctx context.Context, runnerNam
 		Name:       runnerName,
 		WorkFolder: "_work",
 	}, sc.scaleSet.ID)
+}
+
+// RemoveRunner deregisters a runner from GitHub.
+//
+// GitHub refuses while the runner is executing a job, which is reported as
+// ErrRunnerBusy. A runner GitHub no longer knows counts as removed. The check
+// and the removal are a single call on GitHub's side, so a nil return also
+// means no job can be assigned to the runner afterwards.
+func (sc *ScaleSetClient) RemoveRunner(ctx context.Context, runnerId int64) error {
+	ctx, cancel := context.WithTimeout(ctx, removeRunnerTimeout)
+	defer cancel()
+
+	return classifyRemoveRunnerError(sc.client.RemoveRunner(ctx, runnerId))
+}
+
+func classifyRemoveRunnerError(err error) error {
+	switch {
+	case err == nil, errors.Is(err, scaleset.RunnerNotFoundError):
+		return nil
+	case errors.Is(err, scaleset.JobStillRunningError):
+		return ErrRunnerBusy
+	case strings.Contains(err.Error(), runnerEndpointNotFound):
+		// A 404 without the exception the scaleset client recognises still
+		// means there is no such runner. Passing it on as a failure would keep
+		// a tray whose runner is already gone for good.
+		return nil
+	default:
+		return err
+	}
 }
 
 func (sc *ScaleSetClient) Close(ctx context.Context) error {

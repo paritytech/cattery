@@ -6,6 +6,7 @@ import (
 	"cattery/lib/config"
 	"cattery/lib/messages"
 	"cattery/lib/metrics"
+	"cattery/lib/trayManager"
 	"cattery/lib/trays"
 	"context"
 	"encoding/json"
@@ -151,6 +152,14 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 	logger.Tracef("AgentUnregister: %v", r)
 
 	tray, code, errMsg := h.authenticateAgent(r)
+	if code == http.StatusNotFound {
+		// The tray is already gone: a completed job, the stale tray check or
+		// the agent's own ping removed it first. That is all an unregister
+		// asks for, and any other answer makes the agent retry.
+		logger.Debugf("Agent %s unregistered, its tray was already removed", r.PathValue("id"))
+		responseWriter.WriteHeader(http.StatusOK)
+		return
+	}
 	if code != 0 {
 		logger.Warn(errMsg)
 		http.Error(responseWriter, errMsg, code)
@@ -190,7 +199,13 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 
 	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
 
-	if deleteErr != nil {
+	switch {
+	case errors.Is(deleteErr, trayManager.ErrTrayKept):
+		// The agent is leaving whatever becomes of its tray, so it is not made
+		// to retry, same as when cleanup fails. The stale tray check removes
+		// the tray once GitHub lets go of the runner.
+		logger.Warnf("Tray is left for the stale tray check: %v", deleteErr)
+	case deleteErr != nil:
 		logger.Errorf("Failed to delete tray: %v", deleteErr)
 		http.Error(responseWriter, "Failed to delete tray", http.StatusInternalServerError)
 		return
@@ -277,6 +292,15 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
+		// The status may only be lagging behind a job that is already
+		// running, so the tray goes through the same removal as everywhere
+		// else and the agent is left alone unless GitHub lets its runner go.
+		if _, err := h.TrayManager.DeleteTray(r.Context(), tray.Id); err != nil {
+			logger.Warnf("Tray '%s' status not changed in 15 minutes, but it was not deleted: %v", tray.Id, err)
+			writeResponse(responseWriter, pingResponse, logger)
+			return
+		}
+
 		errMsg := fmt.Sprintf("Tray '%s' status not changed in 15 minutes", tray.Id)
 		logger.Error(errMsg)
 

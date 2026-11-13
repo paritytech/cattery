@@ -126,7 +126,7 @@ func setupIntegrationTestWithFactory(t *testing.T, factory providers.TrayProvide
 	restartRepo.Connect(db.Collection("restarters"))
 
 	// Set up managers
-	tm := trayManager.NewTrayManager(trayRepo, factory)
+	tm := trayManager.NewTrayManager(trayRepo, factory, nil)
 	rm := restarter.NewWorkflowRestarter(restartRepo)
 
 	// Scale set manager holds no pollers here; the agent register handler gets
@@ -499,11 +499,12 @@ func TestIntegration_DoubleUnregister(t *testing.T) {
 	th.mux.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Second unregister — tray gone, should get 404
+	// Second unregister — the tray is already gone, which is what an
+	// unregister asks for. A 404 would make the agent retry.
 	req = httptest.NewRequest("POST", fmt.Sprintf("/agent/unregister/test-type-double1"), bytes.NewReader(unregBody))
 	w = httptest.NewRecorder()
 	th.mux.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // --- CreateTray lifecycle tests ---

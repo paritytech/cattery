@@ -3,10 +3,12 @@ package trayManager
 import (
 	"cattery/lib/config"
 	"cattery/lib/metrics"
+	"cattery/lib/scaleSetClient"
 	"cattery/lib/trays"
 	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,15 +16,27 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RunnerRemover deregisters a tray's runner from GitHub. RemoveRunner returns
+// nil once the runner is gone, scaleSetClient.ErrRunnerBusy while it is
+// executing a job, and scaleSetClient.ErrNoClient when the tray type has no
+// GitHub client.
+type RunnerRemover interface {
+	RemoveRunner(ctx context.Context, trayTypeName string, runnerId int64) error
+}
+
 type TrayManager struct {
 	trayRepository  repositories.TrayRepository
 	providerFactory providers.TrayProviderFactory
+	runnerRemover   RunnerRemover
 }
 
-func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory) *TrayManager {
+// NewTrayManager builds a TrayManager. runnerRemover may be nil, in which case
+// trays are removed on local status alone, without deregistering their runners.
+func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory, runnerRemover RunnerRemover) *TrayManager {
 	return &TrayManager{
 		trayRepository:  trayRepository,
 		providerFactory: providerFactory,
+		runnerRemover:   runnerRemover,
 	}
 }
 
@@ -191,13 +205,50 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 	return tray, nil
 }
 
-// DeleteTray marks the tray as deleting and attempts to clean up the
-// upstream resource. On cleanup failure the row is left in deleting state for
-// the stale handler to retry; only repository-level failures propagate to the
-// caller. Callers (unregister handler, stale loop) should treat a non-error
-// return as "deletion was requested," not "the upstream resource is gone."
+// ErrTrayKept is returned by DeleteTray when it leaves a tray in place because
+// GitHub did not let go of its runner. The tray is untouched, and the next
+// DeleteTray call asks GitHub again.
+var ErrTrayKept = errors.New("tray kept")
+
+// DeleteTray removes a tray: mark it as deleting, clean up the upstream
+// resource, delete the record. It is the one way a tray is removed, and it
+// decides on its own whether the tray may go, so callers only ever ask.
+//
+// The one tray that may not go is a "registered" tray that is running a job.
+// Such a tray is assumed to be idle, but it leaves this status only when the
+// scale set listener delivers JobStarted, and that message can arrive late or
+// not at all (a stalled poll, a recreated session). So its runner is
+// deregistered from GitHub first. GitHub refuses that while the runner is
+// executing a job, and the check and the deregistration are one call on
+// GitHub's side, so nothing can be assigned to the runner afterwards. If the
+// runner cannot be deregistered, because it is busy or because GitHub could
+// not be asked ("could not tell" is not "idle"), the tray is left untouched
+// and the returned error wraps ErrTrayKept.
+//
+// Trays in any other status are removed without asking GitHub, because its
+// answer could not change the outcome: a running tray is removed because its
+// job completed or its agent is leaving, a deleting tray was already given up
+// on, and a tray in an earlier status has no runner on record yet.
+//
+// On cleanup failure the row is left in deleting state for the stale handler
+// to retry. Callers should treat a non-error return as "deletion was
+// requested," not "the upstream resource is gone."
 func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
+	tray, err := tm.trayRepository.GetById(ctx, trayId)
+	if err != nil {
+		return nil, err
+	}
+	if tray == nil {
+		return nil, nil
+	}
+
+	if tray.Status == trays.TrayStatusRegistered {
+		if err := tm.removeRunner(ctx, tray); err != nil {
+			return tray, fmt.Errorf("%w: %s: %w", ErrTrayKept, tray.Id, err)
+		}
+	}
+
+	tray, err = tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -224,8 +275,33 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 	return tray, nil
 }
 
+// removeRunner deregisters the tray's runner from GitHub. It returns nil when
+// no runner is left to deregister, and an error wrapping
+// scaleSetClient.ErrRunnerBusy while the runner is executing a job.
+func (tm *TrayManager) removeRunner(ctx context.Context, tray *trays.Tray) error {
+	if tm.runnerRemover == nil || tray.GitHubRunnerId == 0 {
+		return nil
+	}
+
+	err := tm.runnerRemover.RemoveRunner(ctx, tray.TrayTypeName, tray.GitHubRunnerId)
+	if errors.Is(err, scaleSetClient.ErrNoClient) {
+		// The tray type is gone from the config, so nothing can ever answer
+		// for this runner. Waiting for an answer would leak the tray.
+		log.Warnf("Tray %s: no GitHub client for tray type '%s', runner %d is left registered",
+			tray.Id, tray.TrayTypeName, tray.GitHubRunnerId)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("deregister runner %d: %w", tray.GitHubRunnerId, err)
+	}
+	return nil
+}
+
 // HandleStale periodically deletes trays stuck in a non-running status for
 // longer than the configured threshold. It blocks until ctx is done.
+//
+// A stale "registered" tray survives until GitHub lets go of its runner (see
+// DeleteTray).
 //
 // It must run on a single replica at a time (the caller gates it behind
 // leader election): two replicas would each pick up the same stale trays and
@@ -258,7 +334,12 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 			for _, tray := range stale {
 				log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
 				if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
-					log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
+					if errors.Is(err, ErrTrayKept) {
+						log.Warnf("Stale tray not deleted (status=%s): %v", tray.Status, err)
+					} else {
+						log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
+					}
+					continue
 				}
 				metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 			}

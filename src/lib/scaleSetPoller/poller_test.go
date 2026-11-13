@@ -72,6 +72,7 @@ func TestHandleDesiredRunnerCount_RecordsScaleBeforeProviderWaitCompletes(t *tes
 	tm := trayManager.NewTrayManager(
 		testutil.NewMockTrayRepository(),
 		&pollerTestProviderFactory{provider: provider},
+		nil,
 	)
 	poller := &Poller{
 		trayType:    trayType,
@@ -128,7 +129,7 @@ func TestScalerCallbacks_PerTrayErrorsDoNotFailSession(t *testing.T) {
 	repo.CountErr = errors.New("mongo unavailable")
 
 	trayType := &config.TrayType{Name: "test-type", Provider: "blocking", MaxTrays: 1}
-	tm := trayManager.NewTrayManager(repo, &pollerTestProviderFactory{provider: &blockingProvider{}})
+	tm := trayManager.NewTrayManager(repo, &pollerTestProviderFactory{provider: &blockingProvider{}}, nil)
 	poller := &Poller{
 		trayType:    trayType,
 		trayManager: tm,

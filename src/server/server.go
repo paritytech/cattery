@@ -62,10 +62,17 @@ func Start() {
 
 	var database = client.Database(config.Get().Database.Database)
 
+	// The JIT registry holds one sessionless GitHub client per tray type. It is
+	// populated in the tray type loop below, so the agent register handler can
+	// generate JIT configs on any replica without depending on the (leader-only)
+	// poller for that tray type. The tray manager uses the same clients to
+	// deregister a runner before destroying a tray that looks idle.
+	jitRegistry := scaleSetClient.NewJitRegistry()
+
 	// Initialize tray manager and repository
 	var trayRepository = repositories.NewMongodbTrayRepository()
 	trayRepository.Connect(database.Collection("trays"))
-	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{})
+	tm := trayManager.NewTrayManager(trayRepository, providers.DefaultFactory{}, jitRegistry)
 
 	// Register DB-backed metrics collector
 	metrics.RegisterTrayCollector(tm)
@@ -76,11 +83,7 @@ func Start() {
 	rm := restarter.NewWorkflowRestarter(restartManagerRepository)
 
 	// Initialize scale set pollers — one per TrayType.
-	// The JIT registry is populated alongside, so the agent register handler can
-	// generate JIT configs on any replica without depending on the (leader-only)
-	// poller for that tray type.
 	ssm := scaleSetPoller.NewManager()
-	jitRegistry := scaleSetClient.NewJitRegistry()
 
 	// Leader election decides which replica runs each tray type's poller. The
 	// tray HTTP plane (served via jitRegistry above) runs on every replica
