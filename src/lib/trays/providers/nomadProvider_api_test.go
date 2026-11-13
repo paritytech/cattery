@@ -197,7 +197,7 @@ func TestStartDeploy_Success(t *testing.T) {
 	payload := string(seenReq.Payload)
 	assert.Contains(t, payload, "echo hi")
 	assert.Contains(t, payload, `--runner-folder "/cattery"`)
-	assert.Contains(t, payload, `curl -fsSL "$CATTERY_URL/agent/download"`)
+	assert.Contains(t, payload, `curl -fsSL "$CATTERY_URL/agent/download?os=$(uname -s)&arch=$(uname -m)"`)
 }
 
 func TestStartDeploy_MissingJobId(t *testing.T) {

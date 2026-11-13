@@ -442,6 +442,64 @@ trayTypes:
 	assert.Equal(t, "my-secret-token", config.Server.AgentSecret)
 }
 
+func TestLoadConfig_AgentBinaries(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "config_agent_binaries*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	agentBinariesConfig := `
+server:
+  listenAddress: ":8080"
+  advertiseUrl: "http://localhost:8080"
+  agentBinaries:
+    dir: "/srv/cattery/agents"
+    download: true
+database:
+  uri: "mongodb://localhost:27017"
+  database: "cattery"
+github:
+  - name: "test-org"
+    appId: 12345
+    appClientId: "Iv1.test123"
+    installationId: 67890
+    privateKeyPath: "path/to/key.pem"
+providers:
+  - name: "docker-provider"
+    type: "docker"
+trayTypes:
+  - name: "docker-local"
+    provider: "docker-provider"
+    runnerGroupId: 1
+    githubOrg: "test-org"
+`
+	_, err = tempFile.Write([]byte(agentBinariesConfig))
+	assert.NoError(t, err)
+	tempFile.Close()
+
+	configPath := tempFile.Name()
+	config, err := LoadConfig(&configPath)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "/srv/cattery/agents", config.Server.AgentBinaries.Dir)
+	assert.True(t, config.Server.AgentBinaries.Download)
+}
+
+func TestAgentBinariesConfig_WithDefaults(t *testing.T) {
+	t.Run("empty config gets the default folder and no download", func(t *testing.T) {
+		got := AgentBinariesConfig{}.WithDefaults()
+		assert.Equal(t, DefaultAgentBinariesDir, got.Dir)
+		assert.False(t, got.Download)
+	})
+
+	t.Run("explicit values are kept", func(t *testing.T) {
+		got := AgentBinariesConfig{Dir: "/custom", Download: true}.WithDefaults()
+		assert.Equal(t, "/custom", got.Dir)
+		assert.True(t, got.Download)
+	})
+}
+
 func TestLoadConfig_Stale(t *testing.T) {
 	t.Run("parses durations and threshold map from YAML", func(t *testing.T) {
 		tempFile, err := os.CreateTemp("", "config_stale*.yaml")

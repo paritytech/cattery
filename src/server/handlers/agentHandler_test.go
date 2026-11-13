@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"cattery/lib/agentBinaries"
 	"cattery/lib/config"
 	"cattery/lib/messages"
 	"cattery/lib/restarter"
@@ -17,6 +18,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -449,6 +453,98 @@ func TestAgentUnregister_OtherReasonsDoNotRequestRestart(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	}
 	assert.Empty(t, restarterRepository.requests, "only preemption and signal shutdowns schedule a restart")
+}
+
+// --- AgentDownloadBinary tests ---
+
+// foreignPlatform returns a supported platform other than the test host's, so
+// the binary is looked up in the folder instead of being the test executable.
+func foreignPlatform() (string, string) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		return "linux", "amd64"
+	}
+	return "linux", "arm64"
+}
+
+func setupDownloadMux(t *testing.T) (*http.ServeMux, string) {
+	t.Helper()
+	dir := t.TempDir()
+	h := &Handlers{
+		AgentBinaries: agentBinaries.NewStore(config.AgentBinariesConfig{Dir: dir}, "1.2.3"),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /agent/download", h.AgentDownloadBinary)
+	return mux, dir
+}
+
+func TestAgentDownloadBinary_NoParamsServesOwnExecutable(t *testing.T) {
+	mux, _ := setupDownloadMux(t)
+
+	req := httptest.NewRequest("GET", "/agent/download", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	info, err := os.Stat(executable)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.EqualValues(t, info.Size(), w.Body.Len())
+}
+
+func TestAgentDownloadBinary_ForeignPlatformFromFolder(t *testing.T) {
+	mux, dir := setupDownloadMux(t)
+	goos, goarch := foreignPlatform()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, agentBinaries.AssetName(goos, goarch, "1.2.3")), []byte("foreign binary"), 0o755))
+
+	req := httptest.NewRequest("GET", "/agent/download?os="+goos+"&arch="+goarch, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "foreign binary", w.Body.String())
+	assert.Equal(t, `attachment; filename="cattery"`, w.Header().Get("Content-Disposition"))
+}
+
+func TestAgentDownloadBinary_WindowsBinaryKeepsExeName(t *testing.T) {
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		t.Skip("windows/arm64 is the test host's own platform")
+	}
+	mux, dir := setupDownloadMux(t)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, agentBinaries.AssetName("windows", "arm64", "1.2.3")), []byte("exe"), 0o755))
+
+	req := httptest.NewRequest("GET", "/agent/download?os=Windows_NT&arch=ARM64", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "exe", w.Body.String())
+	assert.Equal(t, `attachment; filename="cattery.exe"`, w.Header().Get("Content-Disposition"))
+}
+
+func TestAgentDownloadBinary_UnsupportedPlatform(t *testing.T) {
+	mux, _ := setupDownloadMux(t)
+
+	req := httptest.NewRequest("GET", "/agent/download?os=linux&arch=bogus", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAgentDownloadBinary_NotAvailable(t *testing.T) {
+	mux, _ := setupDownloadMux(t)
+	goos, goarch := foreignPlatform()
+
+	req := httptest.NewRequest("GET", "/agent/download?os="+goos+"&arch="+goarch, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), agentBinaries.AssetName(goos, goarch, "1.2.3"))
 }
 
 // --- writeResponse tests ---
