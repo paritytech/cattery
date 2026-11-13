@@ -96,6 +96,47 @@ trayTypes:
 | statusListenAddress  | string | no       | Separate host:port for the /status and /metrics endpoints. If empty or equal to listenAddress, served on the agent port. |
 | advertiseUrl         | string | yes      | Public base URL where the server is reachable. Passed to agents.                                                         |
 | agentSecret          | string | no       | Bearer token the server requires on every `/agent/*` request. **Leave empty:** the agent does not send this token yet, so setting it rejects every agent registration. |
+| agentBinaries        | object | no       | Where the server finds cattery binaries for platforms other than its own. See [Serving agent binaries](#serving-agent-binaries). |
+
+##### Serving agent binaries
+
+A tray can fetch the cattery binary it runs its agent from straight from the server:
+
+```bash
+curl -fsSL "$CATTERY_URL/agent/download?os=$(uname -s)&arch=$(uname -m)" -o /usr/local/bin/cattery
+```
+
+`os` and `arch` select the platform. Both are optional and default to the server's own, and both are case-insensitive. Besides Go's names they accept what a machine reports about itself, so the values can be passed through unchanged:
+
+| Parameter | Accepted values                                                   |
+|-----------|-------------------------------------------------------------------|
+| os        | `linux`, `darwin` (or `macos`), `windows` (or `Windows_NT`)       |
+| arch      | `amd64` (or `x86_64`, `x64`), `arm64` (or `aarch64`)              |
+
+Always pass both when the trays may differ from the server: without them the answer depends on the machine the server happens to run on.
+
+The server resolves the binary in this order:
+
+1. Its own platform is served from its own executable.
+2. Any other platform is looked up in `agentBinaries.dir`, under the release asset name for the server's own version: `cattery_<os>_<arch>_<version>`, plus `.exe` on windows (for example `cattery_linux_arm64_0.4.0`). Files for another version are ignored, so a folder that outlives an upgrade never serves a stale agent.
+3. If the file is missing and `agentBinaries.download` is on, the server downloads that asset from the [GitHub release](https://github.com/paritytech/cattery/releases) matching its version, stores it in the folder and serves it.
+
+The official image ships both linux binaries: its own, plus the other architecture already placed in the default folder. An amd64 server therefore serves arm64 linux trays (and the other way round) with no configuration. macOS and windows binaries are not in the image; drop them into the folder or turn `download` on.
+
+| Key      | Type   | Required | Description                                                                                         |
+|----------|--------|----------|-----------------------------------------------------------------------------------------------------|
+| dir      | string | no       | Folder holding the binaries. Defaults to `/var/lib/cattery/agents`.                                 |
+| download | bool   | no       | Download a binary missing from `dir` from the GitHub release matching the server version. Defaults to `false`. |
+
+Responses: `400` for an unknown `os`/`arch`, `404` when the server has no binary for the platform, `502` when the on-demand download fails.
+
+On-demand download has three requirements:
+
+- **A released version.** Only releases have assets. A server built from a commit (pull request and `main` images are versioned by commit SHA) has nothing to download and answers `404`.
+- **Egress** from the server to `github.com` and to `release-assets.githubusercontent.com`, where GitHub redirects release downloads.
+- **A writable folder.** The default folder in the official image is writable by the cattery user. With a read-only root filesystem, mount a volume (an `emptyDir` is enough) at `dir`; this hides the binary shipped in the image, which is then downloaded like the others.
+
+macOS and windows agents register and run jobs, but `shutdown: true` only powers off linux machines.
 
 #### database
 
@@ -221,7 +262,7 @@ Provider-specific config under trayType.config:
 
   **Bootstrap composition.** The provider builds the dispatched payload from three pieces:
 
-  1. A fixed prelude that downloads the cattery agent binary from `$CATTERY_URL/agent/download` (the server serves its own executable) to `/usr/local/bin/cattery`.
+  1. A fixed prelude that downloads the cattery agent binary for the guest's own platform from `$CATTERY_URL/agent/download?os=$(uname -s)&arch=$(uname -m)` to `/usr/local/bin/cattery` (see [Serving agent binaries](#serving-agent-binaries)).
   2. The optional `script` field, executed as a pre-agent hook.
   3. An `exec /usr/local/bin/cattery agent -i "$TRAY_NAME" -s "$CATTERY_URL" --runner-folder <runnerFolder>`, where `<runnerFolder>` defaults to `/cattery`.
 

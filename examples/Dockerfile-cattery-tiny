@@ -21,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /action-runner
 
 ARG RUNNER_VERSION='2.333.0'
-RUN curl -sL -o actions-runner.tar.gz \
-      https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+# Set by BuildKit to the architecture the image is built for (amd64, arm64).
+# The Actions runner calls amd64 "x64".
+ARG TARGETARCH
+RUN RUNNER_ARCH="$([ "${TARGETARCH}" = "amd64" ] && echo x64 || echo "${TARGETARCH}")" \
+    && curl -fsSL -o actions-runner.tar.gz \
+      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz" \
     && tar xzf actions-runner.tar.gz \
     && rm actions-runner.tar.gz \
     && ./bin/installdependencies.sh

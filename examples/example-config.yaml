@@ -5,6 +5,17 @@ server:
   # statusListenAddress: "0.0.0.0:5138"
   # Public URL the agents use to reach this server.
   advertiseUrl: https://cattery.my-org.com
+  # Optional. Cattery binaries served to trays through
+  #   GET /agent/download?os=<os>&arch=<arch>
+  # The server's own platform is always served from its own executable; any
+  # other platform is looked up in `dir` as cattery_<os>_<arch>_<version>
+  # (the release asset name, for the server's own version). Defaults shown.
+  # agentBinaries:
+  #   dir: /var/lib/cattery/agents
+  #   # Fetch a missing binary from the GitHub release matching the server
+  #   # version. Needs a released version, a writable `dir` and egress to
+  #   # github.com and release-assets.githubusercontent.com.
+  #   download: false
 
 database:
   uri: mongodb://localhost:27017/

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cattery/lib/agentBinaries"
 	"cattery/lib/config"
 	"cattery/lib/election"
 	"cattery/lib/metrics"
@@ -11,6 +12,7 @@ import (
 	"cattery/lib/trayManager"
 	"cattery/lib/trays/providers"
 	"cattery/lib/trays/repositories"
+	"cattery/lib/version"
 	"cattery/server/handlers"
 	"context"
 	"errors"
@@ -127,6 +129,7 @@ func Start() {
 		RestartManager:  rm,
 		ScaleSetManager: ssm,
 		JitRegistry:     jitRegistry,
+		AgentBinaries:   agentBinaries.NewStore(config.Get().Server.AgentBinaries.WithDefaults(), version.Get()),
 	}
 
 	servers := startServers(logger, cancel, h)
@@ -208,7 +211,7 @@ func agentMux(h *handlers.Handlers) *http.ServeMux {
 	mux.HandleFunc("GET /healthcheck", h.Healthcheck)
 	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
 	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
-	mux.HandleFunc("GET /agent/download", handlers.AgentDownloadBinary)
+	mux.HandleFunc("GET /agent/download", h.AgentDownloadBinary)
 	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
 	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
 	return mux

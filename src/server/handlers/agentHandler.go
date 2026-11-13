@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cattery/lib/agentBinaries"
 	"cattery/lib/agents"
 	"cattery/lib/config"
 	"cattery/lib/messages"
@@ -8,10 +9,11 @@ import (
 	"cattery/lib/trays"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -203,15 +205,50 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 	responseWriter.WriteHeader(http.StatusOK)
 }
 
-func AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
-	execPath, err := os.Executable()
+// AgentDownloadBinary serves the cattery binary a tray runs its agent from.
+//
+// The optional `os` and `arch` query parameters select the platform; each
+// defaults to the server's own. They accept Go names (linux, arm64) as well as
+// raw `uname -s` / `uname -m` output (Linux, aarch64, x86_64), so a bootstrap
+// script can pass those through unchanged.
+func (h *Handlers) AgentDownloadBinary(responseWriter http.ResponseWriter, r *http.Request) {
+	logger := log.WithFields(log.Fields{
+		"handler": "agent",
+		"call":    "AgentDownloadBinary",
+	})
+
+	query := r.URL.Query()
+
+	binaryPath, err := h.AgentBinaries.Path(r.Context(), query.Get("os"), query.Get("arch"))
 	if err != nil {
-		http.Error(responseWriter, "Failed to get binary path", http.StatusInternalServerError)
+		if r.Context().Err() != nil {
+			// The tray went away while waiting; nobody is left to answer.
+			logger.Debugf("Agent binary request os=%q arch=%q abandoned: %v", query.Get("os"), query.Get("arch"), err)
+			return
+		}
+
+		code := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, agentBinaries.ErrUnsupportedPlatform):
+			code = http.StatusBadRequest
+		case errors.Is(err, agentBinaries.ErrNotAvailable):
+			code = http.StatusNotFound
+		case errors.Is(err, agentBinaries.ErrDownloadFailed):
+			code = http.StatusBadGateway
+		}
+
+		logger.Warnf("Agent binary request os=%q arch=%q failed: %v", query.Get("os"), query.Get("arch"), err)
+		http.Error(responseWriter, err.Error(), code)
 		return
 	}
 
-	responseWriter.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(execPath)))
-	http.ServeFile(responseWriter, r, execPath)
+	filename := "cattery"
+	if strings.EqualFold(filepath.Ext(binaryPath), ".exe") {
+		filename += ".exe"
+	}
+
+	responseWriter.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	http.ServeFile(responseWriter, r, binaryPath)
 }
 
 func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request) {

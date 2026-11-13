@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cattery/lib/agentBinaries"
 	"cattery/lib/restarter"
 	"cattery/lib/scaleSetClient"
 	"cattery/lib/scaleSetPoller"
@@ -15,6 +16,9 @@ type Handlers struct {
 	// JitRegistry serves JIT runner configs per tray type, independent of which
 	// replica holds the scale set session (see scaleSetClient.JitRegistry).
 	JitRegistry *scaleSetClient.JitRegistry
+	// AgentBinaries locates the cattery binary served to a tray of a given
+	// platform (see AgentDownloadBinary).
+	AgentBinaries *agentBinaries.Store
 }
 
 func (h *Handlers) Index(w http.ResponseWriter, r *http.Request) {

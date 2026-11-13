@@ -189,6 +189,39 @@ type ServerConfig struct {
 	StatusListenAddress string `yaml:"statusListenAddress"`
 	AdvertiseUrl        string `yaml:"advertiseUrl" validate:"required"`
 	AgentSecret         string `yaml:"agentSecret"`
+	// AgentBinaries configures where GET /agent/download finds cattery
+	// binaries for platforms other than the server's own.
+	AgentBinaries AgentBinariesConfig `yaml:"agentBinaries"`
+}
+
+// AgentBinariesConfig configures the cattery binaries the server hands out to
+// trays through GET /agent/download.
+//
+// The server's own platform is always served from its own executable. Any
+// other platform is looked up in Dir as cattery_<os>_<arch>_<version> (plus
+// .exe on windows) — the release asset name, for the server's own version.
+//
+// Defaults are applied in AgentBinariesConfig.WithDefaults when fields are zero.
+type AgentBinariesConfig struct {
+	// Dir is the folder holding the binaries.
+	Dir string `yaml:"dir"`
+	// Download lets the server fetch a binary missing from Dir from the GitHub
+	// release matching its own version, and keep it in Dir. Only released
+	// versions have assets to download; Dir must be writable.
+	Download bool `yaml:"download"`
+}
+
+// DefaultAgentBinariesDir is used when AgentBinariesConfig.Dir is empty. The
+// official image creates it, writable by the cattery user.
+const DefaultAgentBinariesDir = "/var/lib/cattery/agents"
+
+// WithDefaults returns a copy with zero/empty fields populated from defaults.
+func (a AgentBinariesConfig) WithDefaults() AgentBinariesConfig {
+	out := a
+	if out.Dir == "" {
+		out.Dir = DefaultAgentBinariesDir
+	}
+	return out
 }
 
 type DatabaseConfig struct {

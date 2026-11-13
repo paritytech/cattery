@@ -62,6 +62,18 @@ Or with Docker:
 docker build --build-arg CATTERY_VERSION=0.1.0 -t cattery .
 ```
 
+### Prebuilt binaries and images
+
+Each [release](https://github.com/paritytech/cattery/releases) carries a binary per platform, named `cattery_<os>_<arch>_<version>` (`.exe` on Windows), for Linux, macOS and Windows on `amd64` and `arm64`. The image `docker.io/paritytech/cattery` is published for `linux/amd64` and `linux/arm64`.
+
+The server and the agent are the same binary. Linux is the fully supported agent platform; on macOS and Windows the agent registers and runs jobs, but `shutdown: true` does not power the machine off.
+
+Trays do not need the binary baked in: the server hands it out for the tray's own platform, whatever architecture the server itself runs on. See [Serving agent binaries](docs/configuration.md#serving-agent-binaries).
+
+```bash
+curl -fsSL "$CATTERY_URL/agent/download?os=$(uname -s)&arch=$(uname -m)" -o /usr/local/bin/cattery
+```
+
 ### Configure
 
 Create a `config.yaml` (see [Configuration](docs/configuration.md) for full reference):
