@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /action-runner
 
-ARG RUNNER_VERSION='2.333.0'
+ARG RUNNER_VERSION='2.338.2'
 # Set by BuildKit to the architecture the image is built for (amd64, arm64).
 # The Actions runner calls amd64 "x64".
 ARG TARGETARCH

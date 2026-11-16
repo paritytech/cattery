@@ -1,5 +1,5 @@
-ARG GO_VERSION=1.26.5
-ARG ALPINE_VERSION=3.22
+ARG GO_VERSION=1.26.11
+ARG ALPINE_VERSION=3.24
 
 # The builder runs on the build host's own platform and cross-compiles, so a
 # multi-platform image build never compiles Go under emulation. It references
