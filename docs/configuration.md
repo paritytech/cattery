@@ -112,9 +112,9 @@ Optional. Configures the cleanup loop that deletes trays stuck in a non-running 
 | pollInterval | duration                | no       | How often stale trays are looked for. Default `1m`.                                                                                             |
 | thresholds   | map[status]duration     | no       | Per-status age after which a tray is stale. Keys: `creating`, `registering`, `registered`, `deleting`. Defaults: `5m`, `5m`, `15m`, `15m`. Statuses missing from the map are not checked. |
 
-Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, a tray that has sat in `registered` (idle, no job) for 15 minutes is removed when its agent next pings, and the agent is told to shut down.
+Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, an agent whose tray has sat in `registered` (idle, no job) for 15 minutes is told to shut down on its next ping.
 
-A `registered` tray only looks idle: it leaves that status when the server receives the job-started message for it, and that message can arrive late or be lost. So whatever triggers the removal of a `registered` tray, its runner is deregistered from GitHub first, and GitHub refuses that while the runner is executing a job. A tray whose runner could not be deregistered, because it is busy or because GitHub could not be reached, is kept. It still counts towards `maxTrays`, and it is tried again on the next pass of this loop, so keep `registered` among the thresholds. Trays in any other status are removed without asking GitHub.
+A `registered` tray is removed only after its runner has been deregistered from GitHub. GitHub refuses that while the runner is executing a job, which happens when the job-started message has not reached the server yet. Such a tray is kept and tried again on the next pass, and so is one whose runner GitHub could not be asked about.
 
 #### coordination
 Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.

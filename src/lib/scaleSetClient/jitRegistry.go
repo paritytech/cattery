@@ -2,14 +2,8 @@ package scaleSetClient
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 )
-
-// ErrNoClient is returned by JitRegistry.RemoveRunner when the tray type has
-// no client that can deregister runners.
-var ErrNoClient = errors.New("no scale set client for tray type")
 
 // JitRegistry maps a tray type name to its JitConfigGenerator. It is populated
 // once at startup (one entry per tray type) and read by the agent HTTP handlers
@@ -19,9 +13,6 @@ var ErrNoClient = errors.New("no scale set client for tray type")
 // config is a sessionless GitHub call, so any replica can serve it regardless
 // of which replica holds that tray type's scale set session. Without this, the
 // register handler would have to reach into the (leader-only) poller.
-//
-// Deregistering a runner is sessionless too, so RemoveRunner is routed through
-// the same entries.
 type JitRegistry struct {
 	mu   sync.RWMutex
 	gens map[string]JitConfigGenerator
@@ -45,13 +36,13 @@ func (r *JitRegistry) Get(trayTypeName string) JitConfigGenerator {
 	return r.gens[trayTypeName]
 }
 
-// RemoveRunner deregisters a runner through the tray type's client. It returns
-// ErrNoClient when there is none (for example the tray type was removed from
-// the config), so callers can tell "cannot ask GitHub" from "GitHub refused".
+// RemoveRunner deregisters a runner through its tray type's client (see
+// ScaleSetClient.RemoveRunner). A tray type that is no longer configured has
+// no client, so nothing can be asked about its runners and nil is returned.
 func (r *JitRegistry) RemoveRunner(ctx context.Context, trayTypeName string, runnerId int64) error {
-	remover, ok := r.Get(trayTypeName).(RunnerRemover)
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrNoClient, trayTypeName)
+	gen := r.Get(trayTypeName)
+	if gen == nil {
+		return nil
 	}
-	return remover.RemoveRunner(ctx, runnerId)
+	return gen.RemoveRunner(ctx, runnerId)
 }

@@ -48,6 +48,10 @@ func (m *mockJitConfigGenerator) GenerateJitRunnerConfig(_ context.Context, runn
 	}, nil
 }
 
+func (m *mockJitConfigGenerator) RemoveRunner(_ context.Context, _ int64) error {
+	return nil
+}
+
 var _ scaleSetClient.JitConfigGenerator = (*mockJitConfigGenerator)(nil)
 
 // mockProviderFactory implements providers.TrayProviderFactory
@@ -413,7 +417,7 @@ func TestIntegration_StaleTrayCleanup(t *testing.T) {
 	assert.Equal(t, "test-type-stale-cleanup", stale[0].Id)
 
 	// Delete it (simulates what HandleStale does)
-	_, err = th.tm.DeleteTray(context.Background(), tray.Id)
+	_, err = th.tm.DeleteTray(context.Background(), stale[0])
 	require.NoError(t, err)
 
 	// Verify tray gone
@@ -499,12 +503,11 @@ func TestIntegration_DoubleUnregister(t *testing.T) {
 	th.mux.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Second unregister — the tray is already gone, which is what an
-	// unregister asks for. A 404 would make the agent retry.
+	// Second unregister — tray gone, should get 404
 	req = httptest.NewRequest("POST", fmt.Sprintf("/agent/unregister/test-type-double1"), bytes.NewReader(unregBody))
 	w = httptest.NewRecorder()
 	th.mux.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // --- CreateTray lifecycle tests ---

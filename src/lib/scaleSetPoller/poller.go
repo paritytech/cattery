@@ -231,7 +231,11 @@ func (cs *catteryScaler) HandleJobCompleted(ctx context.Context, jobInfo *scales
 
 	// Per-tray failure: log and count, do not fail the session. The stale
 	// handler and the agent's own unregister will still remove the tray.
-	if _, err := cs.poller.trayManager.DeleteTray(ctx, jobInfo.RunnerName); err != nil {
+	tray, err := cs.poller.trayManager.GetTrayById(ctx, jobInfo.RunnerName)
+	if err == nil && tray != nil {
+		_, err = cs.poller.trayManager.DeleteTray(ctx, tray)
+	}
+	if err != nil {
 		cs.recordHandlerError("delete tray "+jobInfo.RunnerName, err)
 	}
 

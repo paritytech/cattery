@@ -6,18 +6,9 @@ import (
 	"github.com/actions/scaleset"
 )
 
-// JitConfigGenerator generates JIT runner configurations for ephemeral runners.
+// JitConfigGenerator generates JIT runner configurations for ephemeral runners
+// and deregisters those runners again.
 type JitConfigGenerator interface {
 	GenerateJitRunnerConfig(ctx context.Context, runnerName string) (*scaleset.RunnerScaleSetJitRunnerConfig, error)
-}
-
-// RunnerRemover deregisters runners from GitHub. RemoveRunner returns
-// ErrRunnerBusy while the runner is executing a job.
-type RunnerRemover interface {
 	RemoveRunner(ctx context.Context, runnerId int64) error
 }
-
-var (
-	_ JitConfigGenerator = (*ScaleSetClient)(nil)
-	_ RunnerRemover      = (*ScaleSetClient)(nil)
-)
