@@ -89,7 +89,7 @@ func (m *mockProviderFactory) GetProviderForTray(_ *trays.Tray) (providers.TrayP
 // --- Helper ---
 
 func newTestManager(repo *testutil.MockTrayRepository, pf *mockProviderFactory) *TrayManager {
-	return NewTrayManager(repo, pf)
+	return NewTrayManager(repo, pf, nil)
 }
 
 // --- Tests ---
@@ -397,7 +397,7 @@ func TestDeleteTray_Success(t *testing.T) {
 	prov := &mockProvider{name: "docker"}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	tray, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
 	assert.NoError(t, err)
 	assert.NotNil(t, tray)
 	assert.Equal(t, 1, len(prov.cleaned))
@@ -409,7 +409,7 @@ func TestDeleteTray_NotFound(t *testing.T) {
 	prov := &mockProvider{name: "docker"}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray, err := tm.DeleteTray(context.Background(), "nonexistent")
+	tray, err := tm.DeleteTray(context.Background(), &trays.Tray{Id: "nonexistent"})
 	assert.NoError(t, err)
 	assert.Nil(t, tray)
 	assert.Equal(t, 0, len(prov.cleaned))
@@ -424,7 +424,7 @@ func TestDeleteTray_ProviderCleanError(t *testing.T) {
 	prov := &mockProvider{name: "docker", cleanErr: errors.New("clean failed")}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	tray, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
 	assert.NoError(t, err)
 	assert.NotNil(t, tray)
 	assert.Equal(t, 1, len(repo.Trays))
@@ -442,7 +442,7 @@ func TestDeleteTray_RepoDeleteFails_Propagates(t *testing.T) {
 	prov := &mockProvider{name: "docker"}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	tray, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
 	assert.Error(t, err)
 	assert.NotNil(t, tray, "tray returned even when row delete fails so callers can log the id")
 	assert.Equal(t, 1, len(prov.cleaned), "cleanup ran successfully")
@@ -458,7 +458,7 @@ func TestDeleteTray_UpdateStatusFails_Propagates(t *testing.T) {
 	prov := &mockProvider{name: "docker"}
 	tm := newTestManager(repo, &mockProviderFactory{provider: prov})
 
-	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	tray, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
 	assert.Error(t, err)
 	assert.Nil(t, tray)
 	assert.Equal(t, 0, len(prov.cleaned), "must not attempt cleanup if status couldn't be marked")
@@ -474,11 +474,76 @@ func TestDeleteTray_FactoryError(t *testing.T) {
 	factory := &mockProviderFactory{forTrayErr: errors.New("no provider")}
 	tm := newTestManager(repo, factory)
 
-	tray, err := tm.DeleteTray(context.Background(), "tray-1")
+	tray, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
 	assert.NoError(t, err)
 	assert.NotNil(t, tray)
 	assert.Equal(t, 1, len(repo.Trays))
 	assert.Equal(t, trays.TrayStatusDeleting, repo.Trays["tray-1"].Status)
+}
+
+// mockRunnerRemover answers every RemoveRunner call with err and records the
+// runner IDs it was asked about.
+type mockRunnerRemover struct {
+	mu    sync.Mutex
+	err   error
+	calls []int64
+}
+
+func (m *mockRunnerRemover) RemoveRunner(_ context.Context, _ string, runnerId int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, runnerId)
+	return m.err
+}
+
+// A registered tray may be running a job whose JobStarted message is late or
+// lost. GitHub refuses to deregister such a runner, and the tray must then be
+// left untouched. Trays in other statuses are deleted without asking GitHub.
+func TestDeleteTray_ChecksRunnerOfRegisteredTray(t *testing.T) {
+	busy := errors.New("job still running")
+
+	tests := []struct {
+		name        string
+		status      trays.TrayStatus
+		removeErr   error
+		wantAsked   bool
+		wantDeleted bool
+	}{
+		{name: "registered, runner deregistered", status: trays.TrayStatusRegistered, wantAsked: true, wantDeleted: true},
+		{name: "registered, runner busy", status: trays.TrayStatusRegistered, removeErr: busy, wantAsked: true},
+		{name: "running", status: trays.TrayStatusRunning, removeErr: busy, wantDeleted: true},
+		{name: "registering", status: trays.TrayStatusRegistering, removeErr: busy, wantDeleted: true},
+		{name: "deleting", status: trays.TrayStatusDeleting, removeErr: busy, wantDeleted: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testutil.NewMockTrayRepository()
+			repo.Trays["tray-1"] = &trays.Tray{Id: "tray-1", TrayTypeName: "t1", GitHubRunnerId: 99, Status: tc.status}
+			prov := &mockProvider{name: "docker"}
+			remover := &mockRunnerRemover{err: tc.removeErr}
+			tm := NewTrayManager(repo, &mockProviderFactory{provider: prov}, remover)
+
+			_, err := tm.DeleteTray(context.Background(), repo.Trays["tray-1"])
+
+			if tc.wantAsked {
+				assert.Equal(t, []int64{99}, remover.calls)
+			} else {
+				assert.Empty(t, remover.calls)
+			}
+
+			if tc.wantDeleted {
+				assert.NoError(t, err)
+				assert.Empty(t, repo.Trays)
+				return
+			}
+			assert.ErrorIs(t, err, busy)
+			assert.Empty(t, prov.cleaned, "a kept tray must not be cleaned up")
+			if assert.Contains(t, repo.Trays, "tray-1") {
+				assert.Equal(t, tc.status, repo.Trays["tray-1"].Status, "a kept tray must be left untouched")
+			}
+		})
+	}
 }
 
 func TestGetTrayById_Found(t *testing.T) {
@@ -680,6 +745,59 @@ func TestHandleStale_DeletesStaleTrays(t *testing.T) {
 		}
 		return seen["stale-1"] && seen["stale-2"]
 	}, 500*time.Millisecond, 10*time.Millisecond, "expected both stale trays to be cleaned")
+}
+
+// The failure this guards against: a tray is running a job, but its JobStarted
+// message is late, so the stale query still lists it as registered. Here the
+// message even arrives after the query: the stored tray is already running.
+// DeleteTray goes by the status the caller saw, so GitHub is asked either way,
+// and its refusal must keep the tray alive.
+func TestHandleStale_KeepsRegisteredTrayWhoseRunnerIsBusy(t *testing.T) {
+	config.SetForTest(t, &config.CatteryConfig{
+		Server: config.ServerConfig{
+			ListenAddress: ":8080",
+			AdvertiseUrl:  "http://localhost",
+		},
+		Database: config.DatabaseConfig{Uri: "x", Database: "y"},
+		Stale: config.StaleConfig{
+			PollInterval: 10 * time.Millisecond,
+			Thresholds:   map[string]time.Duration{"registered": time.Second},
+		},
+	})
+
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["busy-1"] = &trays.Tray{Id: "busy-1", TrayTypeName: "t1", ProviderName: "docker", GitHubRunnerId: 99, Status: trays.TrayStatusRunning}
+	// Set directly, not through SetStale, so that the listed tray and the
+	// stored one differ.
+	repo.StaleTrays = []*trays.Tray{
+		{Id: "busy-1", TrayTypeName: "t1", ProviderName: "docker", GitHubRunnerId: 99, Status: trays.TrayStatusRegistered},
+	}
+
+	prov := &mockProvider{name: "docker"}
+	remover := &mockRunnerRemover{err: errors.New("job still running")}
+	tm := NewTrayManager(repo, &mockProviderFactory{provider: prov}, remover)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go tm.HandleStale(ctx)
+
+	assert.Never(t, func() bool {
+		prov.mu.Lock()
+		defer prov.mu.Unlock()
+		return len(prov.cleaned) > 0
+	}, 200*time.Millisecond, 10*time.Millisecond, "a tray whose runner is executing a job must not be destroyed")
+
+	remover.mu.Lock()
+	asked := len(remover.calls)
+	remover.mu.Unlock()
+	assert.NotZero(t, asked, "GitHub must be asked about the tray")
+
+	tray, err := repo.GetById(context.Background(), "busy-1")
+	assert.NoError(t, err)
+	if assert.NotNil(t, tray, "a kept tray must stay in the repository") {
+		assert.Equal(t, trays.TrayStatusRunning, tray.Status, "a kept tray must be left untouched")
+	}
 }
 
 func TestHandleStale_GetStaleErrorDoesNotCrashLoop(t *testing.T) {

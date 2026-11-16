@@ -155,6 +155,8 @@ Optional. Configures the cleanup loop that deletes trays stuck in a non-running 
 
 Durations use Go syntax (`30s`, `5m`, `1h30m`). Independently of this loop, an agent whose tray has sat in `registered` (idle, no job) for 15 minutes is told to shut down on its next ping.
 
+A `registered` tray is removed only after its runner has been deregistered from GitHub. GitHub refuses that while the runner is executing a job, which happens when the job-started message has not reached the server yet. Such a tray is kept and tried again on the next pass, and so is one whose runner GitHub could not be asked about.
+
 #### coordination
 Optional. Selects the leader-election backend for running more than one server replica. Each tray type's scale set poller (the GitHub session), the workflow restarter and the stale tray cleanup each run on exactly one replica at a time; every replica serves the agent HTTP API regardless.
 

@@ -1,6 +1,9 @@
 package scaleSetClient
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // JitRegistry maps a tray type name to its JitConfigGenerator. It is populated
 // once at startup (one entry per tray type) and read by the agent HTTP handlers
@@ -31,4 +34,15 @@ func (r *JitRegistry) Get(trayTypeName string) JitConfigGenerator {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.gens[trayTypeName]
+}
+
+// RemoveRunner deregisters a runner through its tray type's client (see
+// ScaleSetClient.RemoveRunner). A tray type that is no longer configured has
+// no client, so nothing can be asked about its runners and nil is returned.
+func (r *JitRegistry) RemoveRunner(ctx context.Context, trayTypeName string, runnerId int64) error {
+	gen := r.Get(trayTypeName)
+	if gen == nil {
+		return nil
+	}
+	return gen.RemoveRunner(ctx, runnerId)
 }

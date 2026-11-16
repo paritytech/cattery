@@ -3,6 +3,7 @@ package scaleSetClient
 import (
 	"cattery/lib/config"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -154,6 +155,25 @@ func (sc *ScaleSetClient) GenerateJitRunnerConfig(ctx context.Context, runnerNam
 		Name:       runnerName,
 		WorkFolder: "_work",
 	}, sc.scaleSet.ID)
+}
+
+// removeRunnerTimeout bounds RemoveRunner: the scaleset client's own defaults
+// let a request hang for minutes.
+const removeRunnerTimeout = 15 * time.Second
+
+// RemoveRunner deregisters a runner from GitHub. GitHub refuses while the
+// runner is executing a job, so a nil return means the runner is gone and no
+// job can be assigned to it any more. A runner GitHub no longer knows counts
+// as gone.
+func (sc *ScaleSetClient) RemoveRunner(ctx context.Context, runnerId int64) error {
+	ctx, cancel := context.WithTimeout(ctx, removeRunnerTimeout)
+	defer cancel()
+
+	err := sc.client.RemoveRunner(ctx, runnerId)
+	if errors.Is(err, scaleset.RunnerNotFoundError) {
+		return nil
+	}
+	return err
 }
 
 func (sc *ScaleSetClient) Close(ctx context.Context) error {

@@ -188,7 +188,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 		_ = h.requestRestartForTray(r.Context(), logger, tray)
 	}
 
-	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray.Id)
+	_, deleteErr := h.TrayManager.DeleteTray(r.Context(), tray)
 
 	if deleteErr != nil {
 		logger.Errorf("Failed to delete tray: %v", deleteErr)
@@ -277,6 +277,15 @@ func (h *Handlers) AgentPing(responseWriter http.ResponseWriter, r *http.Request
 	}
 
 	if time.Now().UTC().Sub(tray.StatusChanged) > time.Minute*15 {
+		// The status may only be lagging behind a job that is already running.
+		// DeleteTray checks that with GitHub, so the agent is told to stop only
+		// once its tray is really being removed.
+		if _, err := h.TrayManager.DeleteTray(r.Context(), tray); err != nil {
+			logger.Warnf("Tray '%s' status not changed in 15 minutes, but it was not deleted: %v", tray.Id, err)
+			writeResponse(responseWriter, pingResponse, logger)
+			return
+		}
+
 		errMsg := fmt.Sprintf("Tray '%s' status not changed in 15 minutes", tray.Id)
 		logger.Error(errMsg)
 

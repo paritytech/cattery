@@ -48,6 +48,10 @@ func (m *mockJitConfigGenerator) GenerateJitRunnerConfig(_ context.Context, runn
 	}, nil
 }
 
+func (m *mockJitConfigGenerator) RemoveRunner(_ context.Context, _ int64) error {
+	return nil
+}
+
 var _ scaleSetClient.JitConfigGenerator = (*mockJitConfigGenerator)(nil)
 
 // mockProviderFactory implements providers.TrayProviderFactory
@@ -126,7 +130,7 @@ func setupIntegrationTestWithFactory(t *testing.T, factory providers.TrayProvide
 	restartRepo.Connect(db.Collection("restarters"))
 
 	// Set up managers
-	tm := trayManager.NewTrayManager(trayRepo, factory)
+	tm := trayManager.NewTrayManager(trayRepo, factory, nil)
 	rm := restarter.NewWorkflowRestarter(restartRepo)
 
 	// Scale set manager holds no pollers here; the agent register handler gets
@@ -413,7 +417,7 @@ func TestIntegration_StaleTrayCleanup(t *testing.T) {
 	assert.Equal(t, "test-type-stale-cleanup", stale[0].Id)
 
 	// Delete it (simulates what HandleStale does)
-	_, err = th.tm.DeleteTray(context.Background(), tray.Id)
+	_, err = th.tm.DeleteTray(context.Background(), stale[0])
 	require.NoError(t, err)
 
 	// Verify tray gone

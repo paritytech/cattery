@@ -14,15 +14,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RunnerRemover deregisters a tray's runner from GitHub. It fails while the
+// runner is executing a job.
+type RunnerRemover interface {
+	RemoveRunner(ctx context.Context, trayTypeName string, runnerId int64) error
+}
+
 type TrayManager struct {
 	trayRepository  repositories.TrayRepository
 	providerFactory providers.TrayProviderFactory
+	runnerRemover   RunnerRemover
 }
 
-func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory) *TrayManager {
+func NewTrayManager(trayRepository repositories.TrayRepository, providerFactory providers.TrayProviderFactory, runnerRemover RunnerRemover) *TrayManager {
 	return &TrayManager{
 		trayRepository:  trayRepository,
 		providerFactory: providerFactory,
+		runnerRemover:   runnerRemover,
 	}
 }
 
@@ -117,7 +125,7 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 		if _, pErr := tm.trayRepository.SetProviderData(ctx, tray.Id, tray.ProviderData); pErr != nil {
 			log.Errorf("Failed to persist provider data after start deploy error for tray %s: %v", tray.Id, pErr)
 		}
-		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+		if _, dErr := tm.DeleteTray(ctx, tray); dErr != nil {
 			log.Errorf("Failed to delete tray %s after start deploy error: %v", tray.Id, dErr)
 		}
 		return err
@@ -133,7 +141,7 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 	if waitErr != nil {
 		log.Errorf("Failed wait deploy for tray %s: %v", tray.Id, waitErr)
 		metrics.TrayProviderErrors(tray.GitHubOrgName, tray.ProviderName, tray.TrayTypeName, "create")
-		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+		if _, dErr := tm.DeleteTray(ctx, tray); dErr != nil {
 			log.Errorf("Failed to delete tray %s after wait deploy error: %v", tray.Id, dErr)
 		}
 		return waitErr
@@ -141,7 +149,7 @@ func (tm *TrayManager) CreateTray(ctx context.Context, trayType *config.TrayType
 
 	if merged != nil && merged.Status == trays.TrayStatusDeleting {
 		log.Infof("Tray %s marked for deletion during deploy; cleaning up", tray.Id)
-		if _, dErr := tm.DeleteTray(ctx, tray.Id); dErr != nil {
+		if _, dErr := tm.DeleteTray(ctx, tray); dErr != nil {
 			log.Errorf("Failed to delete tray %s after concurrent unregister: %v", tray.Id, dErr)
 		}
 	}
@@ -196,8 +204,20 @@ func (tm *TrayManager) SetJob(ctx context.Context, trayId string, jobRunId int64
 // the stale handler to retry; only repository-level failures propagate to the
 // caller. Callers (unregister handler, stale loop) should treat a non-error
 // return as "deletion was requested," not "the upstream resource is gone."
-func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tray, error) {
-	tray, err := tm.trayRepository.UpdateStatus(ctx, trayId, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
+//
+// A tray the caller knows as registered may in fact be running a job: it
+// leaves that status only when JobStarted is delivered, which can be late or
+// never happen. So its runner is deregistered from GitHub first, and GitHub
+// refuses that while the runner is executing a job. If the runner cannot be
+// deregistered, the tray is left untouched and an error is returned.
+func (tm *TrayManager) DeleteTray(ctx context.Context, tray *trays.Tray) (*trays.Tray, error) {
+	if tray.Status == trays.TrayStatusRegistered && tm.runnerRemover != nil {
+		if err := tm.runnerRemover.RemoveRunner(ctx, tray.TrayTypeName, tray.GitHubRunnerId); err != nil {
+			return nil, fmt.Errorf("runner %d was not deregistered: %w", tray.GitHubRunnerId, err)
+		}
+	}
+
+	tray, err := tm.trayRepository.UpdateStatus(ctx, tray.Id, trays.TrayStatusDeleting, 0, 0, 0, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +237,7 @@ func (tm *TrayManager) DeleteTray(ctx context.Context, trayId string) (*trays.Tr
 		return tray, nil
 	}
 
-	if err := tm.trayRepository.Delete(ctx, trayId); err != nil {
+	if err := tm.trayRepository.Delete(ctx, tray.Id); err != nil {
 		return tray, err
 	}
 
@@ -257,8 +277,9 @@ func (tm *TrayManager) HandleStale(ctx context.Context) {
 
 			for _, tray := range stale {
 				log.Debugf("Deleting stale tray: %s (status=%s)", tray.Id, tray.Status)
-				if _, err := tm.DeleteTray(ctx, tray.Id); err != nil {
+				if _, err := tm.DeleteTray(ctx, tray); err != nil {
 					log.Errorf("Failed to delete tray %s: %v", tray.Id, err)
+					continue
 				}
 				metrics.StaleTraysInc(tray.GitHubOrgName, tray.TrayTypeName)
 			}
