@@ -226,9 +226,9 @@ func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
 }
 
 // Timeouts of both HTTP servers, so a client that stalls cannot hold a
-// connection open forever. writeTimeout also bounds the handler: a response
-// not finished in time is dropped. GET /agent/download, the one slow route,
-// sets its own write deadline.
+// connection open forever. writeTimeout does not stop a slow handler: it runs
+// on, but whatever it writes after the deadline is dropped. GET
+// /agent/download, the one slow route, sets its own write deadline.
 const (
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second

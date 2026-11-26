@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,6 +297,36 @@ func TestAgentUnregister_InvalidBody(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAgentUnregister_OversizedBodyHasNoEffect(t *testing.T) {
+	repo := testutil.NewMockTrayRepository()
+	repo.Trays["tray-1"] = &trays.Tray{
+		Id:            "tray-1",
+		Status:        trays.TrayStatusRunning,
+		WorkflowRunId: 123,
+		GitHubOrgName: "test-org",
+		Repository:    "test-org/repo",
+		ProviderData:  map[string]string{},
+	}
+	restarterRepository := &mockRestarterRepository{}
+	h := setupHandlersWithRestarter(repo, restarterRepository)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /agent/{id}/unregister", h.AgentUnregister)
+
+	// Valid apart from its size: it would delete the tray and request a restart.
+	body, _ := json.Marshal(messages.UnregisterRequest{
+		Reason:  messages.UnregisterReasonPreempted,
+		Message: strings.Repeat("a", 2<<20),
+	})
+	req := httptest.NewRequest("POST", "/agent/tray-1/unregister", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, repo.Trays, "tray-1")
+	assert.Empty(t, restarterRepository.requests)
 }
 
 func TestAgentUnregister_Success_RowDeleted(t *testing.T) {
