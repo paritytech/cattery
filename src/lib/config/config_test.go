@@ -454,6 +454,7 @@ server:
   listenAddress: ":8080"
   advertiseUrl: "http://localhost:8080"
   agentBinaries:
+    enabled: false
     dir: "/srv/cattery/agents"
     download: true
 database:
@@ -484,6 +485,11 @@ trayTypes:
 	assert.NoError(t, err)
 	assert.Equal(t, "/srv/cattery/agents", config.Server.AgentBinaries.Dir)
 	assert.True(t, config.Server.AgentBinaries.Download)
+	assert.False(t, config.Server.AgentBinaries.IsEnabled())
+}
+
+func TestAgentBinariesConfig_IsEnabledByDefault(t *testing.T) {
+	assert.True(t, AgentBinariesConfig{}.IsEnabled())
 }
 
 func TestAgentBinariesConfig_WithDefaults(t *testing.T) {

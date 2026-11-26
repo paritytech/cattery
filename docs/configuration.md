@@ -96,7 +96,7 @@ trayTypes:
 | statusListenAddress  | string | no       | Separate host:port for the /status and /metrics endpoints. If empty or equal to listenAddress, served on the agent port. |
 | advertiseUrl         | string | yes      | Public base URL where the server is reachable. Passed to agents.                                                         |
 | agentSecret          | string | no       | Bearer token the server requires on every `/agent/*` request. **Leave empty:** the agent does not send this token yet, so setting it rejects every agent registration. |
-| agentBinaries        | object | no       | Where the server finds cattery binaries for platforms other than its own. See [Serving agent binaries](#serving-agent-binaries). |
+| agentBinaries        | object | no       | The `/agent/download` endpoint: whether it is served, and where the server finds cattery binaries for platforms other than its own. See [Serving agent binaries](#serving-agent-binaries). |
 
 ##### Serving agent binaries
 
@@ -123,8 +123,11 @@ The server resolves the binary in this order:
 
 The official image ships both linux binaries: its own, plus the other architecture already placed in the default folder. An amd64 server therefore serves arm64 linux trays (and the other way round) with no configuration. macOS and windows binaries are not in the image; drop them into the folder or turn `download` on.
 
+The endpoint is not authenticated and is meant for a private network. Where the agent port is reachable from untrusted networks, set `agentBinaries.enabled: false` and put the binary on the trays some other way (bake it into the image, or download it from the GitHub release). The endpoint then answers `404`. The nomad provider's bootstrap script downloads the agent from this endpoint, so keep it on for nomad tray types.
+
 | Key      | Type   | Required | Description                                                                                         |
 |----------|--------|----------|-----------------------------------------------------------------------------------------------------|
+| enabled  | bool   | no       | Serve `GET /agent/download`. Defaults to `true`.                                                    |
 | dir      | string | no       | Folder holding the binaries. Defaults to `/var/lib/cattery/agents`.                                 |
 | download | bool   | no       | Download a binary missing from `dir` from the GitHub release matching the server version. Defaults to `false`. |
 

@@ -158,6 +158,7 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 	}
 
 	unregisterRequest := messages.UnregisterRequest{}
+	r.Body = http.MaxBytesReader(responseWriter, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&unregisterRequest); err != nil {
 		decodeErr := fmt.Sprintf("Failed to decode unregister request for trayId '%s': %v", tray.Id, err)
 		logger.Error(decodeErr)
@@ -205,6 +206,10 @@ func (h *Handlers) AgentUnregister(responseWriter http.ResponseWriter, r *http.R
 	responseWriter.WriteHeader(http.StatusOK)
 }
 
+// agentDownloadTimeout bounds AgentDownloadBinary: the wait for an on-demand
+// download plus sending the binary to a tray on a slow link.
+const agentDownloadTimeout = 10 * time.Minute
+
 // AgentDownloadBinary serves the cattery binary a tray runs its agent from.
 //
 // The optional `os` and `arch` query parameters select the platform; each
@@ -216,6 +221,10 @@ func (h *Handlers) AgentDownloadBinary(responseWriter http.ResponseWriter, r *ht
 		"handler": "agent",
 		"call":    "AgentDownloadBinary",
 	})
+
+	// Replaces the server's write timeout, which is too short for this route.
+	// Not supported by every ResponseWriter (tests), hence the ignored error.
+	_ = http.NewResponseController(responseWriter).SetWriteDeadline(time.Now().Add(agentDownloadTimeout))
 
 	query := r.URL.Query()
 

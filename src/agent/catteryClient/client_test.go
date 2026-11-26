@@ -295,6 +295,28 @@ func TestPing_FailsFastOn401(t *testing.T) {
 	assert.EqualValues(t, 1, calls.Load())
 }
 
+func TestDoRequest_TimesOutWhenServerNeverAnswers(t *testing.T) {
+	// A server that takes the request and then goes silent must fail the
+	// attempt, not hang the agent.
+	release := make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-release
+	}))
+	defer server.Close()
+	defer close(release) // runs first: Close waits for the handlers to return
+
+	c := newTestClient(t, server.URL)
+	require.Equal(t, requestTimeout, c.httpClient.Timeout)
+	c.httpClient.Timeout = 20 * time.Millisecond
+
+	_, err := c.Ping()
+
+	require.Error(t, err)
+	assert.EqualValues(t, 3, calls.Load(), "a timed out attempt is retried")
+}
+
 // newRefusingServer starts a listener that accepts connections then closes
 // them immediately, producing a network error on the client side.
 func newRefusingServer(t *testing.T) net.Listener {

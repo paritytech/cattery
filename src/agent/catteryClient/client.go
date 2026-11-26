@@ -18,6 +18,11 @@ import (
 const (
 	defaultMaxAttempts = 10
 	defaultRetryDelay  = 3 * time.Second
+	// requestTimeout bounds one attempt, so a server that accepts the
+	// connection but never answers fails the attempt instead of hanging the
+	// agent. It matches the server's write timeout: past that the server can
+	// no longer answer anyway.
+	requestTimeout = 60 * time.Second
 )
 
 type CatteryClient struct {
@@ -36,7 +41,7 @@ type CatteryClient struct {
 
 func NewCatteryClient(baseURL string, agentId string) *CatteryClient {
 	return &CatteryClient{
-		httpClient:  &http.Client{},
+		httpClient:  &http.Client{Timeout: requestTimeout},
 		baseURL:     baseURL,
 		logger:      logrus.WithField("name", "catteryClient"),
 		agentId:     agentId,
