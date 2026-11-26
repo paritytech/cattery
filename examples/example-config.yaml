@@ -11,6 +11,9 @@ server:
   # other platform is looked up in `dir` as cattery_<os>_<arch>_<version>
   # (the release asset name, for the server's own version). Defaults shown.
   # agentBinaries:
+  #   # The endpoint is not authenticated: turn it off if the agent port is
+  #   # reachable from untrusted networks. The nomad provider needs it on.
+  #   enabled: true
   #   dir: /var/lib/cattery/agents
   #   # Fetch a missing binary from the GitHub release matching the server
   #   # version. Needs a released version, a writable `dir` and egress to

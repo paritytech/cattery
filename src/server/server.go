@@ -211,7 +211,9 @@ func agentMux(h *handlers.Handlers) *http.ServeMux {
 	mux.HandleFunc("GET /healthcheck", h.Healthcheck)
 	mux.HandleFunc("GET /agent/register/{id}", h.AgentRegister)
 	mux.HandleFunc("POST /agent/unregister/{id}", h.AgentUnregister)
-	mux.HandleFunc("GET /agent/download", h.AgentDownloadBinary)
+	if config.Get().Server.AgentBinaries.IsEnabled() {
+		mux.HandleFunc("GET /agent/download", h.AgentDownloadBinary)
+	}
 	mux.HandleFunc("POST /agent/interrupt/{id}", h.AgentInterrupt)
 	mux.HandleFunc("POST /agent/ping/{id}", h.AgentPing)
 	return mux
@@ -223,8 +225,27 @@ func registerStatusRoutes(mux *http.ServeMux, h *handlers.Handlers) {
 	mux.Handle("/metrics", promhttp.Handler())
 }
 
+// Timeouts of both HTTP servers, so a client that stalls cannot hold a
+// connection open forever. writeTimeout also bounds the handler: a response
+// not finished in time is dropped. GET /agent/download, the one slow route,
+// sets its own write deadline.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	writeTimeout      = 60 * time.Second
+	// Above the agent's 60s ping interval, so an agent keeps its connection.
+	idleTimeout = 2 * time.Minute
+)
+
 func listenAndServe(logger *log.Logger, cancel context.CancelFunc, addr string, handler http.Handler) *http.Server {
-	srv := &http.Server{Addr: addr, Handler: handler}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 	go func() {
 		logger.Infof("Starting server on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

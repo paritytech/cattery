@@ -203,6 +203,10 @@ type ServerConfig struct {
 //
 // Defaults are applied in AgentBinariesConfig.WithDefaults when fields are zero.
 type AgentBinariesConfig struct {
+	// Enabled turns GET /agent/download on or off. On when unset. The endpoint
+	// is not authenticated, so turn it off where the agent port is reachable
+	// from untrusted networks and trays get their binary some other way.
+	Enabled *bool `yaml:"enabled"`
 	// Dir is the folder holding the binaries.
 	Dir string `yaml:"dir"`
 	// Download lets the server fetch a binary missing from Dir from the GitHub
@@ -214,6 +218,11 @@ type AgentBinariesConfig struct {
 // DefaultAgentBinariesDir is used when AgentBinariesConfig.Dir is empty. The
 // official image creates it, writable by the cattery user.
 const DefaultAgentBinariesDir = "/var/lib/cattery/agents"
+
+// IsEnabled reports whether GET /agent/download is served.
+func (a AgentBinariesConfig) IsEnabled() bool {
+	return a.Enabled == nil || *a.Enabled
+}
 
 // WithDefaults returns a copy with zero/empty fields populated from defaults.
 func (a AgentBinariesConfig) WithDefaults() AgentBinariesConfig {
